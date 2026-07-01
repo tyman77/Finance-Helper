@@ -6,9 +6,18 @@ Docs:
 
 A journal entry must balance. We debit each categorized expense line to its GL
 account and post a single offsetting credit to INTACCT_CLEARING_ACCOUNT (your AP
-or a clearing account) for the total. Confirm the exact field names / dimensions
-(location, department, journal symbol) against your Intacct company setup before
-going live.
+or a clearing account) for the total.
+
+Auth: OAuth2 client-credentials grant (same pattern as
+scripts/fetch_sage_projects.py — see that file's docstring for the credential
+setup). This is a FIRST PASS at the live POST, not a confirmed-working
+integration: developer.sage.com blocks automated doc fetches, so the exact
+request field names below (_JE_URL's shape, the keys in _line_payload /
+_to_rest_body) are a best-effort guess from what's independently verifiable,
+not a verified spec. post_journal_entry() raises with the FULL response body
+on any non-2xx so a live test tells you exactly what to fix — same "probe,
+then correct one spot" approach used for the projects fetch. If it fails,
+paste the error back rather than guessing a second time.
 """
 
 from __future__ import annotations
@@ -20,6 +29,13 @@ from ..models import SourceDocument
 # The GL journal to post into (a.k.a. journal symbol). "GJ" = General Journal is
 # a common default; change to match your Intacct setup.
 _JOURNAL_SYMBOL = os.environ.get("INTACCT_JOURNAL_SYMBOL", "GJ")
+
+_TOKEN_URL = "https://api.intacct.com/ia/api/v1/oauth2/token"
+# Best-guess REST endpoint for creating a journal entry — override with
+# INTACCT_JOURNAL_ENTRY_URL if this turns out to be wrong (see module docstring).
+_JE_URL = os.environ.get(
+    "INTACCT_JOURNAL_ENTRY_URL", "https://api.intacct.com/ia/api/v1/objects/general-ledger/journal-entry"
+)
 
 
 def build_journal_entry(doc: SourceDocument) -> dict:
@@ -67,27 +83,91 @@ def build_journal_entry(doc: SourceDocument) -> dict:
     }
 
 
-def post_journal_entry(payload: dict) -> dict:
-    """POST the journal entry to Sage Intacct.
+def _to_rest_body(payload: dict) -> dict:
+    """Map our internal build_journal_entry() shape to the REST request body.
 
-    Not yet wired to live HTTP — fill in once you have sandbox credentials. Raises
-    a clear error so nothing silently no-ops.
+    THE PART MOST LIKELY TO NEED A FIX: the field names here (glAccountNumber,
+    debitAmount, postingDate, ...) are a best-effort guess, not a verified
+    spec — see the module docstring. If a live POST comes back with a
+    "required field missing" / "unrecognized field" style error, this is the
+    one function to edit; nothing else in this file should need to change.
     """
-    required = [
-        "INTACCT_SENDER_ID",
-        "INTACCT_COMPANY_ID",
-        "INTACCT_USER_ID",
-        "INTACCT_USER_PASSWORD",
-    ]
+    lines = []
+    for line in payload["lines"]:
+        entry = {
+            "glAccountNumber": line["account_no"],
+            "debitAmount": line["debit"],
+            "creditAmount": line["credit"],
+            "memo": line.get("memo", ""),
+        }
+        if line.get("department"):
+            entry["departmentId"] = line["department"]
+        if line.get("project"):
+            entry["projectId"] = line["project"]
+        lines.append(entry)
+
+    return {
+        "journalSymbol": payload["journal"],
+        "postingDate": payload["date"],
+        "referenceNumber": payload["reference_no"],
+        "description": payload["description"],
+        "currency": payload["currency"],
+        "lines": lines,
+    }
+
+
+def _get_token() -> str:
+    import requests
+
+    try:
+        resp = requests.post(
+            _TOKEN_URL,
+            auth=(os.environ["INTACCT_CLIENT_ID"], os.environ["INTACCT_CLIENT_SECRET"]),
+            data={"grant_type": "client_credentials"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as exc:
+        # Network-level failure (DNS, proxy, timeout, ...) — wrap so this
+        # surfaces through the CLI/web UI's existing RuntimeError handling
+        # instead of an uncaught traceback.
+        raise RuntimeError(f"Sage Intacct token request failed: {type(exc).__name__}: {exc}") from exc
+    if resp.status_code != 200:
+        raise RuntimeError(f"Sage Intacct token request failed: HTTP {resp.status_code}\n{resp.text[:1000]}")
+    return resp.json()["access_token"]
+
+
+def post_journal_entry(payload: dict) -> dict:
+    """POST the journal entry to Sage Intacct. Raises with the full response
+    body on failure — see the module docstring if this is your first live test."""
+    import requests
+
+    required = ["INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID"]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise RuntimeError(
-            "Sage Intacct credentials missing: "
-            + ", ".join(missing)
-            + ". Add them to .env (see .env.example)."
+            "Sage Intacct credentials missing: " + ", ".join(missing) + ". Add them to .env (see .env.example)."
         )
-    raise NotImplementedError(
-        "Live Sage Intacct posting is not implemented yet. Credentials are "
-        "present; the next step is wiring the REST call + session auth against "
-        "your sandbox. Until then, run without --approve to review the payload."
-    )
+
+    token = _get_token()
+    body = _to_rest_body(payload)
+    try:
+        resp = requests.post(
+            _JE_URL,
+            json=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "company-id": os.environ.get("INTACCT_COMPANY_ID", ""),
+            },
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(f"Sage Intacct journal entry POST failed: {type(exc).__name__}: {exc}") from exc
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(
+            f"Sage Intacct journal entry POST failed: HTTP {resp.status_code}\n{resp.text[:2000]}\n\n"
+            "See sage_intacct.py's module docstring — this is a first-pass field "
+            "mapping; paste this error back to get _to_rest_body() corrected."
+        )
+    return resp.json()
