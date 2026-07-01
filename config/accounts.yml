@@ -1,0 +1,33 @@
+# Real chart-of-accounts values observed in the historical United coding.
+# Reference for reviewers; the traveler map suggests one of these per ticket.
+# (Non-PII — safe to commit. Employee->account history lives in data/, gitignored.)
+
+accounts:
+  "52200": "COGS Travel: Flights / Parking"     # billable — used when a project is assigned
+  "62300": "OH - Licenses and Permits"
+  "63100": "OH - Hiring/Recruiting"
+  "64000": "OH - Personal Development"
+  "64300": "OH - Sales: New or Existing Clients NOT Project Related (CR)"
+  "64301": "OH - Sales: Existing Client and New Project"
+  "64302": "OH - Sales: New Client and New Project"
+  "71000": "OH - Travel"
+  "73010": "OH - Marketing: Website / Social / Digital"
+  "73060": "OH - Marketing: Events"
+  "13000": "Employee Charges Receivable"
+
+departments:
+  "10": "Sales Team"
+  "20": "Marketing Team"
+  "30": "Solution Architect Team"
+  "35": "Project Manager Team"
+  "40": "Design & Engineering Team"
+  "50": "Assembly/Warehouse/HR"
+  "60": "Install Team"
+  "70": "Finance Team"
+  "80": "Lead Team"
+
+# How the account is chosen historically:
+#   - Project assigned  -> 52200 COGS Travel (98% of project rows)
+#   - No project        -> an OH account by trip purpose (traveler's usual as a hint)
+notes:
+  project_means_cogs: "52200"

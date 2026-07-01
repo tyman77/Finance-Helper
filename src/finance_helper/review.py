@@ -17,17 +17,23 @@ def render(doc: SourceDocument, payload: dict) -> str:
         f"  Document: {doc.document_id}    Date: {doc.document_date}    "
         f"Total: {doc.total} {doc.currency}",
         "=" * 68,
-        f"  {'GL Acct':<9} {'Category':<28} {'Amount':>12}  Description",
-        "  " + "-" * 64,
+        f"  {'':1}{'GL Acct':<8} {'Dept':<6} {'Amount':>11}  Description",
+        "  " + "-" * 70,
     ]
     for li in doc.line_items:
+        flag = "⚑" if li.needs_review else " "  # ⚑ marks lines to review
+        dept = (li.department or "").split("--")[0].strip()
         lines.append(
-            f"  {str(li.gl_account):<9} {str(li.category):<28} "
-            f"{str(li.amount):>12}  {li.description[:40]}"
+            f"  {flag}{str(li.gl_account):<8} {dept:<6} "
+            f"{str(li.amount):>11}  {li.description[:44]}"
         )
-    lines.append("  " + "-" * 64)
-    lines.append(f"  {'TOTAL':<38} {str(doc.total):>12}")
+    lines.append("  " + "-" * 70)
+    lines.append(f"  {'TOTAL':<17} {str(doc.total):>11}")
     lines.append("=" * 68)
+    flagged = sum(1 for li in doc.line_items if li.needs_review)
+    if flagged:
+        lines.append(f"  ⚑ = needs review ({flagged} line(s))")
+        lines.append("=" * 68)
     return "\n".join(lines)
 
 

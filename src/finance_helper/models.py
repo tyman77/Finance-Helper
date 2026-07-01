@@ -21,6 +21,13 @@ class LineItem:
     # Filled in by the categorizer:
     category: Optional[str] = None
     gl_account: Optional[str] = None
+    # Filled in by enrichment (dimensions):
+    person: Optional[str] = None
+    department: Optional[str] = None
+    project: Optional[str] = None
+    # Review workflow: set when a human should confirm before posting.
+    needs_review: bool = False
+    note: Optional[str] = None
     # Original CSV row, kept for audit/debugging.
     raw: dict = field(default_factory=dict)
 

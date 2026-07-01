@@ -48,6 +48,24 @@ python -m finance_helper process --source ups --file samples/ups_sample.csv --ap
 Nothing is ever sent to Sage or Bill.com without `--approve` **and** valid
 credentials. Without them, you get a saved proposal JSON in `out/` to eyeball.
 
+## United traveler coding (learned from history)
+
+United tickets are enriched from your historical coding. Regenerate the map from
+a historical "United Flights" export whenever it changes:
+
+```bash
+python scripts/build_traveler_map.py <historical_export.csv>   # -> data/united_travelers.yml
+```
+
+For each ticket the tool then:
+- **auto-assigns Person + Department** (department is 100% stable per traveler);
+- **suggests the GL account** (the traveler's most-common account) but **flags it
+  for review** — historically the account is `52200 COGS Travel` when a project is
+  assigned, otherwise an overhead account by trip purpose, which is a human call.
+
+The map contains employee names and is **gitignored**; only the reproducible
+script and the non-PII `config/accounts.yml` are committed.
+
 ## Configuration
 
 - `config/sources.yml` — per-source CSV column mapping + destination.

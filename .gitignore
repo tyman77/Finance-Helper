@@ -12,3 +12,7 @@ venv/
 
 # Generated proposals / outputs
 out/
+
+# Learned traveler map — contains employee names; regenerate with
+# scripts/build_traveler_map.py from your historical export.
+data/

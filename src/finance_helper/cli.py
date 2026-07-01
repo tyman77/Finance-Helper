@@ -13,17 +13,20 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import categorize, destinations, review, sources
+from . import destinations, pipeline, review
 
 
 def _cmd_process(args: argparse.Namespace) -> int:
-    doc = sources.load(args.source, args.file)
-    doc = categorize.categorize(doc)
+    doc = pipeline.process(args.source, args.file)
     payload = destinations.build_payload(doc)
 
     print(review.render(doc, payload))
     proposal_path = review.save_proposal(doc, payload)
     print(f"\nProposal saved to: {proposal_path}")
+
+    flagged = [li for li in doc.line_items if li.needs_review]
+    if flagged:
+        print(f"\n{len(flagged)} of {len(doc.line_items)} lines need review before posting.")
 
     if not args.approve:
         print("\nDRY RUN — nothing was posted. Re-run with --approve to post.")

@@ -10,6 +10,7 @@ united:
   layout: long
   statement: true              # whole file = one monthly UATP statement -> one JE
   statement_id_column: null    # no single invoice number; id built from date range
+  enrich: united_travelers     # assign person/department + account hint from history
   columns:
     date: "Issue Date"
     # Passenger Name carries fee types ("/SECOND CHECKED BAG"); Routing adds context.

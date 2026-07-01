@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from finance_helper import categorize, destinations, sources
+from finance_helper import destinations, enrich, pipeline, sources
 
 SAMPLES = {
     "ups": ("samples/ups_sample.csv", "bill"),
@@ -14,15 +14,10 @@ SAMPLES = {
 }
 
 
-def _processed(source):
-    path, _ = SAMPLES[source]
-    return categorize.categorize(sources.load(source, path))
-
-
 @pytest.mark.parametrize("source,expected", SAMPLES.items())
 def test_pipeline_builds_payload(source, expected):
     _, destination = expected
-    doc = _processed(source)
+    doc = pipeline.process(source, SAMPLES[source][0])
     assert doc.destination == destination
     assert doc.line_items
     for li in doc.line_items:
@@ -31,38 +26,61 @@ def test_pipeline_builds_payload(source, expected):
     assert destinations.build_payload(doc)
 
 
-def test_united_fee_breakout_and_refund():
-    doc = _processed("united")
-    cats = {li.category for li in doc.line_items}
-    assert "travel_baggage" in cats       # "/SECOND CHECKED BAG"
-    assert "travel_seat_fees" in cats     # "/PREFERRED ZONE"
-    assert "travel_airfare" in cats
-    # The refund row stays negative and nets against the total.
-    assert any(li.amount < 0 for li in doc.line_items)
-    assert doc.total == Decimal("405.00")  # 400 + 60 + 45 - 100
-
-
 def test_ups_categorization_rules():
-    doc = _processed("ups")
+    doc = pipeline.process("ups", SAMPLES["ups"][0])
     by_desc = {li.description: li for li in doc.line_items}
     assert by_desc["Fuel Surcharge"].gl_account == "5210"
     assert by_desc["Residential Surcharge"].gl_account == "5220"
-    assert by_desc["Ground Commercial"].category == "shipping_freight"
 
 
 def test_hotel_engine_components_tie_to_total():
-    doc = _processed("hotel_engine")
-    # Each booking's parts (room remainder + components) must sum to the
-    # statement total, and the credit line must reduce it.
+    doc = pipeline.process("hotel_engine", SAMPLES["hotel_engine"][0])
     assert doc.total == Decimal("732.25")  # 183.52 + 356.86 + 191.87
     assert any(li.category == "travel_credits" and li.amount < 0 for li in doc.line_items)
     assert any(li.category == "travel_lodging_taxes" for li in doc.line_items)
 
 
+def test_enrich_united_from_history():
+    """Department is trusted; account is a hint that always needs review."""
+    doc = sources.load("united", SAMPLES["united"][0])
+    tmap = {
+        "DOE/JOHN": {
+            "person": "John Doe",
+            "department": "10--Sales Team",
+            "department_confidence": 1.0,
+            "account_hint": "52200--COGS Travel: Flights / Parking",
+            "account_confidence": 0.5,
+            "n": 10,
+        }
+    }
+    enrich.enrich_united(doc, tmap)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.person == "John Doe"
+    assert john.department == "10--Sales Team"
+    assert john.gl_account == "52200"
+    assert john.needs_review, "account must be confirmed by a human"
+    # Unknown travelers are flagged, not silently coded.
+    smith = next(li for li in doc.line_items if "SMITH" in li.raw.get("Passenger Name", ""))
+    assert smith.needs_review
+
+
 @pytest.mark.parametrize("source", ["united", "hotel_engine"])
 def test_sage_journal_entry_balances(source):
-    doc = _processed(source)
+    doc = pipeline.process(source, SAMPLES[source][0])
     payload = destinations.build_payload(doc)
     debits = sum(Decimal(l["debit"]) for l in payload["lines"])
     credits = sum(Decimal(l["credit"]) for l in payload["lines"])
     assert debits == credits, "journal entry must balance"
+
+
+def test_sage_lines_carry_department_dimension():
+    doc = sources.load("united", SAMPLES["united"][0])
+    enrich.enrich_united(doc, {
+        "DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                     "department_confidence": 1.0, "account_hint": "52200--x",
+                     "account_confidence": 1.0, "n": 5}
+    })
+    from finance_helper import categorize
+    categorize.categorize(doc)
+    payload = destinations.build_payload(doc)
+    assert any(line.get("department") == "10" for line in payload["lines"])

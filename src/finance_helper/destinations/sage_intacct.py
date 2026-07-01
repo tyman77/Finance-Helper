@@ -32,15 +32,19 @@ def build_journal_entry(doc: SourceDocument) -> dict:
         # and post as a credit to the same account rather than a negative debit.
         debit = li.amount if li.amount >= 0 else 0
         credit = -li.amount if li.amount < 0 else 0
-        lines.append(
-            {
-                "account_no": li.gl_account,
-                "debit": str(debit),
-                "credit": str(credit),
-                "memo": f"{doc.vendor}: {li.description}"[:200],
-                "category": li.category,
-            }
-        )
+        line = {
+            "account_no": li.gl_account,
+            "debit": str(debit),
+            "credit": str(credit),
+            "memo": f"{doc.vendor}: {li.description}"[:200],
+            "category": li.category,
+        }
+        # Intacct dimensions, when we learned them via enrichment.
+        if li.department:
+            line["department"] = li.department.split("--")[0].strip()
+        if li.project:
+            line["project"] = li.project
+        lines.append(line)
     # Offsetting line to the clearing/AP account for the net total. If the net is
     # a credit (a net refund), flip it to a debit so the entry still balances.
     net = doc.total
