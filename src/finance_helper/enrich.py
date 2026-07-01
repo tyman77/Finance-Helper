@@ -84,14 +84,17 @@ def enrich_united(
     doc: SourceDocument,
     tmap: dict | None = None,
     schedule_index: dict | None = None,
-    calendar_index: list | None = None,
+    calendar_index: dict | None = None,
+    roster: dict | None = None,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
     if schedule_index is None:
         schedule_index = _load_json("schedule_index.json") or {}
     if calendar_index is None:
-        calendar_index = _load_json("calendar_index.json") or []
+        calendar_index = _load_json("calendar_index.json") or {}
+    if roster is None:
+        roster = _load_json("roster.json") or {}
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -113,8 +116,8 @@ def enrich_united(
             li.needs_review = True
             li.note = "low-confidence department"
 
-        # 1) Try to pin the project/account from schedule (installers) or calendar.
-        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index)
+        # 1) Installers: pin project + 52200 COGS from the crew schedule.
+        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster)
         if resolved and resolved.get("account"):
             li.gl_account = resolved["account"]
             if resolved.get("project"):
@@ -123,30 +126,35 @@ def enrich_united(
             li.note = (li.note + "; " if li.note else "") + resolved["note"]
             continue
 
-        # 2) Fall back to the traveler's usual account, flagged for coding.
+        # 2) Everyone else falls back to the traveler's usual account, with any
+        #    calendar trip context attached for the reviewer.
+        context = resolved.get("note") if resolved else None
         hint = entry.get("account_hint") or ""
         if hint:
             li.gl_account = hint.split("--")[0].strip()  # "52200--COGS..." -> "52200"
         li.needs_review = True
         conf = entry.get("account_confidence", 0)
         li.note = (li.note + "; " if li.note else "") + (
-            f"no schedule/calendar match; account hint {hint!r} "
-            f"(used {int(conf * 100)}% of trips) — confirm project/COGS"
+            f"account hint {hint!r} (used {int(conf * 100)}% of trips) — confirm project/COGS"
         )
         if not exact:
             li.note += "; matched by surname only"
+        if context:
+            li.note += "; " + context
 
     return doc
 
 
-def _resolve_project(li, entry, passenger, schedule_index, calendar_index):
+def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster):
     dep = _parse_date(li.raw.get("Departure Date"))
     if dep is None:
         return None
     dept = (entry.get("department") or "")
-    # Installers are on the crew schedule; everyone else lives on the calendar.
+    # Installers are on the crew schedule; everyone else on their own calendar.
     if dept.startswith("60") and schedule_index:
         return project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index)
     if calendar_index:
-        return project_resolver.resolve_calendar(passenger, dep, calendar_index)
+        owner = roster.get(entry.get("person", "")) or project_resolver.email_for(passenger)
+        if owner:
+            return project_resolver.resolve_calendar(owner, dep, calendar_index)
     return None

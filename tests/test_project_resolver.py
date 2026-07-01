@@ -25,20 +25,27 @@ def test_resolve_schedule_picks_project_during_stay():
     assert got["account"] == "52200"
 
 
-def test_resolve_calendar_matches_creator_and_maps_account():
-    cal = [{
-        "creator": "jclark@summitintegrated.com",
-        "summary": "JO | Programming Trip: Austin, TX",
-        "start": "2026-05-18", "end": "2026-05-20", "location": "",
-    }]
-    got = project_resolver.resolve_calendar("CLARK/JOHN", date(2026, 5, 18), cal)
-    assert got["account"] == "64302"          # OH Sales: New Client
-    assert "Programming Trip" in got["note"]
+def test_resolve_calendar_surfaces_client_context():
+    cal = {
+        "andrew@summitintegrated.com": [
+            {"summary": "Studio C Bid: OKC SOW/Part List Review",
+             "start": "2026-05-27", "end": "2026-05-27",
+             "location": "Microsoft Teams Meeting", "all_day": False, "external": True},
+            {"summary": "Lunch", "start": "2026-05-27", "end": "2026-05-27",
+             "location": "", "all_day": False, "external": False},
+        ]
+    }
+    got = project_resolver.resolve_calendar("andrew@summitintegrated.com", date(2026, 5, 27), cal)
+    assert "Studio C Bid" in got["note"]      # client/trip event surfaced
+    assert "Lunch" not in got["note"]         # internal noise filtered out
+    assert "account" not in got               # personal calendars give context, not a code
 
 
 def test_resolve_calendar_no_match_returns_none():
-    cal = [{"creator": "someone@x.com", "summary": "X | Trip", "start": "2026-05-18", "end": "2026-05-20"}]
-    assert project_resolver.resolve_calendar("CLARK/JOHN", date(2026, 1, 1), cal) is None
+    cal = {"andrew@summitintegrated.com": [
+        {"summary": "Emails / Slack", "start": "2026-05-18", "end": "2026-05-18",
+         "location": "", "all_day": False, "external": False}]}
+    assert project_resolver.resolve_calendar("andrew@summitintegrated.com", date(2026, 5, 18), cal) is None
 
 
 def test_enrich_routes_installer_to_schedule():
@@ -56,11 +63,14 @@ def test_enrich_routes_installer_to_schedule():
 def test_enrich_routes_noninstaller_to_calendar():
     doc = sources.load("united", "samples/united_sample.csv")
     tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
-                         "department_confidence": 1.0, "account_hint": "71000--OH",
+                         "department_confidence": 1.0, "account_hint": "71000--OH Travel",
                          "account_confidence": 0.4, "n": 5}}
-    cal = [{"creator": "jdoe@summitintegrated.com", "summary": "JD | Sales Trip: Austin, TX",
-            "start": "2026-05-10", "end": "2026-05-12", "location": ""}]
-    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index=cal)
+    cal = {"jdoe@summitintegrated.com": [
+        {"summary": "First Baptist Dallas - Discovery", "start": "2026-05-10", "end": "2026-05-12",
+         "location": "Dallas, TX", "all_day": False, "external": True}]}
+    roster = {"John Doe": "jdoe@summitintegrated.com"}
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index=cal, roster=roster)
     john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
-    assert john.gl_account == "64302"         # sales trip -> OH Sales
+    assert john.gl_account == "71000"                 # keeps traveler's usual OH account
+    assert "First Baptist Dallas" in john.note        # calendar context attached for review
     assert john.needs_review

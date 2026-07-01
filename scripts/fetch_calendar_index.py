@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Fetch the Summit Sales Travel calendar into data/calendar_index.json.
+"""Fetch each traveler's individual calendar into data/calendar_index.json.
 
-This is the production fetch step for the "everyone else" project path. It reads
-the shared travel calendar over a date range and writes the compact index that
-enrich.py consumes:
+The "everyone else" project path reads each non-installer's OWN calendar (not the
+shared Sales Travel calendar) for trip context around their travel dates. This
+writes:
 
-    [{"creator", "summary", "start", "end", "location"}, ...]
+    data/calendar_index.json  -> {"<calendar id>": [ {summary,start,end,location,
+                                    all_day,external}, ... ], ...}
+    data/roster.json          -> {"<Person Name>": "<calendar id>"}  (person -> calendar)
 
-Requires a Google service account / OAuth client with read access to the
-calendar. Set:
+`roster.json` maps the traveler (as named in the United history) to their calendar
+id, since work emails/calendars aren't a clean formula (andrew@ vs jclark@).
+
+Requires a Google service account with read access to each calendar. Set:
     GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-    SALES_TRAVEL_CALENDAR_ID=c_57a2ab77...@group.calendar.google.com
+Provide the roster as data/roster.json (person -> calendar id); this script reads
+its calendar ids from there.
 
 Usage:
     python scripts/fetch_calendar_index.py 2026-05-01 2026-07-15
-
-Note: inside a Claude session the calendar can be pulled via the Google Calendar
-MCP tool and written to data/calendar_index.json directly; this script is the
-standalone/cron equivalent using the google-api-python-client.
 """
 
 from __future__ import annotations
@@ -26,17 +27,18 @@ import json
 import os
 import sys
 
+_INTERNAL_DOMAIN = "summitintegrated.com"
 
-def fetch(calendar_id: str, start: str, end: str) -> list:
-    # Deferred imports so the repo doesn't hard-depend on Google libs.
-    from google.oauth2 import service_account            # type: ignore
-    from googleapiclient.discovery import build          # type: ignore
 
-    creds = service_account.Credentials.from_service_account_file(
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
-    )
-    svc = build("calendar", "v3", credentials=creds)
+def _is_external(ev: dict) -> bool:
+    for att in ev.get("attendees", []):
+        email = att.get("email", "")
+        if "@" in email and not email.endswith("@" + _INTERNAL_DOMAIN):
+            return True
+    return False
+
+
+def fetch_calendar(svc, calendar_id: str, start: str, end: str) -> list:
     events, page_token = [], None
     while True:
         resp = (
@@ -52,15 +54,16 @@ def fetch(calendar_id: str, start: str, end: str) -> list:
             .execute()
         )
         for ev in resp.get("items", []):
+            start_d = ev.get("start", {})
+            end_d = ev.get("end", {})
             events.append(
                 {
-                    "creator": ev.get("creator", {}).get("email", ""),
                     "summary": ev.get("summary", ""),
-                    "start": ev.get("start", {}).get("date")
-                    or ev.get("start", {}).get("dateTime", "")[:10],
-                    "end": ev.get("end", {}).get("date")
-                    or ev.get("end", {}).get("dateTime", "")[:10],
+                    "start": start_d.get("date") or start_d.get("dateTime", "")[:10],
+                    "end": end_d.get("date") or end_d.get("dateTime", "")[:10],
                     "location": ev.get("location", ""),
+                    "all_day": "date" in start_d,
+                    "external": _is_external(ev),
                 }
             )
         page_token = resp.get("nextPageToken")
@@ -72,12 +75,26 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__)
         return 1
-    calendar_id = os.environ.get("SALES_TRAVEL_CALENDAR_ID", "")
-    events = fetch(calendar_id, argv[0], argv[1])
-    os.makedirs("data", exist_ok=True)
+    from google.oauth2 import service_account            # type: ignore
+    from googleapiclient.discovery import build          # type: ignore
+
+    creds = service_account.Credentials.from_service_account_file(
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
+        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+    )
+    svc = build("calendar", "v3", credentials=creds)
+
+    with open("data/roster.json", encoding="utf-8") as fh:
+        roster = json.load(fh)
+
+    index = {}
+    for cal_id in sorted(set(roster.values())):
+        index[cal_id] = fetch_calendar(svc, cal_id, argv[0], argv[1])
+        print(f"  {cal_id}: {len(index[cal_id])} events")
+
     with open("data/calendar_index.json", "w", encoding="utf-8") as fh:
-        json.dump(events, fh, indent=2)
-    print(f"Wrote {len(events)} events to data/calendar_index.json")
+        json.dump(index, fh, indent=2)
+    print(f"Wrote {len(index)} calendars to data/calendar_index.json")
     return 0
 
 

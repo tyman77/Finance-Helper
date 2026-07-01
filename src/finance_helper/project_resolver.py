@@ -71,28 +71,54 @@ def _account_for_trip(trip: str) -> str | None:
     return None
 
 
-def resolve_calendar(passenger: str, dep: date, calendar_index: list) -> dict | None:
-    """Match the traveler's calendar event covering the departure date."""
-    email = email_for(passenger)
-    if not email:
+# Recurring/internal events on personal calendars that never indicate a trip.
+_INTERNAL_STOP = (
+    "email", "slack", "lunch", "focus time", "deep work", "planning", "check in",
+    "checkin", "1:1", "one on one", "stand up", "standup", "followup", "follow up",
+    "pto", "ooo", "out of office", "holiday", "birthday",
+)
+
+
+def _looks_physical(location: str) -> bool:
+    if not location:
+        return False
+    low = location.lower()
+    return not any(x in low for x in ("http", "zoom", "teams", "meet.google", "webex"))
+
+
+def _travel_relevant(ev: dict) -> bool:
+    summary = (ev.get("summary") or "").lower()
+    if not summary or any(w in summary for w in _INTERNAL_STOP):
+        return False
+    # A physical location, an all-day multi-day block, or external (client)
+    # attendees are the signals that an event is an actual trip/engagement.
+    return _looks_physical(ev.get("location", "")) or ev.get("all_day") or ev.get("external")
+
+
+def resolve_calendar(owner_key: str, dep: date, calendar_index: dict) -> dict | None:
+    """Surface trip-relevant events from the traveler's OWN calendar as context.
+
+    Personal calendars carry client names, not project codes, so this returns
+    review context (which client / where) rather than an account. The reviewer
+    codes it; a client->project registry can automate this later.
+    """
+    events = calendar_index.get(owner_key) or []
+    hits = []
+    for ev in events:
+        start = date.fromisoformat(ev["start"][:10])
+        end = date.fromisoformat(ev["end"][:10])
+        if start - timedelta(days=1) <= dep <= end + timedelta(days=STAY_WINDOW_DAYS) and _travel_relevant(ev):
+            hits.append(ev)
+    if not hits:
         return None
-    match = None
-    for ev in calendar_index:
-        start = date.fromisoformat(ev["start"])
-        end = date.fromisoformat(ev["end"])  # Google all-day end is exclusive
-        if not (start - timedelta(days=1) <= dep < end + timedelta(days=1)):
-            continue
-        if ev.get("creator", "").lower() == email:
-            match = ev
-            break
-    if not match:
-        return None
-    summary = match.get("summary", "")
-    trip = summary.split("|", 1)[1].strip() if "|" in summary else summary
+    parts = []
+    for ev in hits[:2]:
+        p = ev.get("summary", "")
+        if ev.get("location") and _looks_physical(ev["location"]):
+            p += f" @ {ev['location']}"
+        parts.append(p)
     return {
-        "account": _account_for_trip(trip),
         "source": "calendar",
-        "note": f"calendar: {summary!r}"
-        + (f" @ {match['location']}" if match.get("location") else "")
-        + " — confirm account",
+        "events": [h.get("summary", "") for h in hits],
+        "note": "calendar context — " + "; ".join(parts) + " — confirm client/account",
     }
