@@ -238,33 +238,46 @@ def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocum
     oh = cfg.get("overhead_shipping", "65565")
     dept_kw = cfg.get("overhead_departments", {})
 
-    # Pass 1: map each tracking number to its project code (from any of its rows).
+    # Pass 1: learn, from this invoice's coded rows, which project each tracking
+    # number and each receiver (church/campus) maps to.
+    def _norm(text):
+        return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
     tracking_code = {}
+    receiver_codes: dict[str, set] = {}
     for li in doc.line_items:
         ref = (li.raw.get("Reference No.1") or "").strip()
+        if not re.fullmatch(r"\d{3,5}", ref):
+            continue
         trk = (li.raw.get("Tracking Number") or "").strip()
-        if trk and re.fullmatch(r"\d{3,5}", ref):
+        if trk:
             tracking_code.setdefault(trk, ref)
+        rk = _norm(li.raw.get("Receiver Company Name", ""))
+        if len(rk) >= 4:
+            receiver_codes.setdefault(rk, set()).add(ref)
 
     for li in doc.line_items:
         raw = li.raw
         ref = (raw.get("Reference No.1") or "").strip()
         trk = (raw.get("Tracking Number") or "").strip()
-        code = None
+        rk = _norm(raw.get("Receiver Company Name", ""))
+        code = src = None
         if re.fullmatch(r"\d{3,5}", ref):
-            code = ref
+            code, src = ref, "reference"
         elif trk and trk in tracking_code:
-            code = tracking_code[trk]
+            code, src = tracking_code[trk], "same tracking #"
+        elif rk in receiver_codes and len(receiver_codes[rk]) == 1:
+            code, src = next(iter(receiver_codes[rk])), "receiver in this invoice"
         elif registry:
             matched = project_resolver.match_project(
                 [{"summary": f"{raw.get('Receiver Company Name', '')} {ref}", "domains": []}], registry)
             if matched and matched.get("project"):
-                code = matched["project"]
+                code, src = matched["project"], "registry guess — verify"
 
         if code:
             li.project = code
             li.gl_account = cogs
-            li.note = f"UPS ref {ref!r} -> project {code} (COGS Shipping)"
+            li.note = f"UPS -> project {code} via {src} (COGS Shipping)"
         else:
             li.gl_account = oh
             for kw, dept_id in dept_kw.items():
