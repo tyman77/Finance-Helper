@@ -27,40 +27,72 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import date
 
+_MD = re.compile(r"^\d{1,2}/\d{1,2}$")
+_NAME_LIKE = re.compile(r"^[A-Za-z][A-Za-z.'-]+ [A-Za-z][A-Za-z.'-]+")  # "First Last"
 
-def _day_headers(month_row, day_row, year: int) -> dict:
-    """Map each column index -> ISO date using the 'month' and 'M/D' header rows."""
+
+def _day_row_index(values: list) -> int:
+    """The header row is the one with the most 'M/D' cells."""
+    best, best_i = -1, 0
+    for i, row in enumerate(values):
+        count = sum(1 for c in row if _MD.match((c or "").strip()))
+        if count > best:
+            best, best_i = count, i
+    return best_i
+
+
+def _day_headers(day_row, year: int) -> dict:
     cols = {}
     for i, cell in enumerate(day_row):
         cell = (cell or "").strip()
-        if "/" in cell:
+        if _MD.match(cell):
+            m, d = cell.split("/")
             try:
-                m, d = cell.split("/")
                 cols[i] = date(year, int(m), int(d)).isoformat()
-            except (ValueError, TypeError):
+            except ValueError:
                 continue
     return cols
 
 
-def parse_grid(values: list, year: int, name_col: int = 1, day_header_row: int = 2) -> dict:
-    """values = raw sheet rows. name_col holds the person; cells hold project codes."""
-    day_cols = _day_headers(values[day_header_row - 1], values[day_header_row], year)
+def _detect_name_col(rows, first_day_col: int) -> int:
+    """Among the leading (pre-day) columns, pick the one that most looks like names."""
+    best, best_col = -1, 0
+    for col in range(first_day_col):
+        score = sum(1 for r in rows if col < len(r) and _NAME_LIKE.match((r[col] or "").strip()))
+        if score > best:
+            best, best_col = score, col
+    return best_col
+
+
+def parse_grid(values: list, year: int, name_col: int | None = None) -> dict:
+    """Flatten the crew grid to {person: {ISO date: cell}}.
+
+    Auto-detects the day-header row and (unless overridden) the name column, so it
+    tolerates tabs with different numbers of leading columns.
+    """
+    hdr = _day_row_index(values)
+    day_cols = _day_headers(values[hdr], year)
+    if not day_cols:
+        return {}
+    first_day_col = min(day_cols)
+    data_rows = values[hdr + 1:]
+    if name_col is None:
+        name_col = _detect_name_col(data_rows, first_day_col)
+
     index: dict[str, dict] = {}
-    for row in values[day_header_row + 1:]:
+    for row in data_rows:
         if len(row) <= name_col:
             continue
         person = (row[name_col] or "").strip()
-        if not person:
+        if not person or _NAME_LIKE.match(person) is None:
             continue
-        days = {}
-        for col, iso in day_cols.items():
-            if col < len(row):
-                val = (row[col] or "").strip()
-                if val:
-                    days[iso] = val
+        days = {col_iso: row[col].strip()
+                for col, col_iso in day_cols.items()
+                if col < len(row) and (row[col] or "").strip()}
         if days:
             index[person] = days
     return index
@@ -82,7 +114,8 @@ def fetch(sheet_id: str, rng: str) -> list:
 def main(argv):
     year = int(argv[0]) if argv else date.today().year  # noqa: DTZ011 (cron passes year)
     values = fetch(os.environ["SCHEDULE_SHEET_ID"], os.environ.get("SCHEDULE_SHEET_RANGE", ""))
-    index = parse_grid(values, year)
+    name_col = os.environ.get("SCHEDULE_NAME_COL")
+    index = parse_grid(values, year, int(name_col) if name_col else None)
     os.makedirs("data", exist_ok=True)
     with open("data/schedule_index.json", "w", encoding="utf-8") as fh:
         json.dump(index, fh, indent=2)

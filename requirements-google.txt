@@ -1,0 +1,4 @@
+# Optional: only needed to run the fetch scripts (scripts/fetch_*_index.py)
+# against live Google Sheets / Calendar with a service account.
+google-api-python-client>=2.100
+google-auth>=2.23
