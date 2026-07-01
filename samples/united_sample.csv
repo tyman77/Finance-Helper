@@ -1,4 +1,5 @@
-Confirmation Number,Transaction Date,Description,Amount
-ABC123,06/10/2026,Economy fare DEN-ORD,289.40
-ABC123,06/10/2026,Seat selection,45.00
-ABC123,06/10/2026,US Transportation Tax,21.70
+Account Number,Customer Name,Issue Date,Departure Date,Passenger Name,Ticket Number,Routing (Origin To To To To ),Fare Class,Airline Segment,Agency Number,Customer Currency  (Charges/Credits),Currency - Original Sales Currency,Original Sales Currency (Charges/Credits)
+**********0013,EXAMPLE CO,05/01/2026,05/10/2026,DOE/JOHN,1610000000001,DEN AUS DEN,WAA4AK,UA UA,10000001,400.00,400.00,400.00
+**********0013,EXAMPLE CO,05/02/2026,05/10/2026,DOE       /SECOND CHECKED BAG,1640000000002,DEN AUS,WAA4AK,UA,10000002,60.00,60.00,60.00
+**********0013,EXAMPLE CO,05/03/2026,05/12/2026,SMITH     /PREFERRED ZONE,1640000000003,ORD DEN,TAP5AK,UA,10000003,45.00,45.00,45.00
+**********0013,EXAMPLE CO,05/04/2026,,DOE/JOHN,1610000000004,,,,10000004,-100.00,-100.00,-100.00

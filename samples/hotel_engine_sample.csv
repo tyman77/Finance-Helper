@@ -1,4 +1,4 @@
-Itinerary ID,Check Out Date,Line Item,Amount
-HE55231,06/14/2026,Room charge 2 nights,318.00
-HE55231,06/14/2026,Resort Fee,50.00
-HE55231,06/14/2026,Occupancy Tax,44.16
+Statement Number,Invoice Number,Invoice Type,Start Date,End Date,Nights,Average Nightly Rate w/out Taxes and Fees,Taxes and Fees,Property Charge,Incidentals Coverage,Flex,Flight Fare,Ancillary fees,Base Rental,Booking Fee,Travel Credits Redeemed,Total Expense,Hotel Name,Hotel City,Currency Code,Invoiced On
+999999-2606-1,260615000001,Hotel,06/09/2026,06/10/2026,1,148.71,29.81,0.00,5.00,0.00,,,,0.00,(0.00),183.52,Fairfield Inn Example,Nampa,USD,06/15/2026
+999999-2606-1,260615000002,Hotel,06/02/2026,06/07/2026,5,73.11,81.08,0.00,2.50,0.00,,,,0.00,(92.27),356.86,La Quinta Example,Omaha,USD,06/15/2026
+999999-2606-1,260615000003,Hotel,06/14/2026,06/16/2026,1,159.00,15.82,0.00,1.25,0.00,,,,15.80,(0.00),191.87,Residence Inn Example,Broomfield,USD,06/15/2026

@@ -28,22 +28,28 @@ def build_journal_entry(doc: SourceDocument) -> dict:
 
     lines = []
     for li in doc.line_items:
+        # Positive amounts are expenses (debit); negatives are refunds/credits
+        # and post as a credit to the same account rather than a negative debit.
+        debit = li.amount if li.amount >= 0 else 0
+        credit = -li.amount if li.amount < 0 else 0
         lines.append(
             {
                 "account_no": li.gl_account,
-                "debit": str(li.amount),
-                "credit": "0",
-                "memo": f"{doc.vendor}: {li.description}",
+                "debit": str(debit),
+                "credit": str(credit),
+                "memo": f"{doc.vendor}: {li.description}"[:200],
                 "category": li.category,
             }
         )
-    # Balancing credit for the full total.
+    # Offsetting line to the clearing/AP account for the net total. If the net is
+    # a credit (a net refund), flip it to a debit so the entry still balances.
+    net = doc.total
     lines.append(
         {
             "account_no": clearing,
-            "debit": "0",
-            "credit": str(doc.total),
-            "memo": f"{doc.vendor} {doc.document_id}",
+            "debit": str(-net if net < 0 else 0),
+            "credit": str(net if net >= 0 else 0),
+            "memo": f"{doc.vendor} {doc.document_id}"[:200],
         }
     )
 

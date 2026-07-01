@@ -1,42 +1,53 @@
-# Categorization rules. Each rule assigns a category + GL account to a line item.
+# Categorization rules + the category -> GL account map.
 #
-# Matching: a rule matches a line item when EVERY condition it lists is true.
-#   - source:   the source key (ups, united, ...)
-#   - contains: a case-insensitive substring found in the line description
-# Rules are evaluated top-to-bottom; the FIRST match wins. If nothing matches,
-# the source's `default_category` (from sources.yml) is used.
+# Rules apply to LONG-layout sources (United, UPS, National): the first rule
+# whose conditions all match a line's description wins. WIDE-layout sources
+# (Hotel Engine) assign categories directly in sources.yml, so they skip rules.
 #
-# gl_account values below are PLACEHOLDERS. Replace with your real Sage Intacct
-# chart-of-accounts numbers (and Bill.com uses the same account mapping).
+# gl_account values are PLACEHOLDERS — replace with your real Sage Intacct
+# chart-of-accounts numbers.
 
 rules:
-  - contains: "fuel surcharge"
+  # --- United (fees hidden in the passenger-name field) ---
+  - source: united
+    contains: "CHECKED BAG"
+    category: travel_baggage
+  - source: united
+    contains: "PREFERRED ZONE"
+    category: travel_seat_fees
+  # --- UPS ---
+  - source: ups
+    contains: "fuel surcharge"
     category: shipping_fuel_surcharge
-    gl_account: "5210"
   - source: ups
     contains: "residential"
     category: shipping_residential_surcharge
-    gl_account: "5220"
+  # --- generic ---
   - contains: "resort fee"
     category: travel_lodging_fees
-    gl_account: "6110"
   - contains: "parking"
     category: travel_parking
-    gl_account: "6120"
   - contains: "tax"
     category: taxes
-    gl_account: "6900"
 
-# Categories referenced by rules or by a source default. `gl_account` here is the
-# fallback used when a category is applied via default_category.
+# Category -> GL account. `default_category` (sources.yml) and wide-layout
+# component categories resolve their account here.
 categories:
-  travel_airfare:            { gl_account: "6100" }
-  travel_lodging:            { gl_account: "6110" }
-  travel_lodging_fees:       { gl_account: "6110" }
-  travel_parking:            { gl_account: "6120" }
-  travel_car_rental:         { gl_account: "6130" }
-  shipping_freight:          { gl_account: "5200" }
-  shipping_fuel_surcharge:   { gl_account: "5210" }
+  travel_airfare:                 { gl_account: "6100" }
+  travel_airfare_fees:            { gl_account: "6102" }
+  travel_baggage:                 { gl_account: "6103" }
+  travel_seat_fees:               { gl_account: "6104" }
+  travel_lodging:                 { gl_account: "6110" }
+  travel_lodging_taxes:           { gl_account: "6111" }
+  travel_lodging_fees:            { gl_account: "6112" }
+  travel_lodging_incidentals:     { gl_account: "6113" }
+  travel_lodging_flex:            { gl_account: "6114" }
+  travel_booking_fee:             { gl_account: "6115" }
+  travel_credits:                 { gl_account: "6119" }   # contra / credits earned back
+  travel_parking:                 { gl_account: "6120" }
+  travel_car_rental:              { gl_account: "6130" }
+  shipping_freight:               { gl_account: "5200" }
+  shipping_fuel_surcharge:        { gl_account: "5210" }
   shipping_residential_surcharge: { gl_account: "5220" }
-  taxes:                     { gl_account: "6900" }
-  uncategorized:             { gl_account: "9999" }
+  taxes:                          { gl_account: "6900" }
+  uncategorized:                  { gl_account: "9999" }

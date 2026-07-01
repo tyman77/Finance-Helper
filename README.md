@@ -20,7 +20,17 @@ raw CSV  →  parse (config-driven)  →  normalize  →  categorize (rules)
 
 Each source is just a config entry in `config/sources.yml` (which columns map to
 what, and which destination it targets). Adding a new vendor = adding a config
-block, not writing new code.
+block, not writing new code. Two CSV shapes are handled:
+
+- **long** — one amount column; each row is a line item. A whole file can be a
+  *statement* that posts as one entry (e.g. a month of United UATP tickets).
+- **wide** — each row is already split across charge columns; every component
+  becomes its own categorized line and the room/base remainder is derived so the
+  parts tie exactly to the row total (e.g. a Hotel Engine statement broken into
+  room / taxes / incidentals / flex / booking fee / travel credits).
+
+Verified end-to-end against real United (91 tickets, net $31,148.79) and Hotel
+Engine (32 bookings, $17,790.29) exports — both produce balanced journal entries.
 
 ## Quick start
 

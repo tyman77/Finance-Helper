@@ -1,38 +1,54 @@
-# Per-source configuration. Each source describes how to read its CSV and where
-# the resulting entry should go. Column names below are BEST GUESSES — replace
-# them with the exact headers from a real exported file from each vendor.
+# Per-source configuration: how to read each vendor's CSV and where it posts.
+# Column names below match REAL exports from United and Hotel Engine. UPS and
+# National are still placeholders until you drop a real file (see NEXT_STEPS).
 
 united:
   display_name: United Airlines
-  destination: sage          # -> Sage Intacct journal entry
+  destination: sage            # -> Sage Intacct journal entry
   vendor: United Airlines
   currency: USD
-  # Map canonical fields -> the column header in the CSV.
+  layout: long
+  statement: true              # whole file = one monthly UATP statement -> one JE
+  statement_id_column: null    # no single invoice number; id built from date range
   columns:
-    date: "Transaction Date"
-    description: "Description"
-    amount: "Amount"
-    document_id: "Confirmation Number"
+    date: "Issue Date"
+    # Passenger Name carries fee types ("/SECOND CHECKED BAG"); Routing adds context.
+    description: ["Passenger Name", "Routing (Origin To To To To )"]
+    amount: "Customer Currency (Charges/Credits)"   # double-space in file; matched loosely
   default_category: travel_airfare
 
 hotel_engine:
   display_name: Hotel Engine
-  destination: sage          # -> Sage Intacct journal entry
+  destination: sage            # -> Sage Intacct journal entry
   vendor: Hotel Engine
   currency: USD
-  columns:
-    date: "Check Out Date"
-    description: "Line Item"
-    amount: "Amount"
-    document_id: "Itinerary ID"
-  default_category: travel_lodging
+  layout: wide                 # each booking row is split across charge columns
+  statement: true
+  statement_id_column: "Statement Number"
+  date_column: "Invoiced On"
+  label_columns: ["Hotel Name", "Hotel City"]
+  total_column: "Total Expense"
+  remainder_label: "Room charge"
+  remainder_category: travel_lodging     # room = Total minus the components below
+  # Each component column becomes its own categorized line. Parenthesized values
+  # (e.g. Travel Credits Redeemed) parse as negatives, so the parts sum to Total.
+  components:
+    - { column: "Taxes and Fees",         category: travel_lodging_taxes }
+    - { column: "Property Charge",        category: travel_lodging }
+    - { column: "Incidentals Coverage",   category: travel_lodging_incidentals }
+    - { column: "Flex",                   category: travel_lodging_flex }
+    - { column: "Booking Fee",            category: travel_booking_fee }
+    - { column: "Travel Credits Redeemed", category: travel_credits }
+    - { column: "Flight Fare",            category: travel_airfare }
+    - { column: "Ancillary fees",         category: travel_airfare_fees }
+    - { column: "Base Rental",            category: travel_car_rental }
 
 ups:
   display_name: UPS
-  destination: bill          # -> Bill.com bill
+  destination: bill            # -> Bill.com bill
   vendor: UPS
   currency: USD
-  # UPS 32-column summary CSV style headers. Adjust to your export.
+  layout: long
   columns:
     date: "Invoice Date"
     description: "Charge Description"
@@ -42,9 +58,10 @@ ups:
 
 national:
   display_name: National Car Rental
-  destination: bill          # -> Bill.com bill
+  destination: bill            # -> Bill.com bill
   vendor: National Car Rental
   currency: USD
+  layout: long
   columns:
     date: "Rental Date"
     description: "Charge Type"
