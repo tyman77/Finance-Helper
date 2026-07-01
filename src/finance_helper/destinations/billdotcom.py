@@ -18,17 +18,20 @@ from ..models import SourceDocument
 
 
 def build_bill(doc: SourceDocument) -> dict:
-    bill_line_items = [
-        {
+    bill_line_items = []
+    for li in doc.line_items:
+        line = {
             "amount": str(li.amount),
-            "description": li.description,
-            # In Bill.com this is chartOfAccountId; we surface the GL account we
-            # categorized to so you can map it to the Bill.com CoA id.
-            "gl_account": li.gl_account,
-            "category": li.category,
+            "description": li.description[:200],
+            # In Bill.com chartOfAccountId maps to the CoA id; we pass the GL
+            # account number we coded to.
+            "chartOfAccountId": li.gl_account,
         }
-        for li in doc.line_items
-    ]
+        if li.department:
+            line["departmentId"] = li.department
+        if li.project:
+            line["project"] = li.project     # Bill.com job/customer mapping
+        bill_line_items.append(line)
     return {
         "vendorName": doc.vendor,
         "invoice": {

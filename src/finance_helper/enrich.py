@@ -223,6 +223,61 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
     return doc
 
 
+def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocument:
+    """Code each UPS shipment: project -> COGS Shipping, else overhead postage.
+
+    Project code comes from Reference No.1, else inherited from another line with
+    the same Tracking Number (correction rows), else a registry match on the
+    receiver (client) name. Non-project shipments go to overhead postage, with a
+    department inferred from the reference (marketing/sales) where possible.
+    """
+    if registry is None:
+        registry = _load_json("project_registry.json") or {}
+    cfg = config.accounts().get("ups", {})
+    cogs = cfg.get("cogs_shipping", "51700")
+    oh = cfg.get("overhead_shipping", "65565")
+    dept_kw = cfg.get("overhead_departments", {})
+
+    # Pass 1: map each tracking number to its project code (from any of its rows).
+    tracking_code = {}
+    for li in doc.line_items:
+        ref = (li.raw.get("Reference No.1") or "").strip()
+        trk = (li.raw.get("Tracking Number") or "").strip()
+        if trk and re.fullmatch(r"\d{3,5}", ref):
+            tracking_code.setdefault(trk, ref)
+
+    for li in doc.line_items:
+        raw = li.raw
+        ref = (raw.get("Reference No.1") or "").strip()
+        trk = (raw.get("Tracking Number") or "").strip()
+        code = None
+        if re.fullmatch(r"\d{3,5}", ref):
+            code = ref
+        elif trk and trk in tracking_code:
+            code = tracking_code[trk]
+        elif registry:
+            matched = project_resolver.match_project(
+                [{"summary": f"{raw.get('Receiver Company Name', '')} {ref}", "domains": []}], registry)
+            if matched and matched.get("project"):
+                code = matched["project"]
+
+        if code:
+            li.project = code
+            li.gl_account = cogs
+            li.note = f"UPS ref {ref!r} -> project {code} (COGS Shipping)"
+        else:
+            li.gl_account = oh
+            for kw, dept_id in dept_kw.items():
+                if kw in ref.lower():
+                    li.department = dept_id
+                    break
+            li.note = (f"UPS overhead ref {ref!r} -> {oh}"
+                       + ("" if li.department else " (needs department)"))
+        li.needs_review = True
+
+    return doc
+
+
 def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry):
     dep = _parse_date(li.raw.get("Departure Date"))
     if dep is None:

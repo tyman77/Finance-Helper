@@ -1,5 +1,6 @@
-Invoice Number,Invoice Date,Charge Description,Net Amount
-0000123456,06/15/2026,Ground Commercial,142.50
-0000123456,06/15/2026,Fuel Surcharge,18.30
-0000123456,06/15/2026,Residential Surcharge,5.40
-0000123456,06/15/2026,Additional Handling,12.00
+Invoice Number,Invoice Date,Tracking Number,Reference No.1,Reference No.2,Receiver Company Name,Billed Charge,Incentive Credit
+INV100,06/13/2026,1Z0001,4804,Speaker,Echo Church,20.00,-2.00
+INV100,06/13/2026,1Z0002,4804,Wire,Echo Church,50.00,-5.00
+INV100,06/13/2026,1Z0002,,Wire correction,Echo Church,3.00,0.00
+INV100,06/13/2026,1Z0003,Marketing,Swag,Grace Church,10.00,-1.00
+INV100,06/13/2026,1Z0004,,Misc box,Random Church,8.00,0.00

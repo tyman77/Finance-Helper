@@ -18,5 +18,7 @@ def process(source: str, path: str) -> SourceDocument:
         doc = enrich.enrich_united(doc)
     elif enrichment == "hotel_engine":
         doc = enrich.enrich_hotel_engine(doc)
+    elif enrichment == "ups":
+        doc = enrich.enrich_ups(doc)
 
     return _categorize.categorize(doc)

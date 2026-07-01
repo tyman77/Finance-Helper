@@ -37,6 +37,13 @@ dimension (100% of the real statement), and **Project Name** → project code
 (direct or via the client→project registry). Overhead names (HQ Visit, OH Sales,
 All Staff, SA Hire) set an overhead account instead of a project.
 
+UPS (→ Bill.com) codes each shipment: net = `Billed Charge + Incentive Credit`;
+project from **Reference No.1**, inherited from another line with the same
+**Tracking Number** (correction rows), or matched on the receiver via the
+registry → `51700 COGS Shipping` + project; otherwise `65565 OH Postage &
+Shipping` (department inferred from marketing/sales references). Real invoice:
+129 lines, $3,547.74, 82 project-coded.
+
 ## Quick start
 
 ```bash

@@ -47,6 +47,15 @@ notes:
 # Hotel Engine: the WHOLE booking codes to ONE of these accounts (their chart has
 # no hotel tax/incidental sub-accounts). Project stays -> COGS Travel: Hotel;
 # otherwise an overhead account chosen from the Project Name.
+# UPS: project shipments -> COGS Shipping + project; other shipments -> overhead
+# postage (which requires a department, inferred from the reference where possible).
+ups:
+  cogs_shipping: "51700"       # COGS Shipping (project material shipments)
+  overhead_shipping: "65565"   # OH - Office Expenses: Postage & Shipping
+  overhead_departments:        # infer department from a non-project Reference No.1
+    marketing: "20"
+    sales: "10"
+
 hotel_engine:
   cogs_travel_hotel: "52300"   # COGS Travel: Hotel (confirmed from the GL chart)
   overhead:

@@ -106,7 +106,10 @@ def load(source: str, path: str) -> SourceDocument:
 
 def _load_long(cfg, reader, rows):
     cols = cfg["columns"]
-    amount_h = reader.col(cols["amount"])
+    # Amount is a single column, or the sum of several (e.g. UPS billed + credit).
+    amount_cols = cols.get("amount_columns")
+    amount_hs = ([reader.col(c) for c in amount_cols] if amount_cols
+                 else [reader.col(cols["amount"])])
     date_h = reader.col(cols.get("date"), required=False)
     desc_spec = cols["description"]
     desc_hs = [reader.col(c) for c in (desc_spec if isinstance(desc_spec, list) else [desc_spec])]
@@ -115,7 +118,8 @@ def _load_long(cfg, reader, rows):
     for row in rows:
         d = _parse_date(row.get(date_h)) if date_h else None
         desc = " ".join(row.get(h, "").strip() for h in desc_hs if row.get(h, "").strip())
-        items.append(LineItem(description=desc, amount=_parse_amount(row.get(amount_h)), date=d, raw=dict(row)))
+        amount = sum((_parse_amount(row.get(h)) for h in amount_hs), Decimal("0"))
+        items.append(LineItem(description=desc, amount=amount, date=d, raw=dict(row)))
         if d:
             dates.append(d)
     return items, dates

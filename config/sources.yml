@@ -51,10 +51,11 @@ ups:
   vendor: UPS
   currency: USD
   layout: long
+  enrich: ups                  # project from Reference No.1 / tracking / registry
   columns:
     date: "Invoice Date"
-    description: "Charge Description"
-    amount: "Net Amount"
+    description: ["Tracking Number", "Reference No.2", "Receiver Company Name"]
+    amount_columns: ["Billed Charge", "Incentive Credit"]   # net = billed + credit
     document_id: "Invoice Number"
   default_category: shipping_freight
 
