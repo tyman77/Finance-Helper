@@ -15,11 +15,14 @@ with a note so nothing is silently mis-coded.
 
 from __future__ import annotations
 
+import json
 import os
+from datetime import date, datetime
 from functools import lru_cache
 
 import yaml
 
+from . import project_resolver
 from .models import SourceDocument
 
 _DATA_DIR = os.environ.get(
@@ -34,6 +37,28 @@ def load_traveler_map(path: str) -> dict:
         return {}
     with open(path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
+
+
+def _load_json(name: str):
+    path = os.path.join(_DATA_DIR, name)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+_DATE_FORMATS = ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y")
+
+
+def _parse_date(value) -> date | None:
+    if not value:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _surname(name: str) -> str:
@@ -55,9 +80,18 @@ def _lookup(name: str, tmap: dict, surname_index: dict):
     return None, False
 
 
-def enrich_united(doc: SourceDocument, tmap: dict | None = None) -> SourceDocument:
+def enrich_united(
+    doc: SourceDocument,
+    tmap: dict | None = None,
+    schedule_index: dict | None = None,
+    calendar_index: list | None = None,
+) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
+    if schedule_index is None:
+        schedule_index = _load_json("schedule_index.json") or {}
+    if calendar_index is None:
+        calendar_index = _load_json("calendar_index.json") or []
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -74,23 +108,45 @@ def enrich_united(doc: SourceDocument, tmap: dict | None = None) -> SourceDocume
 
         li.person = entry.get("person") or None
         dept = entry.get("department") or None
-        if dept and entry.get("department_confidence", 0) >= _DEPT_CONF_MIN:
-            li.department = dept
-        else:
-            li.department = dept
+        li.department = dept
+        if not (dept and entry.get("department_confidence", 0) >= _DEPT_CONF_MIN):
             li.needs_review = True
             li.note = "low-confidence department"
 
-        # Account is a hint only — the reviewer confirms COGS-vs-overhead / project.
+        # 1) Try to pin the project/account from schedule (installers) or calendar.
+        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index)
+        if resolved and resolved.get("account"):
+            li.gl_account = resolved["account"]
+            if resolved.get("project"):
+                li.project = resolved["project"]
+            li.needs_review = True  # reviewed to start
+            li.note = (li.note + "; " if li.note else "") + resolved["note"]
+            continue
+
+        # 2) Fall back to the traveler's usual account, flagged for coding.
         hint = entry.get("account_hint") or ""
         if hint:
             li.gl_account = hint.split("--")[0].strip()  # "52200--COGS..." -> "52200"
         li.needs_review = True
         conf = entry.get("account_confidence", 0)
         li.note = (li.note + "; " if li.note else "") + (
-            f"account hint {hint!r} (used {int(conf * 100)}% of trips) — confirm project/COGS"
+            f"no schedule/calendar match; account hint {hint!r} "
+            f"(used {int(conf * 100)}% of trips) — confirm project/COGS"
         )
         if not exact:
             li.note += "; matched by surname only"
 
     return doc
+
+
+def _resolve_project(li, entry, passenger, schedule_index, calendar_index):
+    dep = _parse_date(li.raw.get("Departure Date"))
+    if dep is None:
+        return None
+    dept = (entry.get("department") or "")
+    # Installers are on the crew schedule; everyone else lives on the calendar.
+    if dept.startswith("60") and schedule_index:
+        return project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index)
+    if calendar_index:
+        return project_resolver.resolve_calendar(passenger, dep, calendar_index)
+    return None
