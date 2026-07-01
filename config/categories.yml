@@ -1,0 +1,42 @@
+# Categorization rules. Each rule assigns a category + GL account to a line item.
+#
+# Matching: a rule matches a line item when EVERY condition it lists is true.
+#   - source:   the source key (ups, united, ...)
+#   - contains: a case-insensitive substring found in the line description
+# Rules are evaluated top-to-bottom; the FIRST match wins. If nothing matches,
+# the source's `default_category` (from sources.yml) is used.
+#
+# gl_account values below are PLACEHOLDERS. Replace with your real Sage Intacct
+# chart-of-accounts numbers (and Bill.com uses the same account mapping).
+
+rules:
+  - contains: "fuel surcharge"
+    category: shipping_fuel_surcharge
+    gl_account: "5210"
+  - source: ups
+    contains: "residential"
+    category: shipping_residential_surcharge
+    gl_account: "5220"
+  - contains: "resort fee"
+    category: travel_lodging_fees
+    gl_account: "6110"
+  - contains: "parking"
+    category: travel_parking
+    gl_account: "6120"
+  - contains: "tax"
+    category: taxes
+    gl_account: "6900"
+
+# Categories referenced by rules or by a source default. `gl_account` here is the
+# fallback used when a category is applied via default_category.
+categories:
+  travel_airfare:            { gl_account: "6100" }
+  travel_lodging:            { gl_account: "6110" }
+  travel_lodging_fees:       { gl_account: "6110" }
+  travel_parking:            { gl_account: "6120" }
+  travel_car_rental:         { gl_account: "6130" }
+  shipping_freight:          { gl_account: "5200" }
+  shipping_fuel_surcharge:   { gl_account: "5210" }
+  shipping_residential_surcharge: { gl_account: "5220" }
+  taxes:                     { gl_account: "6900" }
+  uncategorized:             { gl_account: "9999" }

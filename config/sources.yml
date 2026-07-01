@@ -1,0 +1,53 @@
+# Per-source configuration. Each source describes how to read its CSV and where
+# the resulting entry should go. Column names below are BEST GUESSES — replace
+# them with the exact headers from a real exported file from each vendor.
+
+united:
+  display_name: United Airlines
+  destination: sage          # -> Sage Intacct journal entry
+  vendor: United Airlines
+  currency: USD
+  # Map canonical fields -> the column header in the CSV.
+  columns:
+    date: "Transaction Date"
+    description: "Description"
+    amount: "Amount"
+    document_id: "Confirmation Number"
+  default_category: travel_airfare
+
+hotel_engine:
+  display_name: Hotel Engine
+  destination: sage          # -> Sage Intacct journal entry
+  vendor: Hotel Engine
+  currency: USD
+  columns:
+    date: "Check Out Date"
+    description: "Line Item"
+    amount: "Amount"
+    document_id: "Itinerary ID"
+  default_category: travel_lodging
+
+ups:
+  display_name: UPS
+  destination: bill          # -> Bill.com bill
+  vendor: UPS
+  currency: USD
+  # UPS 32-column summary CSV style headers. Adjust to your export.
+  columns:
+    date: "Invoice Date"
+    description: "Charge Description"
+    amount: "Net Amount"
+    document_id: "Invoice Number"
+  default_category: shipping_freight
+
+national:
+  display_name: National Car Rental
+  destination: bill          # -> Bill.com bill
+  vendor: National Car Rental
+  currency: USD
+  columns:
+    date: "Rental Date"
+    description: "Charge Type"
+    amount: "Amount"
+    document_id: "Agreement Number"
+  default_category: travel_car_rental

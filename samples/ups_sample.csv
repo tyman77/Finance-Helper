@@ -1,0 +1,5 @@
+Invoice Number,Invoice Date,Charge Description,Net Amount
+0000123456,06/15/2026,Ground Commercial,142.50
+0000123456,06/15/2026,Fuel Surcharge,18.30
+0000123456,06/15/2026,Residential Surcharge,5.40
+0000123456,06/15/2026,Additional Handling,12.00

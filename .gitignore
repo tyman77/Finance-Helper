@@ -1,0 +1,14 @@
+# Secrets — never commit
+.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Generated proposals / outputs
+out/
