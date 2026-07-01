@@ -16,8 +16,10 @@ def test_department_and_project_from_columns():
     assert all(li.department == "30" for li in _by_project_name(doc, "Echo Church"))
     assert all(li.department == "10" for li in _by_project_name(doc, "HQ Visit"))
 
-    # Project code extracted from the Project Name.
-    assert all(li.project == "4499" for li in _by_project_name(doc, "PPN 4499"))
+    # Project code extracted from the Project Name; whole stay -> COGS Travel: Hotel.
+    ppn = _by_project_name(doc, "PPN 4499")
+    assert all(li.project == "4499" for li in ppn)
+    assert all(li.gl_account == "COGS-TRAVEL-HOTEL" for li in ppn)  # config placeholder
     assert all(li.project == "4804" for li in _by_project_name(doc, "Echo Church"))
 
 

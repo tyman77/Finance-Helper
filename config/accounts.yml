@@ -31,3 +31,15 @@ departments:
 #   - No project        -> an OH account by trip purpose (traveler's usual as a hint)
 notes:
   project_means_cogs: "52200"
+
+# Hotel Engine: the WHOLE booking codes to ONE of these accounts (their chart has
+# no hotel tax/incidental sub-accounts). Project stays -> COGS Travel: Hotel;
+# otherwise an overhead account chosen from the Project Name.
+hotel_engine:
+  cogs_travel_hotel: "COGS-TRAVEL-HOTEL"   # <-- TODO: replace with the real account number
+  overhead:
+    hq:                    "71000"   # OH - Travel
+    oh_sales_new:          "64302"   # OH - Sales: New Client and New Project
+    oh_sales_not_project:  "64300"   # OH - Sales: New or Existing Clients NOT Project Related (CR)
+    events:                "73060"   # OH - Marketing: Events
+    personal_development:  "64000"   # OH - Personal Development

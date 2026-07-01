@@ -23,7 +23,7 @@ from functools import lru_cache
 
 import yaml
 
-from . import project_resolver
+from . import config, project_resolver
 from .models import SourceDocument
 
 _DATA_DIR = os.environ.get(
@@ -156,30 +156,36 @@ _HE_DEPARTMENTS = {
 }
 
 
-def _he_overhead_account(project_name: str) -> str | None:
-    """Overhead account when the Project Name isn't a client project."""
+def _he_overhead_account(project_name: str, oh: dict) -> str | None:
+    """Overhead account (by Project Name) when the stay isn't project work."""
     t = project_name.lower()
     if "hq" in t:
-        return "71000"                       # OH - Travel
+        return oh.get("hq")
+    if "not project" in t or "tour" in t or "intro" in t:
+        return oh.get("oh_sales_not_project")
     if "oh sales" in t or "discovery" in t:
-        return "64302"                       # OH Sales: New Client
-    if "hire" in t or "onboard" in t:
-        return "63100"                       # OH - Hiring/Recruiting
-    if any(w in t for w in ("all staff", "syncup", "sync up", "bbq", "event")):
-        return "64000"                       # OH - Personal Development
+        return oh.get("oh_sales_new")
+    if any(w in t for w in ("all staff", "syncup", "sync up", "bbq", "hire", "onboard")):
+        return oh.get("personal_development")
+    if any(w in t for w in ("event", "conference", "training", "thrive", "storybrand")):
+        return oh.get("events")
     return None
 
 
 def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> SourceDocument:
-    """Set Department + Project dimensions from the booking's own columns.
+    """Code each Hotel Engine booking to ONE trip account + set dimensions.
 
-    Hotel Engine already carries Department Name and a Project Name that usually
-    holds the code; uncoded-but-named rows fall back to the client->project
-    registry. Overhead Project Names (HQ Visit, OH Sales, All Staff...) set an
-    overhead account. Every line is review-flagged to start.
+    Their chart has no hotel tax/incidental sub-accounts, so the whole booking
+    (every component line) codes to a single account: COGS Travel: Hotel for a
+    client project, otherwise an overhead account chosen from the Project Name.
+    Department and Project are set as Intacct dimensions. Every line is
+    review-flagged to start.
     """
     if registry is None:
         registry = _load_json("project_registry.json") or {}
+    he_cfg = config.accounts().get("hotel_engine", {})
+    cogs_hotel = he_cfg.get("cogs_travel_hotel", "COGS-TRAVEL-HOTEL")
+    oh_map = he_cfg.get("overhead", {})
 
     for li in doc.line_items:
         raw = li.raw
@@ -190,7 +196,7 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
                 break
 
         pname = (raw.get("Project Name") or "").strip()
-        oh = _he_overhead_account(pname)
+        oh = _he_overhead_account(pname, oh_map)
         code = None
         if oh:
             # Overhead trips (HQ visit, discovery, all-staff...) aren't project work.
@@ -206,9 +212,12 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
                     code = matched["project"]
             if code:
                 li.project = code
+                li.gl_account = cogs_hotel     # whole project stay -> COGS Travel: Hotel
+            # else: no project/overhead signal -> leave for the reviewer.
 
         li.needs_review = True
-        li.note = (f"HE {pname!r}" + (f" -> project {code}" if code else "")
+        li.note = (f"HE {pname!r}"
+                   + (f" -> project {code} (COGS Travel: Hotel)" if code else "")
                    + (f"; overhead {oh}" if oh else ""))
 
     return doc

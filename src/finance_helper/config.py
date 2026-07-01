@@ -29,6 +29,11 @@ def categories() -> dict:
     return _load("categories.yml")
 
 
+@lru_cache(maxsize=1)
+def accounts() -> dict:
+    return _load("accounts.yml")
+
+
 def source_config(source: str) -> dict:
     cfg = sources()
     if source not in cfg:
