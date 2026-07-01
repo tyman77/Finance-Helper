@@ -165,8 +165,20 @@ def _department_options() -> list[tuple[str, str]]:
 
 
 def _project_options() -> list[tuple[str, str]]:
+    """(code, client) pairs for the project autocomplete — excludes anything
+    confirmed archived in Sage. If data/sage_projects.json hasn't been fetched
+    yet, nothing is filtered (same "no data -> don't block on it" convention
+    as the rest of this tool)."""
     registry = _load_json_data("project_registry.json").get("registry", {})
-    return sorted((code, info.get("client", "")) for code, info in registry.items())
+    sage_projects = _load_json_data("sage_projects.json")
+    options = []
+    for code, info in registry.items():
+        if sage_projects:
+            proj = sage_projects.get(code)
+            if proj is not None and (proj.get("status") or "").lower() != "active":
+                continue  # archived in Sage — don't offer it
+        options.append((code, info.get("client", "")))
+    return sorted(options)
 
 
 def create_app() -> Flask:

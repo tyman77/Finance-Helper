@@ -149,7 +149,27 @@ python scripts/build_project_registry.py <historical_united.csv>  # client -> pr
 python scripts/build_roster.py                                     # person -> calendar (review it)
 python scripts/fetch_schedule_index.py  2026                       # installer crew grid
 python scripts/fetch_calendar_index.py  2026-05-01 2026-07-15      # per-person calendars
+python scripts/fetch_sage_projects.py                               # active/archived status per project
 ```
+
+### Archived projects never get auto-coded
+
+`scripts/fetch_sage_projects.py` pulls the Projects list from Sage Intacct
+(OAuth2 client-credentials — see `.env.example`) into `data/sage_projects.json`.
+Once that file exists:
+
+- The crew-schedule and calendar/registry matchers (`project_resolver.py`) skip
+  archived codes when deciding what to auto-code — including resolving what used
+  to be a multi-candidate "pick one" (e.g. a client with several old campus
+  codes) down to a clean single match once only one of them is still active.
+- The web UI's project autocomplete stops suggesting archived codes.
+- As a safety net independent of the above — catching a direct vendor-stated
+  code, or someone typing an old number into the web UI by hand — `validate.py`
+  flags any line whose project is archived, using the same issue-highlighting
+  the chart-of-accounts checks already use.
+
+Without `data/sage_projects.json` (not fetched yet), nothing is filtered —
+same "no data, don't block on it" convention as the rest of this tool.
 
 ## Configuration
 

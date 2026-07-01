@@ -14,6 +14,8 @@ so it is easy to test.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections import Counter
 from datetime import date, timedelta
@@ -21,6 +23,30 @@ from datetime import date, timedelta
 
 def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def load_active_projects(path: str | None = None) -> set[str] | None:
+    """Project codes NOT archived in Sage, from data/sage_projects.json
+    (scripts/fetch_sage_projects.py). Returns None — meaning "skip filtering
+    entirely" — if that file doesn't exist, matching the rest of this
+    project's "no data -> don't block on it" convention, rather than treating
+    an absent file as "everything is archived"."""
+    if path is None:
+        data_dir = os.environ.get(
+            "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data")
+        )
+        path = os.path.join(data_dir, "sage_projects.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {code for code, info in data.items() if (info.get("status") or "").lower() == "active"}
+
+
+def _filter_active(codes: set[str], active_projects: set[str] | None) -> set[str]:
+    if active_projects is None:
+        return codes
+    return {c for c in codes if c in active_projects}
 
 STAY_WINDOW_DAYS = 12  # departure through the likely length of a trip
 
@@ -47,15 +73,18 @@ def email_for(passenger: str, domain: str = "summitintegrated.com") -> str | Non
     return f"{first[0]}{surname}".lower() + "@" + domain
 
 
-def resolve_schedule(person: str, dep: date, schedule_index: dict) -> dict | None:
-    """Most-common numeric project code the installer works during the stay."""
+def resolve_schedule(
+    person: str, dep: date, schedule_index: dict, active_projects: set[str] | None = None
+) -> dict | None:
+    """Most-common numeric project code the installer works during the stay,
+    skipping any code that's archived in Sage (a stale sheet entry)."""
     rows = schedule_index.get(person)
     if not rows:
         return None
     codes: Counter = Counter()
     for i in range(STAY_WINDOW_DAYS + 1):
         cell = (rows.get((dep + timedelta(days=i)).isoformat()) or "").strip()
-        if cell.isdigit():
+        if cell.isdigit() and (active_projects is None or cell in active_projects):
             codes[cell] += 1
     if not codes:
         return None
@@ -129,8 +158,14 @@ def extract_leading_codes(summary: str) -> list[str]:
     return codes
 
 
-def match_project(events: list, registry: dict) -> dict | None:
-    """Match calendar events to a project code via client name or client domain."""
+def match_project(events: list, registry: dict, active_projects: set[str] | None = None) -> dict | None:
+    """Match calendar events to a project code via client name or client domain.
+
+    Archived projects (per active_projects, if supplied) are dropped before
+    the single-vs-multiple decision — an archived code never gets suggested,
+    and a client with one still-active project among several old ones now
+    resolves cleanly instead of surfacing dead codes as "candidates".
+    """
     index = registry.get("index", {})
     reg = registry.get("registry", {})
     codes: set = set()
@@ -140,6 +175,7 @@ def match_project(events: list, registry: dict) -> dict | None:
         for key, key_codes in index.items():
             if any(key in h or h in key for h in haystacks if h):
                 codes.update(key_codes)
+    codes = _filter_active(codes, active_projects)
     if not codes:
         return None
     if len(codes) == 1:
@@ -151,12 +187,16 @@ def match_project(events: list, registry: dict) -> dict | None:
             "note": "registry: candidate projects " + ", ".join(sorted(codes)) + " — pick one"}
 
 
-def resolve_calendar(owner_key: str, dep: date, calendar_index: dict, registry: dict | None = None) -> dict | None:
+def resolve_calendar(
+    owner_key: str, dep: date, calendar_index: dict, registry: dict | None = None,
+    active_projects: set[str] | None = None,
+) -> dict | None:
     """Surface trip-relevant events from the traveler's OWN calendar.
 
     Returns review context (which client / where). If a client->project registry
     is supplied and a single project matches, also returns project + 52200 so the
     trip auto-codes; multiple matches are surfaced as candidates for review.
+    Archived projects (per active_projects) are never returned as a match.
     """
     events = calendar_index.get(owner_key) or []
     window = []
@@ -173,7 +213,8 @@ def resolve_calendar(owner_key: str, dep: date, calendar_index: dict, registry: 
     title_codes: set = set()
     title_hits = []
     for ev in window:
-        codes = extract_leading_codes(ev.get("summary", ""))
+        codes = set(extract_leading_codes(ev.get("summary", "")))
+        codes = _filter_active(codes, active_projects)
         if codes:
             title_codes.update(codes)
             title_hits.append(ev)
@@ -207,7 +248,7 @@ def resolve_calendar(owner_key: str, dep: date, calendar_index: dict, registry: 
         "note": "calendar context — " + "; ".join(parts),
     }
 
-    matched = match_project(hits, registry) if registry else None
+    matched = match_project(hits, registry, active_projects) if registry else None
     if matched and matched.get("project"):
         result["project"] = matched["project"]
         result["account"] = matched["account"]

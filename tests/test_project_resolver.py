@@ -176,3 +176,82 @@ def test_enrich_routes_noninstaller_to_calendar():
     assert john.gl_account == "71000"                 # keeps traveler's usual OH account
     assert "First Baptist Dallas" in john.note        # calendar context attached for review
     assert john.needs_review
+
+
+# --- Archived-project filtering ------------------------------------------
+
+def test_load_active_projects_from_file(tmp_path):
+    f = tmp_path / "sage_projects.json"
+    f.write_text('{"4804": {"status": "Active"}, "3190": {"status": "Archived"}, '
+                 '"5036": {"status": "active"}}')  # case-insensitive match
+    active = project_resolver.load_active_projects(str(f))
+    assert active == {"4804", "5036"}
+
+
+def test_load_active_projects_missing_file_returns_none():
+    assert project_resolver.load_active_projects("/nonexistent/path.json") is None
+
+
+def test_resolve_schedule_skips_archived_for_next_active_code():
+    idx = {"Hal Seefeld": {
+        "2026-05-18": "3190",  # most common, but archived
+        "2026-05-19": "3190",
+        "2026-05-20": "4499",  # active, second most common
+    }}
+    active = {"4499"}  # 3190 is not in the active set -> treated as archived
+    got = project_resolver.resolve_schedule("Hal Seefeld", date(2026, 5, 18), idx, active)
+    assert got["project"] == "4499"
+
+
+def test_resolve_schedule_no_active_code_returns_none():
+    idx = {"Hal Seefeld": {"2026-05-18": "3190"}}
+    got = project_resolver.resolve_schedule("Hal Seefeld", date(2026, 5, 18), idx, active_projects=set())
+    assert got is None
+
+
+def test_match_project_filters_archived_candidates():
+    registry = {"registry": {"2630": {"client": "Life.Church"}, "3063": {"client": "Life.Church"},
+                             "3642": {"client": "Life.Church"}},
+                "index": {"lifechurch": ["2630", "3063", "3642"]}}
+    events = [{"summary": "Life.Church visit", "domains": []}]
+    # Without filtering: three old codes are genuinely ambiguous.
+    assert project_resolver.match_project(events, registry)["candidates"] == ["2630", "3063", "3642"]
+    # With only one still active in Sage, the ambiguity resolves cleanly —
+    # this is the actual point of the feature, not just "hide archived ones".
+    got = project_resolver.match_project(events, registry, active_projects={"3642"})
+    assert got["project"] == "3642"
+    assert "candidates" not in got
+
+
+def test_match_project_all_candidates_archived_returns_none():
+    registry = {"registry": {"2630": {"client": "Life.Church"}},
+                "index": {"lifechurch": ["2630"]}}
+    events = [{"summary": "Life.Church visit", "domains": []}]
+    assert project_resolver.match_project(events, registry, active_projects=set()) is None
+
+
+def test_resolve_calendar_title_code_archived_falls_through():
+    cal = {"x@summitintegrated.com": [
+        {"summary": "4804 - Echo Church - Ready to Finish", "start": "2026-05-01",
+         "end": "2026-05-01", "location": "", "all_day": False, "external": False, "domains": []},
+    ]}
+    # 4804 is archived and there's no other travel-relevant signal -> no match at all,
+    # not a silent fall-through to the archived code.
+    got = project_resolver.resolve_calendar("x@summitintegrated.com", date(2026, 5, 1), cal,
+                                            active_projects=set())
+    assert got is None
+
+
+def test_enrich_united_never_assigns_an_archived_project(monkeypatch):
+    """End-to-end: an installer whose schedule cell is an archived project
+    should not get it auto-coded, even though the underlying schedule data
+    is unchanged — the filter has to actually reach through enrich_united."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install Team",
+                         "department_confidence": 1.0, "account_hint": "52200--x",
+                         "account_confidence": 0.4, "n": 5}}
+    schedule = {"John Doe": {"2026-05-11": "5555"}}
+    enrich.enrich_united(doc, tmap, schedule_index=schedule, calendar_index={},
+                         active_projects=set())  # 5555 is not active
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project != "5555"

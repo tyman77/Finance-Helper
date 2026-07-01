@@ -5,6 +5,7 @@ of the real, gitignored vendor exports.
 """
 
 import io
+import json
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -12,7 +13,14 @@ from decimal import Decimal
 import pytest
 
 from finance_helper.models import LineItem, SourceDocument
-from finance_helper.web.app import RUNS, _format_note, _line_candidates, _line_status, create_app
+from finance_helper.web.app import (
+    RUNS,
+    _format_note,
+    _line_candidates,
+    _line_status,
+    _project_options,
+    create_app,
+)
 
 
 @pytest.fixture
@@ -117,7 +125,6 @@ def test_download_returns_current_payload(client):
     resp = client.get(f"/review/{run_id}/download")
     assert resp.status_code == 200
     assert resp.mimetype == "application/json"
-    import json
     data = json.loads(resp.data)
     assert data["destination"] == "bill"
     assert len(data["payload"]["billLineItems"]) == 5
@@ -255,3 +262,33 @@ def test_format_note_unrecognized_segment_shown_verbatim():
     # Safety net: an unknown future note format isn't silently dropped.
     got = _format_note("some brand new note format nobody wrote a rule for")
     assert got["summary"] == "some brand new note format nobody wrote a rule for"
+
+
+# --- Archived-project filtering in the project autocomplete ----------------
+
+def test_project_options_excludes_archived(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "project_registry.json").write_text(json.dumps({
+        "registry": {
+            "4804": {"client": "Echo Church"},
+            "3190": {"client": "Red Rocks Church"},
+        }
+    }))
+    (tmp_path / "sage_projects.json").write_text(json.dumps({
+        "4804": {"name": "Echo Church", "status": "Active"},
+        "3190": {"name": "Red Rocks Church", "status": "Archived"},
+    }))
+    options = _project_options()
+    codes = [code for code, _ in options]
+    assert "4804" in codes
+    assert "3190" not in codes
+
+
+def test_project_options_no_sage_data_shows_everything(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "project_registry.json").write_text(json.dumps({
+        "registry": {"4804": {"client": "Echo Church"}, "3190": {"client": "Red Rocks Church"}}
+    }))
+    # No sage_projects.json fetched yet -> don't filter anything out.
+    options = _project_options()
+    assert {code for code, _ in options} == {"4804", "3190"}

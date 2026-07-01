@@ -30,6 +30,11 @@ _DATA_DIR = os.environ.get(
 )
 _DEPT_CONF_MIN = 0.9   # department is trusted above this
 
+# Distinguishes "caller didn't pass active_projects" (load from disk) from
+# "caller explicitly passed None" (skip filtering) — plain None can't do both,
+# and tests need the latter to stay isolated from whatever's on disk.
+_UNSET = object()
+
 
 def load_traveler_map(path: str) -> dict:
     """Not cached: the web UI is a long-running process, and re-reading this
@@ -89,6 +94,7 @@ def enrich_united(
     calendar_index: dict | None = None,
     roster: dict | None = None,
     registry: dict | None = None,
+    active_projects=_UNSET,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
@@ -100,6 +106,8 @@ def enrich_united(
         roster = _load_json("roster.json") or {}
     if registry is None:
         registry = _load_json("project_registry.json") or {}
+    if active_projects is _UNSET:
+        active_projects = project_resolver.load_active_projects()
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -122,7 +130,8 @@ def enrich_united(
             li.note = "low-confidence department"
 
         # 1) Installers: pin project + 52200 COGS from the crew schedule.
-        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry)
+        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster,
+                                    registry, active_projects)
         if resolved and resolved.get("account"):
             li.gl_account = resolved["account"]
             if resolved.get("project"):
@@ -173,7 +182,9 @@ def _he_overhead_account(project_name: str, oh: dict) -> str | None:
     return None
 
 
-def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> SourceDocument:
+def enrich_hotel_engine(
+    doc: SourceDocument, registry: dict | None = None, active_projects=_UNSET
+) -> SourceDocument:
     """Code each Hotel Engine booking to ONE trip account + set dimensions.
 
     Their chart has no hotel tax/incidental sub-accounts, so the whole booking
@@ -184,6 +195,8 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
     """
     if registry is None:
         registry = _load_json("project_registry.json") or {}
+    if active_projects is _UNSET:
+        active_projects = project_resolver.load_active_projects()
     he_cfg = config.accounts().get("hotel_engine", {})
     cogs_hotel = he_cfg.get("cogs_travel_hotel", "COGS-TRAVEL-HOTEL")
     oh_map = he_cfg.get("overhead", {})
@@ -208,7 +221,8 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
                 code = m.group(1)
             elif registry:
                 matched = project_resolver.match_project(
-                    [{"summary": f"{pname} {raw.get('Hotel Name', '')}", "domains": []}], registry)
+                    [{"summary": f"{pname} {raw.get('Hotel Name', '')}", "domains": []}],
+                    registry, active_projects)
                 if matched and matched.get("project"):
                     code = matched["project"]
             if code:
@@ -224,7 +238,7 @@ def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> So
     return doc
 
 
-def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocument:
+def enrich_ups(doc: SourceDocument, registry: dict | None = None, active_projects=_UNSET) -> SourceDocument:
     """Code each UPS shipment: project -> COGS Shipping, else overhead postage.
 
     Project code comes from Reference No.1, else inherited from another line with
@@ -234,6 +248,8 @@ def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocum
     """
     if registry is None:
         registry = _load_json("project_registry.json") or {}
+    if active_projects is _UNSET:
+        active_projects = project_resolver.load_active_projects()
     cfg = config.accounts().get("ups", {})
     cogs = cfg.get("cogs_shipping", "51700")
     oh = cfg.get("overhead_shipping", "65565")
@@ -271,7 +287,8 @@ def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocum
             code, src = next(iter(receiver_codes[rk])), "receiver in this invoice"
         elif registry:
             matched = project_resolver.match_project(
-                [{"summary": f"{raw.get('Receiver Company Name', '')} {ref}", "domains": []}], registry)
+                [{"summary": f"{raw.get('Receiver Company Name', '')} {ref}", "domains": []}],
+                registry, active_projects)
             if matched and matched.get("project"):
                 code, src = matched["project"], "registry guess — verify"
 
@@ -292,7 +309,7 @@ def enrich_ups(doc: SourceDocument, registry: dict | None = None) -> SourceDocum
     return doc
 
 
-def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry):
+def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry, active_projects):
     dep = _parse_date(li.raw.get("Departure Date"))
     if dep is None:
         return None
@@ -301,11 +318,11 @@ def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roste
     # their calendar if they're not on the sheet (e.g. not current crew) or the
     # sheet has no code for that stay — don't give up just because dept == 60.
     if dept.startswith("60") and schedule_index:
-        result = project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index)
+        result = project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index, active_projects)
         if result:
             return result
     if calendar_index:
         owner = roster.get(entry.get("person", "")) or project_resolver.email_for(passenger)
         if owner:
-            return project_resolver.resolve_calendar(owner, dep, calendar_index, registry)
+            return project_resolver.resolve_calendar(owner, dep, calendar_index, registry, active_projects)
     return None
