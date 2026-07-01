@@ -25,6 +25,7 @@ hotel_engine:
   currency: USD
   layout: wide                 # each booking row is split across charge columns
   statement: true
+  enrich: hotel_engine         # set Department + Project dimensions from columns
   statement_id_column: "Statement Number"
   date_column: "Invoiced On"
   label_columns: ["Hotel Name", "Hotel City"]

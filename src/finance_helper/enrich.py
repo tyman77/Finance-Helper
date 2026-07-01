@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime
 from functools import lru_cache
 
@@ -144,6 +145,71 @@ def enrich_united(
             li.note += "; matched by surname only"
         if context:
             li.note += "; " + context
+
+    return doc
+
+
+_HE_DEPARTMENTS = {
+    "sales": "10", "marketing": "20", "architect": "30",
+    "project manager": "35", "engineering": "40", "assembly": "50",
+    "install": "60", "finance": "70", "lead": "80",
+}
+
+
+def _he_overhead_account(project_name: str) -> str | None:
+    """Overhead account when the Project Name isn't a client project."""
+    t = project_name.lower()
+    if "hq" in t:
+        return "71000"                       # OH - Travel
+    if "oh sales" in t or "discovery" in t:
+        return "64302"                       # OH Sales: New Client
+    if "hire" in t or "onboard" in t:
+        return "63100"                       # OH - Hiring/Recruiting
+    if any(w in t for w in ("all staff", "syncup", "sync up", "bbq", "event")):
+        return "64000"                       # OH - Personal Development
+    return None
+
+
+def enrich_hotel_engine(doc: SourceDocument, registry: dict | None = None) -> SourceDocument:
+    """Set Department + Project dimensions from the booking's own columns.
+
+    Hotel Engine already carries Department Name and a Project Name that usually
+    holds the code; uncoded-but-named rows fall back to the client->project
+    registry. Overhead Project Names (HQ Visit, OH Sales, All Staff...) set an
+    overhead account. Every line is review-flagged to start.
+    """
+    if registry is None:
+        registry = _load_json("project_registry.json") or {}
+
+    for li in doc.line_items:
+        raw = li.raw
+        dn = (raw.get("Department Name") or "").strip().lower()
+        for key, dept_id in _HE_DEPARTMENTS.items():
+            if key in dn:
+                li.department = dept_id
+                break
+
+        pname = (raw.get("Project Name") or "").strip()
+        oh = _he_overhead_account(pname)
+        code = None
+        if oh:
+            # Overhead trips (HQ visit, discovery, all-staff...) aren't project work.
+            li.gl_account = oh
+        else:
+            m = re.search(r"\b(\d{3,5})\b", pname)
+            if m:
+                code = m.group(1)
+            elif registry:
+                matched = project_resolver.match_project(
+                    [{"summary": f"{pname} {raw.get('Hotel Name', '')}", "domains": []}], registry)
+                if matched and matched.get("project"):
+                    code = matched["project"]
+            if code:
+                li.project = code
+
+        li.needs_review = True
+        li.note = (f"HE {pname!r}" + (f" -> project {code}" if code else "")
+                   + (f"; overhead {oh}" if oh else ""))
 
     return doc
 

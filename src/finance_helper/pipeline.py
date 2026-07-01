@@ -16,5 +16,7 @@ def process(source: str, path: str) -> SourceDocument:
     enrichment = config.source_config(source).get("enrich")
     if enrichment == "united_travelers":
         doc = enrich.enrich_united(doc)
+    elif enrichment == "hotel_engine":
+        doc = enrich.enrich_hotel_engine(doc)
 
     return _categorize.categorize(doc)

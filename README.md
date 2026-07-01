@@ -32,6 +32,11 @@ block, not writing new code. Two CSV shapes are handled:
 Verified end-to-end against real United (91 tickets, net $31,148.79) and Hotel
 Engine (32 bookings, $17,790.29) exports — both produce balanced journal entries.
 
+Hotel Engine is enriched from its own columns: **Department Name** → department
+dimension (100% of the real statement), and **Project Name** → project code
+(direct or via the client→project registry). Overhead names (HQ Visit, OH Sales,
+All Staff, SA Hire) set an overhead account instead of a project.
+
 ## Quick start
 
 ```bash
