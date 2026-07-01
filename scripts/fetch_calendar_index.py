@@ -31,11 +31,21 @@ _INTERNAL_DOMAIN = "summitintegrated.com"
 _SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
+_BASE_CREDS = None
+
+
+def _base_creds():
+    global _BASE_CREDS
+    if _BASE_CREDS is None:
+        from google.oauth2 import service_account
+        _BASE_CREDS = service_account.Credentials.from_service_account_file(
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"], scopes=_SCOPES)
+    return _BASE_CREDS
+
+
 def _session(subject: str | None = None):
     from google.auth.transport.requests import AuthorizedSession
-    from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_file(
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"], scopes=_SCOPES)
+    creds = _base_creds()
     if subject:
         creds = creds.with_subject(subject)   # domain-wide delegation impersonation
     sess = AuthorizedSession(creds)
@@ -67,7 +77,7 @@ def fetch_calendar(cal_id: str, start: str, end: str, subject: str | None) -> li
         }
         if page_token:
             params["pageToken"] = page_token
-        resp = sess.get(base, params=params, timeout=60)
+        resp = sess.get(base, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         for ev in data.get("items", []):
@@ -95,17 +105,22 @@ def main(argv):
         roster = json.load(fh)
     use_dwd = bool(os.environ.get("USE_DWD"))
 
+    ids = sorted(set(roster.values()))
     index = {}
-    for cal_id in sorted(set(roster.values())):
+    skipped = []
+    for i, cal_id in enumerate(ids, 1):
         subject = cal_id if use_dwd else None
         try:
             index[cal_id] = fetch_calendar(cal_id, argv[0], argv[1], subject)
-            print(f"  {cal_id}: {len(index[cal_id])} events")
+            print(f"  [{i}/{len(ids)}] {cal_id}: {len(index[cal_id])} events", flush=True)
         except Exception as exc:  # keep going; report the calendars we couldn't read
-            print(f"  {cal_id}: SKIPPED ({type(exc).__name__})")
-    with open("data/calendar_index.json", "w", encoding="utf-8") as fh:
-        json.dump(index, fh, indent=2)
-    print(f"Wrote {len(index)} calendars to data/calendar_index.json")
+            skipped.append(cal_id)
+            print(f"  [{i}/{len(ids)}] {cal_id}: SKIPPED ({type(exc).__name__})", flush=True)
+        # Checkpoint after every calendar so a timeout doesn't lose earlier work.
+        with open("data/calendar_index.json", "w", encoding="utf-8") as fh:
+            json.dump(index, fh, indent=2)
+    print(f"Wrote {len(index)} calendars to data/calendar_index.json "
+          f"({len(skipped)} skipped)")
     return 0
 
 
