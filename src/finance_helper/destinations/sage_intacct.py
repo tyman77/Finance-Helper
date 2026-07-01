@@ -119,11 +119,21 @@ def _to_rest_body(payload: dict) -> dict:
 def _get_token() -> str:
     import requests
 
+    # Confirmed live (2026-07-01): despite being a "client_credentials" grant,
+    # Sage's token endpoint also requires the Web Services User identifying
+    # itself in the request body — a 400 "Either username or session_id is
+    # required" comes back without it. client_id/secret identify the app;
+    # username/password identify the authorized Web Services User within it.
+    data = {"grant_type": "client_credentials"}
+    if os.environ.get("INTACCT_USER_ID"):
+        data["username"] = os.environ["INTACCT_USER_ID"]
+    if os.environ.get("INTACCT_USER_PASSWORD"):
+        data["password"] = os.environ["INTACCT_USER_PASSWORD"]
     try:
         resp = requests.post(
             _TOKEN_URL,
             auth=(os.environ["INTACCT_CLIENT_ID"], os.environ["INTACCT_CLIENT_SECRET"]),
-            data={"grant_type": "client_credentials"},
+            data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
         )
@@ -142,7 +152,10 @@ def post_journal_entry(payload: dict) -> dict:
     body on failure — see the module docstring if this is your first live test."""
     import requests
 
-    required = ["INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID"]
+    required = [
+        "INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID",
+        "INTACCT_USER_ID", "INTACCT_USER_PASSWORD",
+    ]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise RuntimeError(

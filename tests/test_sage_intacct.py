@@ -70,13 +70,50 @@ def test_to_rest_body_omits_dimension_keys_when_absent():
     assert "projectId" not in line
 
 
+_REQUIRED_ENV_VARS = (
+    "INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID",
+    "INTACCT_USER_ID", "INTACCT_USER_PASSWORD",
+)
+
+
 def test_post_journal_entry_requires_credentials(monkeypatch):
-    for var in ("INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID"):
+    for var in _REQUIRED_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(RuntimeError) as exc:
         sage_intacct.post_journal_entry({})
     assert "INTACCT_CLIENT_ID" in str(exc.value)
+    assert "INTACCT_USER_ID" in str(exc.value)  # confirmed required live, not just client id/secret
     assert "credentials missing" in str(exc.value)
+
+
+def test_get_token_sends_username_and_password(monkeypatch):
+    """Regression: Sage's token endpoint 400s with "Either username or
+    session_id is required" for a pure client_credentials request — the Web
+    Services User has to be identified in the body too."""
+    import requests
+
+    monkeypatch.setenv("INTACCT_CLIENT_ID", "cid")
+    monkeypatch.setenv("INTACCT_CLIENT_SECRET", "csecret")
+    monkeypatch.setenv("INTACCT_USER_ID", "wsuser")
+    monkeypatch.setenv("INTACCT_USER_PASSWORD", "wspass")
+
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": "tok"}
+
+    def _fake_post(url, auth=None, data=None, **kwargs):
+        captured["data"] = data
+        return _Resp()
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+    assert sage_intacct._get_token() == "tok"
+    assert captured["data"]["username"] == "wsuser"
+    assert captured["data"]["password"] == "wspass"
+    assert captured["data"]["grant_type"] == "client_credentials"
 
 
 def test_network_failure_wrapped_as_runtime_error_not_uncaught(monkeypatch):
@@ -86,9 +123,8 @@ def test_network_failure_wrapped_as_runtime_error_not_uncaught(monkeypatch):
     were caught upstream."""
     import requests
 
-    monkeypatch.setenv("INTACCT_CLIENT_ID", "x")
-    monkeypatch.setenv("INTACCT_CLIENT_SECRET", "x")
-    monkeypatch.setenv("INTACCT_COMPANY_ID", "x")
+    for var in _REQUIRED_ENV_VARS:
+        monkeypatch.setenv(var, "x")
 
     def _boom(*a, **k):
         raise requests.exceptions.ProxyError("simulated network failure")

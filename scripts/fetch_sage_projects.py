@@ -67,13 +67,21 @@ def get_token() -> str:
     client_id = os.environ["INTACCT_CLIENT_ID"]
     client_secret = os.environ["INTACCT_CLIENT_SECRET"]
 
-    # OAuth2 client-credentials, RFC 6749 standard shape: client id/secret via
-    # HTTP Basic auth, grant_type in the form body. If Sage expects them in
-    # the body instead, this will come back 400/401 — see the module docstring.
+    # Confirmed live (2026-07-01, via destinations/sage_intacct.py): despite
+    # being a "client_credentials" grant, Sage's token endpoint also requires
+    # the Web Services User identifying itself in the body (400 "Either
+    # username or session_id is required" without it) — client_id/secret
+    # identify the app, username/password identify the authorized user.
+    data = {"grant_type": "client_credentials"}
+    if os.environ.get("INTACCT_USER_ID"):
+        data["username"] = os.environ["INTACCT_USER_ID"]
+    if os.environ.get("INTACCT_USER_PASSWORD"):
+        data["password"] = os.environ["INTACCT_USER_PASSWORD"]
+
     resp = requests.post(
         _TOKEN_URL,
         auth=(client_id, client_secret),
-        data={"grant_type": "client_credentials"},
+        data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=30,
     )
