@@ -30,12 +30,15 @@ import sys
 _INTERNAL_DOMAIN = "summitintegrated.com"
 
 
-def _is_external(ev: dict) -> bool:
+def _external_domains(ev: dict) -> list:
+    domains = []
     for att in ev.get("attendees", []):
         email = att.get("email", "")
-        if "@" in email and not email.endswith("@" + _INTERNAL_DOMAIN):
-            return True
-    return False
+        if "@" in email:
+            dom = email.split("@", 1)[1].lower()
+            if dom != _INTERNAL_DOMAIN and dom not in domains:
+                domains.append(dom)
+    return domains
 
 
 def fetch_calendar(svc, calendar_id: str, start: str, end: str) -> list:
@@ -56,6 +59,7 @@ def fetch_calendar(svc, calendar_id: str, start: str, end: str) -> list:
         for ev in resp.get("items", []):
             start_d = ev.get("start", {})
             end_d = ev.get("end", {})
+            domains = _external_domains(ev)
             events.append(
                 {
                     "summary": ev.get("summary", ""),
@@ -63,7 +67,8 @@ def fetch_calendar(svc, calendar_id: str, start: str, end: str) -> list:
                     "end": end_d.get("date") or end_d.get("dateTime", "")[:10],
                     "location": ev.get("location", ""),
                     "all_day": "date" in start_d,
-                    "external": _is_external(ev),
+                    "external": bool(domains),
+                    "domains": domains,
                 }
             )
         page_token = resp.get("nextPageToken")

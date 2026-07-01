@@ -41,6 +41,33 @@ def test_resolve_calendar_surfaces_client_context():
     assert "account" not in got               # personal calendars give context, not a code
 
 
+def test_match_project_unique_and_candidates():
+    registry = {
+        "registry": {"3428": {"client": "Northview Church"},
+                     "2630": {"client": "Life.Church"}, "3642": {"client": "Life.Church"}},
+        "index": {"northviewchurch": ["3428"], "lifechurch": ["2630", "3642"]},
+    }
+    # Unique client -> auto project + 52200
+    uniq = project_resolver.match_project(
+        [{"summary": "Northview Church - Camera Upgrade", "domains": []}], registry)
+    assert uniq["project"] == "3428" and uniq["account"] == "52200"
+    # Client via attendee domain with multiple codes -> candidates for review
+    multi = project_resolver.match_project(
+        [{"summary": "Studio C Bid", "domains": ["life.church"]}], registry)
+    assert "project" not in multi and multi["candidates"] == ["2630", "3642"]
+
+
+def test_resolve_calendar_registry_autocode():
+    registry = {"registry": {"3428": {"client": "Northview Church"}},
+                "index": {"northviewchurch": ["3428"]}}
+    cal = {"jdoe@summitintegrated.com": [
+        {"summary": "Northview Church - Install", "start": "2026-05-10", "end": "2026-05-12",
+         "location": "Carmel, IN", "all_day": False, "external": True, "domains": []}]}
+    got = project_resolver.resolve_calendar("jdoe@summitintegrated.com", date(2026, 5, 10), cal, registry)
+    assert got["project"] == "3428"
+    assert got["account"] == "52200"
+
+
 def test_resolve_calendar_no_match_returns_none():
     cal = {"andrew@summitintegrated.com": [
         {"summary": "Emails / Slack", "start": "2026-05-18", "end": "2026-05-18",

@@ -86,6 +86,7 @@ def enrich_united(
     schedule_index: dict | None = None,
     calendar_index: dict | None = None,
     roster: dict | None = None,
+    registry: dict | None = None,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
@@ -95,6 +96,8 @@ def enrich_united(
         calendar_index = _load_json("calendar_index.json") or {}
     if roster is None:
         roster = _load_json("roster.json") or {}
+    if registry is None:
+        registry = _load_json("project_registry.json") or {}
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -117,7 +120,7 @@ def enrich_united(
             li.note = "low-confidence department"
 
         # 1) Installers: pin project + 52200 COGS from the crew schedule.
-        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster)
+        resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry)
         if resolved and resolved.get("account"):
             li.gl_account = resolved["account"]
             if resolved.get("project"):
@@ -145,7 +148,7 @@ def enrich_united(
     return doc
 
 
-def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster):
+def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry):
     dep = _parse_date(li.raw.get("Departure Date"))
     if dep is None:
         return None
@@ -156,5 +159,5 @@ def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roste
     if calendar_index:
         owner = roster.get(entry.get("person", "")) or project_resolver.email_for(passenger)
         if owner:
-            return project_resolver.resolve_calendar(owner, dep, calendar_index)
+            return project_resolver.resolve_calendar(owner, dep, calendar_index, registry)
     return None

@@ -14,8 +14,13 @@ so it is easy to test.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import date, timedelta
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
 STAY_WINDOW_DAYS = 12  # departure through the likely length of a trip
 
@@ -95,12 +100,34 @@ def _travel_relevant(ev: dict) -> bool:
     return _looks_physical(ev.get("location", "")) or ev.get("all_day") or ev.get("external")
 
 
-def resolve_calendar(owner_key: str, dep: date, calendar_index: dict) -> dict | None:
-    """Surface trip-relevant events from the traveler's OWN calendar as context.
+def match_project(events: list, registry: dict) -> dict | None:
+    """Match calendar events to a project code via client name or client domain."""
+    index = registry.get("index", {})
+    reg = registry.get("registry", {})
+    codes: set = set()
+    for ev in events:
+        text = _normalize(ev.get("summary", ""))
+        haystacks = [text] + [_normalize(d) for d in ev.get("domains", [])]
+        for key, key_codes in index.items():
+            if any(key in h or h in key for h in haystacks if h):
+                codes.update(key_codes)
+    if not codes:
+        return None
+    if len(codes) == 1:
+        code = next(iter(codes))
+        client = reg.get(code, {}).get("client", "")
+        return {"project": code, "account": "52200",
+                "note": f"registry: {client} project {code} -> 52200 COGS"}
+    return {"candidates": sorted(codes),
+            "note": "registry: candidate projects " + ", ".join(sorted(codes)) + " — pick one"}
 
-    Personal calendars carry client names, not project codes, so this returns
-    review context (which client / where) rather than an account. The reviewer
-    codes it; a client->project registry can automate this later.
+
+def resolve_calendar(owner_key: str, dep: date, calendar_index: dict, registry: dict | None = None) -> dict | None:
+    """Surface trip-relevant events from the traveler's OWN calendar.
+
+    Returns review context (which client / where). If a client->project registry
+    is supplied and a single project matches, also returns project + 52200 so the
+    trip auto-codes; multiple matches are surfaced as candidates for review.
     """
     events = calendar_index.get(owner_key) or []
     hits = []
@@ -111,14 +138,26 @@ def resolve_calendar(owner_key: str, dep: date, calendar_index: dict) -> dict | 
             hits.append(ev)
     if not hits:
         return None
+
     parts = []
     for ev in hits[:2]:
         p = ev.get("summary", "")
         if ev.get("location") and _looks_physical(ev["location"]):
             p += f" @ {ev['location']}"
         parts.append(p)
-    return {
+    result = {
         "source": "calendar",
         "events": [h.get("summary", "") for h in hits],
-        "note": "calendar context — " + "; ".join(parts) + " — confirm client/account",
+        "note": "calendar context — " + "; ".join(parts),
     }
+
+    matched = match_project(hits, registry) if registry else None
+    if matched and matched.get("project"):
+        result["project"] = matched["project"]
+        result["account"] = matched["account"]
+        result["note"] += "; " + matched["note"]
+    elif matched:
+        result["note"] += "; " + matched["note"]
+    else:
+        result["note"] += " — confirm client/account"
+    return result
