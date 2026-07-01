@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import destinations, pipeline, review
+from . import destinations, pipeline, review, validate
 
 
 def _cmd_process(args: argparse.Namespace) -> int:
@@ -23,6 +23,12 @@ def _cmd_process(args: argparse.Namespace) -> int:
     print(review.render(doc, payload))
     proposal_path = review.save_proposal(doc, payload)
     print(f"\nProposal saved to: {proposal_path}")
+
+    issues = validate.validate(doc)
+    if issues:
+        print(f"\n{len(issues)} chart-of-accounts issue(s) to fix before posting:")
+        for msg in issues[:20]:
+            print(f"  - {msg}")
 
     flagged = [li for li in doc.line_items if li.needs_review]
     if flagged:

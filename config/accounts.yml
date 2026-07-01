@@ -3,7 +3,16 @@
 # (Non-PII — safe to commit. Employee->account history lives in data/, gitignored.)
 
 accounts:
-  "52200": "COGS Travel: Flights / Parking"     # billable — used when a project is assigned
+  # COGS Travel family (project-related travel) — confirmed from the GL chart.
+  "52200": "COGS Travel: Flights / Parking"
+  "52300": "COGS Travel: Hotel"
+  "52400": "COGS Travel: Meals"
+  "52410": "COGS Travel: Per Diem"
+  "52500": "COGS Travel: Mileage / Fuel"
+  "52600": "COGS Travel: Rental Car / Uber"       # National Car Rental (project)
+  "50200": "COGS Freight"
+  "51700": "COGS Shipping"                         # UPS (project)
+  # Overhead travel/sales/marketing.
   "62300": "OH - Licenses and Permits"
   "63100": "OH - Hiring/Recruiting"
   "64000": "OH - Personal Development"
@@ -11,9 +20,12 @@ accounts:
   "64301": "OH - Sales: Existing Client and New Project"
   "64302": "OH - Sales: New Client and New Project"
   "71000": "OH - Travel"
+  "71040": "OH - Meals / Per Diem"
   "73010": "OH - Marketing: Website / Social / Digital"
   "73060": "OH - Marketing: Events"
   "13000": "Employee Charges Receivable"
+  "91000": "Clearing"
+  "20000": "Accounts Payable"
 
 departments:
   "10": "Sales Team"
@@ -36,7 +48,7 @@ notes:
 # no hotel tax/incidental sub-accounts). Project stays -> COGS Travel: Hotel;
 # otherwise an overhead account chosen from the Project Name.
 hotel_engine:
-  cogs_travel_hotel: "COGS-TRAVEL-HOTEL"   # <-- TODO: replace with the real account number
+  cogs_travel_hotel: "52300"   # COGS Travel: Hotel (confirmed from the GL chart)
   overhead:
     hq:                    "71000"   # OH - Travel (also internal all-staff / sync-up gatherings)
     hiring:                "63100"   # OH - Hiring/Recruiting (new-hire onboarding travel)

@@ -33,21 +33,23 @@ rules:
 # Category -> GL account. `default_category` (sources.yml) and wide-layout
 # component categories resolve their account here.
 categories:
-  travel_airfare:                 { gl_account: "6100" }
-  travel_airfare_fees:            { gl_account: "6102" }
-  travel_baggage:                 { gl_account: "6103" }
-  travel_seat_fees:               { gl_account: "6104" }
-  travel_lodging:                 { gl_account: "6110" }
-  travel_lodging_taxes:           { gl_account: "6111" }
-  travel_lodging_fees:            { gl_account: "6112" }
-  travel_lodging_incidentals:     { gl_account: "6113" }
-  travel_lodging_flex:            { gl_account: "6114" }
-  travel_booking_fee:             { gl_account: "6115" }
-  travel_credits:                 { gl_account: "6119" }   # contra / credits earned back
-  travel_parking:                 { gl_account: "6120" }
-  travel_car_rental:              { gl_account: "6130" }
-  shipping_freight:               { gl_account: "5200" }
-  shipping_fuel_surcharge:        { gl_account: "5210" }
-  shipping_residential_surcharge: { gl_account: "5220" }
-  taxes:                          { gl_account: "6900" }
-  uncategorized:                  { gl_account: "9999" }
+  # Real GL accounts (from the Sage Intacct chart). Fee/tax components of a trip
+  # ride along with the trip's primary travel account.
+  travel_airfare:                 { gl_account: "52200" }   # COGS Travel: Flights / Parking
+  travel_airfare_fees:            { gl_account: "52200" }
+  travel_baggage:                 { gl_account: "52200" }
+  travel_seat_fees:               { gl_account: "52200" }
+  travel_parking:                 { gl_account: "52200" }
+  travel_lodging:                 { gl_account: "52300" }   # COGS Travel: Hotel
+  travel_lodging_taxes:           { gl_account: "52300" }
+  travel_lodging_fees:            { gl_account: "52300" }
+  travel_lodging_incidentals:     { gl_account: "52300" }
+  travel_lodging_flex:            { gl_account: "52300" }
+  travel_booking_fee:             { gl_account: "52300" }
+  travel_credits:                 { gl_account: "52300" }
+  travel_car_rental:              { gl_account: "52600" }   # COGS Travel: Rental Car / Uber
+  shipping_freight:               { gl_account: "50200" }   # COGS Freight
+  shipping_fuel_surcharge:        { gl_account: "50200" }
+  shipping_residential_surcharge: { gl_account: "50200" }
+  taxes:                          { gl_account: "52200" }
+  uncategorized:                  { gl_account: "99500" }   # Ask My Accountant

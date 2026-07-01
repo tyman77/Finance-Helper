@@ -29,8 +29,8 @@ def test_pipeline_builds_payload(source, expected):
 def test_ups_categorization_rules():
     doc = pipeline.process("ups", SAMPLES["ups"][0])
     by_desc = {li.description: li for li in doc.line_items}
-    assert by_desc["Fuel Surcharge"].gl_account == "5210"
-    assert by_desc["Residential Surcharge"].gl_account == "5220"
+    assert by_desc["Fuel Surcharge"].gl_account == "50200"      # COGS Freight
+    assert by_desc["Residential Surcharge"].gl_account == "50200"
 
 
 def test_hotel_engine_components_tie_to_total():
