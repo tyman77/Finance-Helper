@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import uuid
+from collections import Counter
 from datetime import datetime
 
 from flask import Flask, Response, flash, redirect, render_template, request, url_for
@@ -20,6 +22,41 @@ from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
 
 RUNS: dict[str, dict] = {}
+
+_CANDIDATES_RE = re.compile(
+    r"(?:registry: candidate projects|calendar title codes) ([\d, ]+) — pick one"
+)
+
+# Human labels for the status pill — order matters for the filter toolbar.
+STATUS_LABELS = {
+    "auto": "Auto-coded",
+    "pick": "Pick one",
+    "review": "Confirm hint",
+    "unknown": "Unknown traveler",
+}
+
+
+def _line_candidates(note: str | None) -> list[str]:
+    """Pull the candidate project codes out of a "— pick one" note, so the UI
+    can offer them as one-click buttons instead of making someone retype a
+    number out of a wall of text."""
+    m = _CANDIDATES_RE.search(note or "")
+    if not m:
+        return []
+    return [c.strip() for c in m.group(1).split(",") if c.strip()]
+
+
+def _line_status(li, candidates: list[str]) -> str:
+    """Classify a line for the status pill / filter toolbar, purely from
+    signals already on the line — no change to the underlying coding logic."""
+    note = li.note or ""
+    if "not found in history" in note:
+        return "unknown"
+    if candidates:
+        return "pick"
+    if li.project:
+        return "auto"
+    return "review"
 
 
 def _load_json_data(name: str) -> dict:
@@ -109,6 +146,15 @@ def create_app() -> Flask:
         issues_by_line: dict[int, list[str]] = {}
         for issue in validate.validate_lines(doc):
             issues_by_line.setdefault(issue["index"], []).append(issue["message"])
+
+        candidates_by_line = {i: _line_candidates(li.note) for i, li in enumerate(doc.line_items)}
+        candidates_by_line = {i: c for i, c in candidates_by_line.items() if c}
+        statuses = [_line_status(li, candidates_by_line.get(i, [])) for i, li in enumerate(doc.line_items)]
+        status_counts = Counter(statuses)
+
+        account_options = _account_options()
+        account_titles = dict(account_options)
+
         return render_template(
             "review.html",
             run_id=run_id,
@@ -116,9 +162,14 @@ def create_app() -> Flask:
             doc=doc,
             issues_by_line=issues_by_line,
             total_issues=sum(len(v) for v in issues_by_line.values()),
-            account_options=_account_options(),
+            account_options=account_options,
+            account_titles=account_titles,
             department_options=_department_options(),
             project_options=_project_options(),
+            candidates_by_line=candidates_by_line,
+            statuses=statuses,
+            status_counts=status_counts,
+            status_labels=STATUS_LABELS,
         )
 
     @app.post("/review/<run_id>/update")

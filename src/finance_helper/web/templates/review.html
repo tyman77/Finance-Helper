@@ -29,14 +29,20 @@
 </div>
 {% endif %}
 
+<div class="filters">
+  <button type="button" class="filter-btn active" data-filter="all">All ({{ doc.line_items|length }})</button>
+  {% for key in ["pick", "unknown", "review", "auto"] %}
+    {% if status_counts.get(key) %}
+    <button type="button" class="filter-btn status-{{ key }}" data-filter="{{ key }}">
+      {{ status_labels[key] }} ({{ status_counts[key] }})
+    </button>
+    {% endif %}
+  {% endfor %}
+</div>
+
 <datalist id="gl-accounts">
   {% for code, title in account_options %}
   <option value="{{ code }}">{{ code }} — {{ title }}</option>
-  {% endfor %}
-</datalist>
-<datalist id="departments">
-  {% for code, name in department_options %}
-  <option value="{{ code }}">{{ code }} — {{ name }}</option>
   {% endfor %}
 </datalist>
 <datalist id="projects">
@@ -51,32 +57,66 @@
   <thead>
     <tr>
       <th title="Needs review">⚑</th>
+      <th>Status</th>
       <th>Date</th>
       <th>Description</th>
       <th class="amt">Amount</th>
       <th>GL Account</th>
       <th>Dept</th>
       <th>Project</th>
-      <th>Note</th>
+      <th>Why / context</th>
     </tr>
   </thead>
   <tbody>
     {% for li in doc.line_items %}
-    <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if loop.index0 in issues_by_line else '' }}">
-      <td class="chk"><input type="checkbox" name="needs_review_{{ loop.index0 }}" {{ 'checked' if li.needs_review else '' }}></td>
+    {% set idx = loop.index0 %}
+    {% set status = statuses[idx] %}
+    <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}" data-status="{{ status }}">
+      <td class="chk"><input type="checkbox" name="needs_review_{{ idx }}" {{ 'checked' if li.needs_review else '' }}></td>
+      <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
       <td class="nowrap">{{ li.date or '' }}</td>
       <td class="desc" title="{{ li.description }}">{{ li.description }}</td>
       <td class="amt">{{ li.amount }}</td>
-      <td><input type="text" list="gl-accounts" name="gl_account_{{ loop.index0 }}" value="{{ li.gl_account or '' }}" size="7"></td>
-      <td><input type="text" list="departments" name="department_{{ loop.index0 }}" value="{{ li.department or '' }}" size="4"></td>
-      <td><input type="text" list="projects" name="project_{{ loop.index0 }}" value="{{ li.project or '' }}" size="6"></td>
+      <td>
+        <input type="text" list="gl-accounts" name="gl_account_{{ idx }}" value="{{ li.gl_account or '' }}" size="7">
+        {% if li.gl_account and account_titles.get(li.gl_account) %}
+          <div class="hint">{{ account_titles[li.gl_account] }}</div>
+        {% endif %}
+      </td>
+      <td>
+        <select name="department_{{ idx }}">
+          <option value="">—</option>
+          {% for code, name in department_options %}
+          <option value="{{ code }}" {{ 'selected' if code == li.department else '' }}>{{ code }} — {{ name }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>
+        <input type="text" list="projects" name="project_{{ idx }}" value="{{ li.project or '' }}" size="6">
+        {% if candidates_by_line.get(idx) %}
+          <div class="candidates">
+            {% for code in candidates_by_line[idx] %}
+            <button type="button" class="chip" data-fill="project_{{ idx }}" data-value="{{ code }}">{{ code }}</button>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </td>
       <td class="note">
-        {% if loop.index0 in issues_by_line %}
+        {% if idx in issues_by_line %}
           <ul class="issues">
-            {% for msg in issues_by_line[loop.index0] %}<li>{{ msg }}</li>{% endfor %}
+            {% for msg in issues_by_line[idx] %}<li>{{ msg }}</li>{% endfor %}
           </ul>
         {% endif %}
-        <span class="reason">{{ li.note or '' }}</span>
+        {% if li.note %}
+          {% set parts = li.note.split('; ') %}
+          <span class="reason">{{ parts[0] }}</span>
+          {% if parts|length > 1 %}
+          <details>
+            <summary>more detail</summary>
+            {{ parts[1:]|join('; ') }}
+          </details>
+          {% endif %}
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -95,4 +135,6 @@
   </form>
   <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
 </div>
+
+<script src="{{ url_for('static', filename='review.js') }}"></script>
 {% endblock %}

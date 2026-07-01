@@ -6,10 +6,13 @@ of the real, gitignored vendor exports.
 
 import io
 import re
+from datetime import datetime
+from decimal import Decimal
 
 import pytest
 
-from finance_helper.web.app import RUNS, create_app
+from finance_helper.models import LineItem, SourceDocument
+from finance_helper.web.app import RUNS, _line_candidates, _line_status, create_app
 
 
 @pytest.fixture
@@ -95,7 +98,9 @@ def test_editing_a_line_persists_and_affects_validation(client, monkeypatch, tmp
     client.post(f"/review/{run_id}/update", data=fields)
     body3 = client.get(f"/review/{run_id}").data.decode()
     assert re.search(r"account 71000.*requires a department", body3) is None
-    assert 'name="department_0" value="40"' in body3
+    # Department is a <select>; confirm "40" is the one marked selected.
+    dept_select = re.search(r'name="department_0">(.*?)</select>', body3, re.S).group(1)
+    assert re.search(r'value="40"[^>]*selected', dept_select)
 
 
 def test_approve_without_credentials_shows_clean_failure(client):
@@ -122,3 +127,72 @@ def test_unknown_run_id_redirects_home(client):
     resp = client.get("/review/does-not-exist")
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/")
+
+
+# --- Status/candidate classification (the readability improvements) -------
+
+def test_line_candidates_extracts_registry_and_title_code_forms():
+    assert _line_candidates(
+        "account hint '52200--x' (used 90% of trips) — confirm project/COGS; "
+        "registry: candidate projects 2626, 2630, 3063 — pick one"
+    ) == ["2626", "2630", "3063"]
+    assert _line_candidates("calendar title codes 4471, 3831 — pick one") == ["4471", "3831"]
+    assert _line_candidates("crew schedule: project 4499 during stay -> 52200 COGS") == []
+    assert _line_candidates(None) == []
+
+
+def test_line_status_priority_order():
+    unknown = LineItem(description="x", amount=Decimal("1"),
+                        note="traveler not found in history — assign department & account")
+    assert _line_status(unknown, []) == "unknown"
+
+    pick = LineItem(description="x", amount=Decimal("1"), note="... — pick one")
+    assert _line_status(pick, ["4471", "3831"]) == "pick"
+
+    auto = LineItem(description="x", amount=Decimal("1"), project="4804",
+                     note="crew schedule: project 4804 during stay -> 52200 COGS")
+    assert _line_status(auto, []) == "auto"
+
+    review = LineItem(description="x", amount=Decimal("1"),
+                       note="account hint '52200--x' (used 50% of trips) — confirm project/COGS")
+    assert _line_status(review, []) == "review"
+
+
+def test_review_page_renders_status_pills_filters_and_candidate_chips(client):
+    doc = SourceDocument(
+        source="united", destination="sage", vendor="United Airlines",
+        document_id="TEST-1", currency="USD",
+        line_items=[
+            LineItem(description="Known trip", amount=Decimal("100"), gl_account="52200",
+                     department="60", project="4804",
+                     note="crew schedule: project 4804 during stay -> 52200 COGS"),
+            LineItem(description="Ambiguous client", amount=Decimal("200"), gl_account="52200",
+                     note="account hint '52200--x' (used 90% of trips) — confirm project/COGS; "
+                          "registry: candidate projects 2626, 3063 — pick one"),
+            LineItem(description="Nobody", amount=Decimal("8"),
+                     note="traveler not found in history — assign department & account"),
+        ],
+    )
+    RUNS["fixture-run"] = {"doc": doc, "source": "united", "filename": "x.csv",
+                            "created": datetime.now(), "posted": None}
+
+    resp = client.get("/review/fixture-run")
+    body = resp.data.decode()
+
+    # Status pills for each classification actually present.
+    assert 'status-auto">Auto-coded' in body
+    assert 'status-pick">Pick one' in body
+    assert 'status-unknown">Unknown traveler' in body
+
+    # Filter toolbar shows the right counts, only for statuses present.
+    assert 'data-filter="pick">' in body and "Pick one (1)" in body
+    assert 'data-filter="unknown">' in body and "Unknown traveler (1)" in body
+    assert 'data-filter="review"' not in body  # none of these lines are in "review"
+
+    # Candidate chips are clickable buttons wired to fill the right field.
+    assert 'data-fill="project_1" data-value="2626"' in body
+    assert 'data-fill="project_1" data-value="3063"' in body
+
+    # Department select, not a free-text input.
+    assert '<select name="department_0">' in body
+    assert re.search(r'value="60"[^>]*selected', body)
