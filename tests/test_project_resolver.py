@@ -25,6 +25,60 @@ def test_resolve_schedule_picks_project_during_stay():
     assert got["account"] == "52200"
 
 
+def test_extract_leading_codes_common_formats():
+    assert project_resolver.extract_leading_codes("4804 - Echo Church - Ready to Finish") == ["4804"]
+    assert project_resolver.extract_leading_codes("5084 | Westfield Sync up") == ["5084"]
+    assert project_resolver.extract_leading_codes("3335 - LifeChurch PKR - Phase Gate") == ["3335"]
+    assert project_resolver.extract_leading_codes("4798") == ["4798"]
+    assert project_resolver.extract_leading_codes("Lunch") == []
+
+
+def test_extract_leading_codes_year_range_is_not_a_code():
+    assert project_resolver.extract_leading_codes(
+        "2025–2026 High-Value Projects: Scope & Travel Review") == []
+    assert project_resolver.extract_leading_codes("2025-2026 Planning") == []
+
+
+def test_extract_leading_codes_slash_pair_is_ambiguous():
+    assert project_resolver.extract_leading_codes("4471/3831 Combined trip") == ["4471", "3831"]
+
+
+def test_resolve_calendar_title_code_autocodes_without_registry():
+    """A literal project-code prefix should resolve even with no location/
+    external attendees and no registry — this was the real Lynette/Echo
+    Church case: the event had no location, wasn't marked external, and
+    wasn't all-day, so it never reached the noise-filtered "hits" path."""
+    cal = {"rlynette@summitintegrated.com": [
+        {"summary": "4804 - Echo Church - Ready to Finish", "start": "2026-05-01",
+         "end": "2026-05-01", "location": "", "all_day": False, "external": False, "domains": []},
+    ]}
+    got = project_resolver.resolve_calendar("rlynette@summitintegrated.com", date(2026, 5, 1), cal)
+    assert got["project"] == "4804"
+    assert got["account"] == "52200"
+
+
+def test_resolve_calendar_title_code_ignores_year_range_noise():
+    cal = {"x@summitintegrated.com": [
+        {"summary": "2025–2026 High-Value Projects: Scope & Travel Review",
+         "start": "2026-05-01", "end": "2026-05-01", "location": "",
+         "all_day": False, "external": False, "domains": []},
+    ]}
+    got = project_resolver.resolve_calendar("x@summitintegrated.com", date(2026, 5, 1), cal)
+    assert got is None    # no travel-relevant signal at all, correctly falls through
+
+
+def test_resolve_calendar_multiple_title_codes_are_candidates():
+    cal = {"x@summitintegrated.com": [
+        {"summary": "4471 - Site A", "start": "2026-05-01", "end": "2026-05-01",
+         "location": "", "all_day": False, "external": False, "domains": []},
+        {"summary": "3831 - Site B", "start": "2026-05-02", "end": "2026-05-02",
+         "location": "", "all_day": False, "external": False, "domains": []},
+    ]}
+    got = project_resolver.resolve_calendar("x@summitintegrated.com", date(2026, 5, 1), cal)
+    assert "project" not in got
+    assert got["candidates"] == ["3831", "4471"]
+
+
 def test_resolve_calendar_surfaces_client_context():
     cal = {
         "andrew@summitintegrated.com": [

@@ -100,6 +100,35 @@ def _travel_relevant(ev: dict) -> bool:
     return _looks_physical(ev.get("location", "")) or ev.get("all_day") or ev.get("external")
 
 
+_LEADING_CODE = re.compile(r"^\s*(\d{3,5})\b")
+_YEAR_RANGE = re.compile(r"^\s*\d{4}\s*[–—-]\s*\d{4}\b")  # "2025–2026 ..." (not a code)
+
+
+def extract_leading_codes(summary: str) -> list[str]:
+    """Pull explicit project code(s) from a calendar event title.
+
+    The team's convention prefixes trip-related events with the project number
+    — "4804 - Echo Church - Ready to Finish", "5084 | Westfield Sync up", or a
+    bare "4798". This is a stronger, more literal signal than fuzzy client-name
+    matching, so it's checked first and isn't subject to the internal-noise
+    filter (nobody titles an internal meeting "4804 Lunch").
+
+    Returns [] for a "2025–2026 ..." year-range false positive, and two codes
+    for an explicit multi-project title like "4471/3831 ...".
+    """
+    s = (summary or "").strip()
+    if _YEAR_RANGE.match(s):
+        return []
+    m = _LEADING_CODE.match(s)
+    if not m:
+        return []
+    codes = [m.group(1)]
+    m2 = re.match(rf"^\s*{re.escape(m.group(1))}\s*/\s*(\d{{3,5}})\b", s)
+    if m2:
+        codes.append(m2.group(1))
+    return codes
+
+
 def match_project(events: list, registry: dict) -> dict | None:
     """Match calendar events to a project code via client name or client domain."""
     index = registry.get("index", {})
@@ -130,12 +159,39 @@ def resolve_calendar(owner_key: str, dep: date, calendar_index: dict, registry: 
     trip auto-codes; multiple matches are surfaced as candidates for review.
     """
     events = calendar_index.get(owner_key) or []
-    hits = []
+    window = []
     for ev in events:
         start = date.fromisoformat(ev["start"][:10])
         end = date.fromisoformat(ev["end"][:10])
-        if start - timedelta(days=1) <= dep <= end + timedelta(days=STAY_WINDOW_DAYS) and _travel_relevant(ev):
-            hits.append(ev)
+        if start - timedelta(days=1) <= dep <= end + timedelta(days=STAY_WINDOW_DAYS):
+            window.append(ev)
+    if not window:
+        return None
+
+    # Strongest signal first: an explicit project code prefix on the title,
+    # checked against every event in the window (bypasses the noise filter).
+    title_codes: set = set()
+    title_hits = []
+    for ev in window:
+        codes = extract_leading_codes(ev.get("summary", ""))
+        if codes:
+            title_codes.update(codes)
+            title_hits.append(ev)
+    if len(title_codes) == 1:
+        code = next(iter(title_codes))
+        return {
+            "source": "calendar", "project": code, "account": "52200",
+            "events": [h.get("summary", "") for h in title_hits],
+            "note": f"calendar title code {code} -> 52200 COGS",
+        }
+    if len(title_codes) > 1:
+        return {
+            "source": "calendar", "candidates": sorted(title_codes),
+            "events": [h.get("summary", "") for h in title_hits],
+            "note": "calendar title codes " + ", ".join(sorted(title_codes)) + " — pick one",
+        }
+
+    hits = [ev for ev in window if _travel_relevant(ev)]
     if not hits:
         return None
 
