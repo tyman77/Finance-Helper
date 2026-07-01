@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from dotenv import find_dotenv, load_dotenv
+
 from . import destinations, pipeline, review, validate
 
 
@@ -49,6 +51,10 @@ def _cmd_process(args: argparse.Namespace) -> int:
 
 
 def main(argv=None) -> int:
+    # usecwd=True: search from wherever the command is actually run, not from
+    # this installed package's location — load_dotenv()'s default searches
+    # relative to the caller's file, which would look inside src/finance_helper/.
+    load_dotenv(find_dotenv(usecwd=True))
     parser = argparse.ArgumentParser(prog="finance_helper")
     sub = parser.add_subparsers(dest="command", required=True)
 

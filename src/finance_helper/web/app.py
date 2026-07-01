@@ -16,10 +16,15 @@ import uuid
 from collections import Counter
 from datetime import datetime
 
+from dotenv import find_dotenv, load_dotenv
 from flask import Flask, Response, flash, redirect, render_template, request, url_for
 
 from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
+
+# usecwd=True: search from wherever the server is actually started, not from
+# this installed package's location (see cli.py's main() for the same fix).
+load_dotenv(find_dotenv(usecwd=True))
 
 RUNS: dict[str, dict] = {}
 

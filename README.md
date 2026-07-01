@@ -60,6 +60,14 @@ python -m finance_helper process --source ups --file samples/ups_sample.csv --ap
 Nothing is ever sent to Sage or Bill.com without `--approve` **and** valid
 credentials. Without them, you get a saved proposal JSON in `out/` to eyeball.
 
+To post for real, put credentials in a `.env` file — **don't `export` them in
+your shell**, that's easy to mistype/leave stale. Copy the template and fill
+it in with a text editor:
+```bash
+cp .env.example .env
+```
+`.env` is loaded automatically and is gitignored, so it never gets committed.
+
 ## Web UI
 
 A local review UI wraps the exact same pipeline — upload a CSV, see the
