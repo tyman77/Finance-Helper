@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Review — {{ doc.vendor }} {{ doc.document_id }}{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Back</a>
+
+<div class="review-header">
+  <h1>{{ doc.vendor }} &rarr; {{ 'Sage Intacct (journal entry)' if doc.destination == 'sage' else 'Bill.com (bill)' }}</h1>
+  <dl class="meta">
+    <div><dt>Document</dt><dd>{{ doc.document_id }}</dd></div>
+    <div><dt>Date</dt><dd>{{ doc.document_date or '—' }}</dd></div>
+    <div><dt>Total</dt><dd class="amt">{{ doc.total }} {{ doc.currency }}</dd></div>
+    <div><dt>Lines</dt><dd>{{ doc.line_items|length }}</dd></div>
+  </dl>
+</div>
+
+{% if run.posted %}
+  {% if run.posted.ok %}
+    <div class="banner ok"><strong>Posted.</strong> {{ run.posted.detail }}</div>
+  {% else %}
+    <div class="banner err"><strong>Not posted.</strong> {{ run.posted.detail }}</div>
+  {% endif %}
+{% endif %}
+
+{% if total_issues %}
+<div class="banner warn">
+  <strong>{{ total_issues }} chart-of-accounts issue{{ 's' if total_issues != 1 else '' }}</strong>
+  — rows are outlined in red below.
+</div>
+{% endif %}
+
+<datalist id="gl-accounts">
+  {% for code, title in account_options %}
+  <option value="{{ code }}">{{ code }} — {{ title }}</option>
+  {% endfor %}
+</datalist>
+<datalist id="departments">
+  {% for code, name in department_options %}
+  <option value="{{ code }}">{{ code }} — {{ name }}</option>
+  {% endfor %}
+</datalist>
+<datalist id="projects">
+  {% for code, client in project_options %}
+  <option value="{{ code }}">{{ code }} — {{ client }}</option>
+  {% endfor %}
+</datalist>
+
+<form method="post" action="{{ url_for('update_line', run_id=run_id) }}">
+<div class="table-wrap">
+<table class="review-table">
+  <thead>
+    <tr>
+      <th title="Needs review">⚑</th>
+      <th>Date</th>
+      <th>Description</th>
+      <th class="amt">Amount</th>
+      <th>GL Account</th>
+      <th>Dept</th>
+      <th>Project</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for li in doc.line_items %}
+    <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if loop.index0 in issues_by_line else '' }}">
+      <td class="chk"><input type="checkbox" name="needs_review_{{ loop.index0 }}" {{ 'checked' if li.needs_review else '' }}></td>
+      <td class="nowrap">{{ li.date or '' }}</td>
+      <td class="desc" title="{{ li.description }}">{{ li.description }}</td>
+      <td class="amt">{{ li.amount }}</td>
+      <td><input type="text" list="gl-accounts" name="gl_account_{{ loop.index0 }}" value="{{ li.gl_account or '' }}" size="7"></td>
+      <td><input type="text" list="departments" name="department_{{ loop.index0 }}" value="{{ li.department or '' }}" size="4"></td>
+      <td><input type="text" list="projects" name="project_{{ loop.index0 }}" value="{{ li.project or '' }}" size="6"></td>
+      <td class="note">
+        {% if loop.index0 in issues_by_line %}
+          <ul class="issues">
+            {% for msg in issues_by_line[loop.index0] %}<li>{{ msg }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        <span class="reason">{{ li.note or '' }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="actions">
+  <button type="submit">Save changes</button>
+</div>
+</form>
+
+<div class="actions">
+  <form method="post" action="{{ url_for('approve', run_id=run_id) }}"
+        onsubmit="return confirm('Post this to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Save changes first if you edited anything.');">
+    <button type="submit" class="approve">Approve &amp; Post</button>
+  </form>
+  <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
+</div>
+{% endblock %}

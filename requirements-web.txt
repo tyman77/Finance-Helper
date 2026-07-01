@@ -1,0 +1,2 @@
+# Only needed to run the local review UI: python -m finance_helper.web
+Flask>=3.0

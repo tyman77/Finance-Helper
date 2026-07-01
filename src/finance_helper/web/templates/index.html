@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Finance Helper — Upload{% endblock %}
+{% block content %}
+<h1>Process a vendor statement</h1>
+<p class="subtle">Upload a CSV, review the proposed coding, then approve. Nothing
+posts anywhere until you click Approve &amp; Post — and that will refuse to run
+without real API credentials configured.</p>
+
+<form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data" class="upload-form">
+  <label>
+    Source
+    <select name="source" required>
+      <option value="" disabled selected>Choose a source…</option>
+      {% for key, cfg in sources.items() %}
+        <option value="{{ key }}">
+          {{ cfg.get('display_name', key) }} &rarr;
+          {{ 'Sage Intacct' if cfg.destination == 'sage' else 'Bill.com' }}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    CSV file
+    <input type="file" name="file" accept=".csv" required>
+  </label>
+  <button type="submit">Process</button>
+</form>
+
+{% if recent %}
+<h2>Recent runs (this session)</h2>
+<table class="runs">
+  <thead>
+    <tr><th>Vendor</th><th>File</th><th>Document</th><th class="amt">Total</th><th>Processed</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for run_id, run in recent %}
+    <tr>
+      <td>{{ run.doc.vendor }}</td>
+      <td>{{ run.filename }}</td>
+      <td>{{ run.doc.document_id }}</td>
+      <td class="amt">{{ run.doc.total }} {{ run.doc.currency }}</td>
+      <td>{{ run.created.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><a href="{{ url_for('review_page', run_id=run_id) }}">Open →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

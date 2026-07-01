@@ -9,6 +9,9 @@ description = "Vendor CSV -> categorized entries -> Sage Intacct / Bill.com"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0", "requests>=2.31"]
 
+[project.optional-dependencies]
+web = ["Flask>=3.0"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

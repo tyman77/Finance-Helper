@@ -60,6 +60,32 @@ python -m finance_helper process --source ups --file samples/ups_sample.csv --ap
 Nothing is ever sent to Sage or Bill.com without `--approve` **and** valid
 credentials. Without them, you get a saved proposal JSON in `out/` to eyeball.
 
+## Web UI
+
+A local review UI wraps the exact same pipeline — upload a CSV, see the
+proposed entry as an editable table, fix any flagged GL account/department/
+project inline, then Approve & Post (same safety net as `--approve`: it
+refuses without real credentials).
+
+```bash
+pip install -r requirements-web.txt
+PYTHONPATH=src python -m finance_helper.web        # http://127.0.0.1:5000
+```
+
+- Upload a CSV and pick its source; the review table shows every line with its
+  amount, GL account, department, and project — flagged (⚑) rows and chart-
+  of-accounts validation issues (e.g. "requires a department") are highlighted.
+- Edit any coding field (autocomplete from the real chart of accounts, once
+  fetched) and **Save changes** — this re-runs validation live.
+- **Download proposal JSON** gets you the exact payload that would post.
+- Runs live in memory for the life of the process (a local, single-user tool,
+  not a multi-tenant service) — restarting the server clears the list of
+  in-progress runs, though anything already approved is still written to
+  `out/` as usual.
+
+Override the host/port/debug via `FINANCE_HELPER_WEB_HOST` /
+`FINANCE_HELPER_WEB_PORT` / `FINANCE_HELPER_WEB_DEBUG`.
+
 ## United traveler coding (learned from history)
 
 United tickets are enriched from your historical coding. Regenerate the map from
