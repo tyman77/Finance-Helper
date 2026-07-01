@@ -73,7 +73,7 @@ _CAL_CTX_RE = re.compile(r"(?:; )?calendar context — (.+?)(?=; registry: |$)")
 
 _NOTE_RULES: list[tuple[re.Pattern, object]] = [
     (re.compile(r"^account hint '(\d+)--[^']*' \(used (\d+)% of trips\) — confirm project/COGS$"),
-     lambda m: f"Historically coded to {m.group(1)} ({m.group(2)}% of past trips)"),
+     lambda m: f"Usually {m.group(1)} ({m.group(2)}% of trips)"),
     (re.compile(r"^crew schedule: project (\S+) during stay -> 52200 COGS$"),
      lambda m: f"Crew schedule: project {m.group(1)}"),
     (re.compile(r"^calendar title code (\S+) -> 52200 COGS$"),
@@ -83,9 +83,9 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
     (re.compile(r"^(?:registry: candidate projects|calendar title codes) .+ — pick one$"),
      lambda m: "Multiple possible projects — pick one below"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
-     lambda m: "No historical match — assign manually"),
+     lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),
-     lambda m: "⚠ matched by surname only, not an exact name match"),
+     lambda m: "⚠ surname match only"),
     (re.compile(r"^low-confidence department$"),
      lambda m: "⚠ low-confidence department match"),
     (re.compile(r"^HE '(.+)' -> project (\S+) \(COGS Travel: Hotel\)$"),

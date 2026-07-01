@@ -210,7 +210,7 @@ def test_format_note_account_hint_only():
     got = _format_note(
         "account hint '52200--COGS Travel: Flights / Parking' (used 100% of trips) — confirm project/COGS"
     )
-    assert got["summary"] == "Historically coded to 52200 (100% of past trips)"
+    assert got["summary"] == "Usually 52200 (100% of trips)"
     assert got["details"] == []
 
 
@@ -222,7 +222,7 @@ def test_format_note_candidates_with_calendar_events_real_case():
         "Remote (Office); registry: candidate projects 3190, 3458, 4048, 4195, 4211 — pick one"
     )
     got = _format_note(note)
-    assert got["summary"] == "Historically coded to 52200 (39% of past trips)"
+    assert got["summary"] == "Usually 52200 (39% of trips)"
     assert "Multiple possible projects — pick one below" in got["details"]
     # Both calendar events preserved, not merged/lost by the "; " collision
     # with the registry segment that follows them.
@@ -238,7 +238,7 @@ def test_format_note_calendar_context_no_registry_match():
         "Breakaway INSTALL Kickoff 3138 — confirm client/account"
     )
     got = _format_note(note)
-    assert got["summary"] == "Historically coded to 52200 (100% of past trips)"
+    assert got["summary"] == "Usually 52200 (100% of trips)"
     cal_detail = next(d for d in got["details"] if d.startswith("Calendar:"))
     assert "Happy Hour!" in cal_detail and "Breakaway INSTALL Kickoff 3138" in cal_detail
     assert "confirm client/account" not in cal_detail  # trailing instruction stripped, not shown as an "event"
@@ -248,7 +248,7 @@ def test_format_note_surname_only_caveat_preserved():
     got = _format_note(
         "account hint '52200--x' (used 92% of trips) — confirm project/COGS; matched by surname only"
     )
-    assert any("surname only" in d for d in got["details"])
+    assert any("surname" in d for d in got["details"])
 
 
 def test_format_note_unrecognized_segment_shown_verbatim():

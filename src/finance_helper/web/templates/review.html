@@ -54,6 +54,17 @@
 <form method="post" action="{{ url_for('update_line', run_id=run_id) }}">
 <div class="table-wrap">
 <table class="review-table">
+  <colgroup>
+    <col style="width: 3%">   {# flag checkbox #}
+    <col style="width: 8%">   {# status pill #}
+    <col style="width: 6%">   {# date #}
+    <col style="width: 14%">  {# description + matched name #}
+    <col style="width: 6%">   {# amount #}
+    <col style="width: 10%">  {# GL account + title #}
+    <col style="width: 12%">  {# department select #}
+    <col style="width: 10%">  {# project + candidate chips #}
+    <col style="width: 31%">  {# why / context #}
+  </colgroup>
   <thead>
     <tr>
       <th title="Needs review">⚑</th>
