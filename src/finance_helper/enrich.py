@@ -19,7 +19,6 @@ import json
 import os
 import re
 from datetime import date, datetime
-from functools import lru_cache
 
 import yaml
 
@@ -32,8 +31,10 @@ _DATA_DIR = os.environ.get(
 _DEPT_CONF_MIN = 0.9   # department is trusted above this
 
 
-@lru_cache(maxsize=4)
 def load_traveler_map(path: str) -> dict:
+    """Not cached: the web UI is a long-running process, and re-reading this
+    small file each time means a freshly (re)generated map is picked up
+    immediately, without requiring a server restart."""
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
