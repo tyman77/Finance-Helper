@@ -59,6 +59,87 @@ def _line_status(li, candidates: list[str]) -> str:
     return "review"
 
 
+# --- Human-readable note formatting ----------------------------------------
+#
+# enrich.py builds `li.note` by concatenating several distinct facts with
+# "; " for the CLI's plain-text output. The calendar-context piece uses that
+# same separator internally for its own event list, so a naive split blurs
+# "here's why" together with "here's the raw calendar data" and repeats
+# information already shown elsewhere in the row (the account title, the
+# candidate codes). This rewrites each known segment into a short phrase and
+# routes calendar events into their own bucket, instead of parsing prose.
+
+_CAL_CTX_RE = re.compile(r"(?:; )?calendar context — (.+?)(?=; registry: |$)")
+
+_NOTE_RULES: list[tuple[re.Pattern, object]] = [
+    (re.compile(r"^account hint '(\d+)--[^']*' \(used (\d+)% of trips\) — confirm project/COGS$"),
+     lambda m: f"Historically coded to {m.group(1)} ({m.group(2)}% of past trips)"),
+    (re.compile(r"^crew schedule: project (\S+) during stay -> 52200 COGS$"),
+     lambda m: f"Crew schedule: project {m.group(1)}"),
+    (re.compile(r"^calendar title code (\S+) -> 52200 COGS$"),
+     lambda m: f"Calendar: project {m.group(1)}"),
+    (re.compile(r"^registry: (.+) project (\S+) -> 52200 COGS$"),
+     lambda m: f'Matched client "{m.group(1)}": project {m.group(2)}'),
+    (re.compile(r"^(?:registry: candidate projects|calendar title codes) .+ — pick one$"),
+     lambda m: "Multiple possible projects — pick one below"),
+    (re.compile(r"^traveler not found in history — assign department & account$"),
+     lambda m: "No historical match — assign manually"),
+    (re.compile(r"^matched by surname only$"),
+     lambda m: "⚠ matched by surname only, not an exact name match"),
+    (re.compile(r"^low-confidence department$"),
+     lambda m: "⚠ low-confidence department match"),
+    (re.compile(r"^HE '(.+)' -> project (\S+) \(COGS Travel: Hotel\)$"),
+     lambda m: f'"{m.group(1)}" → project {m.group(2)} (COGS Travel: Hotel)'),
+    (re.compile(r"^HE '(.+)'$"),
+     lambda m: f'"{m.group(1)}"'),
+    (re.compile(r"^overhead (\S+)$"),
+     lambda m: f"Overhead account: {m.group(1)}"),
+    (re.compile(r"^UPS -> project (\S+) via (.+) \(COGS Shipping\)$"),
+     lambda m: f"Matched via {m.group(2)}: project {m.group(1)}"),
+    (re.compile(r"^UPS overhead ref '(.*)' -> (\S+)( \(needs department\))?$"),
+     lambda m: f'Overhead ref "{m.group(1)}": {m.group(2)}'
+               + (" — needs a department" if m.group(3) else "")),
+]
+
+
+def _extract_calendar_events(note: str) -> tuple[str, list[str]]:
+    """Pull the "calendar context — E1; E2[...]" chunk out of a note string
+    (it's embedded with the same "; " separator as everything else), leaving
+    the rest of the note intact for normal segment-by-segment formatting."""
+    m = _CAL_CTX_RE.search(note)
+    if not m:
+        return note, []
+    raw = re.sub(r" — confirm client/account$", "", m.group(1))
+    events = [e.strip() for e in raw.split("; ") if e.strip()]
+    return _CAL_CTX_RE.sub("", note, count=1), events
+
+
+def _format_note(note: str | None) -> dict:
+    """{"summary": <first, most important fact>, "details": [<everything
+    else>, ...]} — the template shows summary always, details behind a
+    <details> toggle. Any segment that doesn't match a known pattern is
+    still shown verbatim (as a safety net) rather than silently dropped."""
+    if not note:
+        return {"summary": "", "details": []}
+    remaining, calendar_events = _extract_calendar_events(note)
+    parts: list[str] = []
+    for segment in remaining.split("; "):
+        segment = segment.strip("; ").strip()
+        if not segment:
+            continue
+        for pattern, transform in _NOTE_RULES:
+            m = pattern.match(segment)
+            if m:
+                parts.append(transform(m))
+                break
+        else:
+            parts.append(segment)
+    details = parts[1:]
+    if calendar_events:
+        details.append("Calendar: " + "; ".join(calendar_events))
+    return {"summary": parts[0] if parts else "", "details": details}
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -151,6 +232,7 @@ def create_app() -> Flask:
         candidates_by_line = {i: c for i, c in candidates_by_line.items() if c}
         statuses = [_line_status(li, candidates_by_line.get(i, [])) for i, li in enumerate(doc.line_items)]
         status_counts = Counter(statuses)
+        notes = [_format_note(li.note) for li in doc.line_items]
 
         account_options = _account_options()
         account_titles = dict(account_options)
@@ -170,6 +252,7 @@ def create_app() -> Flask:
             statuses=statuses,
             status_counts=status_counts,
             status_labels=STATUS_LABELS,
+            notes=notes,
         )
 
     @app.post("/review/<run_id>/update")

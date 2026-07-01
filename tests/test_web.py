@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 
 from finance_helper.models import LineItem, SourceDocument
-from finance_helper.web.app import RUNS, _line_candidates, _line_status, create_app
+from finance_helper.web.app import RUNS, _format_note, _line_candidates, _line_status, create_app
 
 
 @pytest.fixture
@@ -196,3 +196,62 @@ def test_review_page_renders_status_pills_filters_and_candidate_chips(client):
     # Department select, not a free-text input.
     assert '<select name="department_0">' in body
     assert re.search(r'value="60"[^>]*selected', body)
+
+
+# --- Note formatting: real strings pulled from an actual review session ---
+
+def test_format_note_simple_schedule_hit():
+    got = _format_note("crew schedule: project 4499 during stay -> 52200 COGS")
+    assert got["summary"] == "Crew schedule: project 4499"
+    assert got["details"] == []
+
+
+def test_format_note_account_hint_only():
+    got = _format_note(
+        "account hint '52200--COGS Travel: Flights / Parking' (used 100% of trips) — confirm project/COGS"
+    )
+    assert got["summary"] == "Historically coded to 52200 (100% of past trips)"
+    assert got["details"] == []
+
+
+def test_format_note_candidates_with_calendar_events_real_case():
+    # The exact note behind the Cody/Jacoblee row from a real review session.
+    note = (
+        "account hint '52200--COGS Travel: Flights / Parking' (used 39% of trips) "
+        "— confirm project/COGS; calendar context — Traders Point MLC Commissioning; "
+        "Remote (Office); registry: candidate projects 3190, 3458, 4048, 4195, 4211 — pick one"
+    )
+    got = _format_note(note)
+    assert got["summary"] == "Historically coded to 52200 (39% of past trips)"
+    assert "Multiple possible projects — pick one below" in got["details"]
+    # Both calendar events preserved, not merged/lost by the "; " collision
+    # with the registry segment that follows them.
+    assert any("Traders Point MLC Commissioning" in d and "Remote (Office)" in d for d in got["details"])
+    assert not any("registry: candidate" in d for d in got["details"])  # replaced, not duplicated
+
+
+def test_format_note_calendar_context_no_registry_match():
+    # The Hargadine row: no registry hit at all, ends in "— confirm client/account".
+    note = (
+        "account hint '52200--COGS Travel: Flights / Parking' (used 100% of trips) "
+        "— confirm project/COGS; calendar context — Happy Hour! (3:45pm in person, 4:00pm online); "
+        "Breakaway INSTALL Kickoff 3138 — confirm client/account"
+    )
+    got = _format_note(note)
+    assert got["summary"] == "Historically coded to 52200 (100% of past trips)"
+    cal_detail = next(d for d in got["details"] if d.startswith("Calendar:"))
+    assert "Happy Hour!" in cal_detail and "Breakaway INSTALL Kickoff 3138" in cal_detail
+    assert "confirm client/account" not in cal_detail  # trailing instruction stripped, not shown as an "event"
+
+
+def test_format_note_surname_only_caveat_preserved():
+    got = _format_note(
+        "account hint '52200--x' (used 92% of trips) — confirm project/COGS; matched by surname only"
+    )
+    assert any("surname only" in d for d in got["details"])
+
+
+def test_format_note_unrecognized_segment_shown_verbatim():
+    # Safety net: an unknown future note format isn't silently dropped.
+    got = _format_note("some brand new note format nobody wrote a rule for")
+    assert got["summary"] == "some brand new note format nobody wrote a rule for"

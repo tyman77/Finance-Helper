@@ -183,6 +183,8 @@ td.chk { text-align: center; }
 .note details summary::before { content: "▸ "; }
 .note details[open] summary::before { content: "▾ "; }
 .note details[open] summary { margin-bottom: 3px; }
+.note .detail-line { padding: 2px 0; border-top: 1px solid var(--border); }
+.note .detail-line:first-child { border-top: none; }
 ul.issues { margin: 0 0 4px; padding-left: 16px; color: var(--err); }
 ul.issues li { margin: 2px 0; }
 

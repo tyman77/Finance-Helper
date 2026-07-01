@@ -75,7 +75,10 @@
       <td class="chk"><input type="checkbox" name="needs_review_{{ idx }}" {{ 'checked' if li.needs_review else '' }}></td>
       <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
       <td class="nowrap">{{ li.date or '' }}</td>
-      <td class="desc" title="{{ li.description }}">{{ li.description }}</td>
+      <td class="desc" title="{{ li.description }}">
+        {{ li.description }}
+        {% if li.person %}<div class="hint">→ {{ li.person }}</div>{% endif %}
+      </td>
       <td class="amt">{{ li.amount }}</td>
       <td>
         <input type="text" list="gl-accounts" name="gl_account_{{ idx }}" value="{{ li.gl_account or '' }}" size="7">
@@ -107,13 +110,13 @@
             {% for msg in issues_by_line[idx] %}<li>{{ msg }}</li>{% endfor %}
           </ul>
         {% endif %}
-        {% if li.note %}
-          {% set parts = li.note.split('; ') %}
-          <span class="reason">{{ parts[0] }}</span>
-          {% if parts|length > 1 %}
+        {% set formatted = notes[idx] %}
+        {% if formatted.summary %}
+          <span class="reason">{{ formatted.summary }}</span>
+          {% if formatted.details %}
           <details>
             <summary>more detail</summary>
-            {{ parts[1:]|join('; ') }}
+            {% for d in formatted.details %}<div class="detail-line">{{ d }}</div>{% endfor %}
           </details>
           {% endif %}
         {% endif %}
