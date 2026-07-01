@@ -87,6 +87,27 @@ def test_enrich_routes_installer_to_schedule():
     assert john.gl_account == "52200"
 
 
+def test_enrich_installer_falls_back_to_calendar_when_not_on_schedule():
+    """An installer not on the crew grid (e.g. no longer current crew) should
+    still get a shot at their calendar instead of being left with only the
+    account hint — regression for a bug where dept==Install stopped at the
+    schedule lookup even when it returned nothing."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install Team",
+                         "department_confidence": 1.0, "account_hint": "52200--x",
+                         "account_confidence": 0.4, "n": 5}}
+    schedule = {"Someone Else": {"2026-05-11": "5555"}}  # John Doe not on the sheet
+    cal = {"jdoe@summitintegrated.com": [
+        {"summary": "Northview Church - Install", "start": "2026-05-10", "end": "2026-05-12",
+         "location": "Carmel, IN", "all_day": False, "external": True, "domains": []}]}
+    registry = {"registry": {"3428": {"client": "Northview Church"}},
+                "index": {"northviewchurch": ["3428"]}}
+    enrich.enrich_united(doc, tmap, schedule_index=schedule, calendar_index=cal, registry=registry)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project == "3428"             # resolved via calendar registry fallback
+    assert john.gl_account == "52200"
+
+
 def test_enrich_routes_noninstaller_to_calendar():
     doc = sources.load("united", "samples/united_sample.csv")
     tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",

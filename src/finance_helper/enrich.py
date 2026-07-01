@@ -296,9 +296,13 @@ def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roste
     if dep is None:
         return None
     dept = (entry.get("department") or "")
-    # Installers are on the crew schedule; everyone else on their own calendar.
+    # Installers are on the crew schedule; try it first, but fall through to
+    # their calendar if they're not on the sheet (e.g. not current crew) or the
+    # sheet has no code for that stay — don't give up just because dept == 60.
     if dept.startswith("60") and schedule_index:
-        return project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index)
+        result = project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index)
+        if result:
+            return result
     if calendar_index:
         owner = roster.get(entry.get("person", "")) or project_resolver.email_for(passenger)
         if owner:

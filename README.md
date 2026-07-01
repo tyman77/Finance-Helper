@@ -78,6 +78,19 @@ For each ticket the tool then:
 The map contains employee names and is **gitignored**; only the reproducible
 script and the non-PII `config/accounts.yml` are committed.
 
+If a traveler's historical `Person` value is blank or junk data (seen in the
+real export: literally `"Customer"` for some rows), the builder falls back to
+a best-effort guess from the United passenger name itself (`"JUDY/JOSHUA"` →
+`"Joshua Judy"`), so they can still be found on the crew schedule / calendar.
+When that guess (or the real historical name) doesn't match how someone is
+named on the schedule sheet or their calendar — a nickname vs. legal name, e.g.
+`"Diego Munguia"` on the crew sheet vs. `"Israel Munguia"` in United history —
+add a one-line fix to `data/name_aliases.yml` (gitignored) rather than editing
+code:
+```yaml
+"MUNGUIA/ISRAELDIEGO": "Diego Munguia"
+```
+
 ### Auto-coding the project (COGS vs overhead)
 
 The account depends on the *trip*, which isn't in the UATP feed — so it's pulled

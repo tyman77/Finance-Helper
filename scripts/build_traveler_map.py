@@ -10,17 +10,58 @@ Usage:
     python scripts/build_traveler_map.py <historical_export.csv> [out.yml]
 
 Default output: data/united_travelers.yml  (gitignored — contains employee names)
+
+Name mismatches (e.g. a nickname on the crew schedule that doesn't match the
+legal/booking name — "Diego Munguia" on the sheet vs. "Israel Munguia" in United
+history) can be fixed without touching this script: add a line to
+data/name_aliases.yml (gitignored), e.g.:
+
+    "MUNGUIA/ISRAELDIEGO": "Diego Munguia"
+    "YOCUM/CARSONJAMES": "Carson Yocum"
+
+The key is the United "Passenger Name" as it appears in the CSV; the value is
+the exact name to use when looking up the crew schedule / calendar roster.
 """
 
 from __future__ import annotations
 
 import csv
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 
+# Placeholder values seen in the historical "Person" column that aren't real
+# names (data-entry junk) — treated the same as blank.
+_JUNK_PERSON = {"", "customer", "n/a", "na", "tbd", "unknown", "-"}
+
+
+def _guess_person(passenger_name: str) -> str:
+    """"JUDY/JOSHUA" -> "Joshua Judy" — best-effort fallback so a traveler with
+    no usable historical Person value can still be looked up by name in the
+    crew schedule / calendar roster."""
+    parts = [p.strip() for p in passenger_name.split("/") if p.strip()]
+    if len(parts) < 2:
+        return ""
+    surname, first = parts[0], parts[1]
+    if not re.match(r"^[A-Za-z]+$", surname) or not re.match(r"^[A-Za-z]+$", first):
+        return ""
+    return f"{first.title()} {surname.title()}"
+
+
+def _load_aliases() -> dict:
+    """Optional manual overrides for United passenger -> schedule/calendar name."""
+    data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
+    path = os.path.join(data_dir, "name_aliases.yml")
+    if not os.path.exists(path):
+        return {}
+    import yaml
+    with open(path, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
 
 def build(path: str) -> dict:
+    aliases = _load_aliases()
     with open(path, newline="", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
 
@@ -36,8 +77,9 @@ def build(path: str) -> dict:
         if "/" in name and any(w in name.upper() for w in ("BAG", "ZONE", "SEAT")):
             continue
         a = agg[name]
-        if row.get("Person", "").strip():
-            a["person"][row["Person"].strip()] += 1
+        person_val = row.get("Person", "").strip()
+        if person_val.lower() not in _JUNK_PERSON:
+            a["person"][person_val] += 1
         if row.get("Department", "").strip() not in ("", "#N/A"):
             a["department"][row["Department"].strip()] += 1
         if row.get("Account", "").strip():
@@ -49,8 +91,9 @@ def build(path: str) -> dict:
         dept = a["department"].most_common(1)
         acct = a["account"].most_common(1)
         person = a["person"].most_common(1)
+        resolved_person = aliases.get(name) or (person[0][0] if person else _guess_person(name))
         out[name] = {
-            "person": person[0][0] if person else "",
+            "person": resolved_person,
             "department": dept[0][0] if dept else "",
             "department_confidence": round(dept[0][1] / sum(a["department"].values()), 3) if dept else 0,
             "account_hint": acct[0][0] if acct else "",
