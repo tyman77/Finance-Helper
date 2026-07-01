@@ -38,8 +38,9 @@ notes:
 hotel_engine:
   cogs_travel_hotel: "COGS-TRAVEL-HOTEL"   # <-- TODO: replace with the real account number
   overhead:
-    hq:                    "71000"   # OH - Travel
+    hq:                    "71000"   # OH - Travel (also internal all-staff / sync-up gatherings)
+    hiring:                "63100"   # OH - Hiring/Recruiting (new-hire onboarding travel)
     oh_sales_new:          "64302"   # OH - Sales: New Client and New Project
     oh_sales_not_project:  "64300"   # OH - Sales: New or Existing Clients NOT Project Related (CR)
-    events:                "73060"   # OH - Marketing: Events
+    events:                "73060"   # OH - Marketing: Events (conferences / training)
     personal_development:  "64000"   # OH - Personal Development

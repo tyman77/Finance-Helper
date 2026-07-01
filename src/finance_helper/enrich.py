@@ -159,14 +159,14 @@ _HE_DEPARTMENTS = {
 def _he_overhead_account(project_name: str, oh: dict) -> str | None:
     """Overhead account (by Project Name) when the stay isn't project work."""
     t = project_name.lower()
-    if "hq" in t:
-        return oh.get("hq")
+    if "hire" in t or "onboard" in t:
+        return oh.get("hiring")                                  # OH - Hiring/Recruiting
+    if "hq" in t or any(w in t for w in ("all staff", "syncup", "sync up", "bbq")):
+        return oh.get("hq")                                      # OH - Travel
     if "not project" in t or "tour" in t or "intro" in t:
         return oh.get("oh_sales_not_project")
     if "oh sales" in t or "discovery" in t:
         return oh.get("oh_sales_new")
-    if any(w in t for w in ("all staff", "syncup", "sync up", "bbq", "hire", "onboard")):
-        return oh.get("personal_development")
     if any(w in t for w in ("event", "conference", "training", "thrive", "storybrand")):
         return oh.get("events")
     return None
