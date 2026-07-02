@@ -94,6 +94,41 @@ PYTHONPATH=src python -m finance_helper.web        # http://127.0.0.1:5000
 Override the host/port/debug via `FINANCE_HELPER_WEB_HOST` /
 `FINANCE_HELPER_WEB_PORT` / `FINANCE_HELPER_WEB_DEBUG`.
 
+### Login
+
+Set `FINANCE_HELPER_WEB_PASSWORD` (and `FINANCE_HELPER_SECRET`, required
+alongside it — the app refuses to start without it) in `.env` to put a login
+in front of every route. This is **required** if the app is reachable by
+anything other than your own machine — it can post real journal entries to
+Sage. With no password set, it runs exactly as before (no login, for
+localhost-only use). Generate a secret with:
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### Hosting it (not just localhost)
+
+To reach the review UI from more than one computer, run it on a real host
+instead of `python -m finance_helper.web` on your Mac:
+
+1. **Set a password** (see above) — non-negotiable once it's on the internet.
+2. Install with the `web` extra so `gunicorn` is available:
+   ```bash
+   pip install -e .[web]
+   ```
+3. Run it with a real WSGI server instead of the Flask dev server:
+   ```bash
+   gunicorn finance_helper.wsgi:app
+   ```
+   (a `Procfile` with this exact command is included for platforms — Render,
+   Railway, Fly.io, etc. — that read one).
+4. Give the host your `.env` values through **its** secrets/environment-variable
+   UI, not by committing `.env` or pasting it anywhere public.
+5. Point `FINANCE_HELPER_DATA` at a **persistent** disk/volume on the host —
+   `data/*.json` (traveler map, project registry, Sage projects) and `out/*.json`
+   (saved proposals) need to survive restarts and redeploys, which an
+   ephemeral container filesystem won't do.
+
 ## United traveler coding (learned from history)
 
 United tickets are enriched from your historical coding. Regenerate the map from

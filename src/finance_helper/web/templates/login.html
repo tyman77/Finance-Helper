@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Finance Helper — Log in{% endblock %}
+{% block content %}
+<h1>Log in</h1>
+<p class="subtle">This tool can post real journal entries to Sage Intacct — a password is required.</p>
+
+{% if error %}
+<div class="flash"><p>{{ error }}</p></div>
+{% endif %}
+
+<form method="post" class="upload-form">
+  <label>
+    Password
+    <input type="password" name="password" autofocus required>
+  </label>
+  <button type="submit">Log in</button>
+</form>
+{% endblock %}

@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 import uuid
 from collections import Counter
 from datetime import datetime
 
 from dotenv import find_dotenv, load_dotenv
-from flask import Flask, Response, flash, redirect, render_template, request, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
 
 from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
@@ -188,7 +189,52 @@ def _project_options() -> list[tuple[str, str]]:
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.secret_key = os.environ.get("FINANCE_HELPER_SECRET", "dev-local-only-not-a-real-secret")
+
+    password = os.environ.get("FINANCE_HELPER_WEB_PASSWORD")
+    secret = os.environ.get("FINANCE_HELPER_SECRET")
+    if password and not secret:
+        raise RuntimeError(
+            "FINANCE_HELPER_WEB_PASSWORD is set but FINANCE_HELPER_SECRET is not. "
+            "A login without a real session secret can be trivially bypassed by "
+            "forging the session cookie -- set FINANCE_HELPER_SECRET to a random "
+            "value (e.g. `python3 -c \"import secrets; print(secrets.token_hex(32))\"`) "
+            "before running with a password configured."
+        )
+    app.secret_key = secret or "dev-local-only-not-a-real-secret"
+
+    if not password:
+        print(
+            "WARNING: FINANCE_HELPER_WEB_PASSWORD is not set -- this server is "
+            "running with NO LOGIN. Fine for localhost-only use; do not expose "
+            "this beyond your own machine without setting a password.",
+            file=sys.stderr,
+        )
+
+    @app.before_request
+    def _require_login():
+        if not password:
+            return None
+        if request.endpoint in ("login", "static"):
+            return None
+        if not session.get("authed"):
+            return redirect(url_for("login", next=request.path))
+        return None
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if request.method == "POST":
+            if request.form.get("password") == password:
+                session.clear()
+                session["authed"] = True
+                session.permanent = True
+                return redirect(request.args.get("next") or url_for("index"))
+            return render_template("login.html", error="Wrong password."), 401
+        return render_template("login.html", error=None)
+
+    @app.get("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
 
     @app.get("/")
     def index():

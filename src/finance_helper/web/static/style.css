@@ -23,6 +23,9 @@ body {
 .topbar {
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .brand {
@@ -31,6 +34,13 @@ body {
   font-weight: 600;
   font-size: 1.1rem;
 }
+
+.logout-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.logout-link:hover { color: var(--text); text-decoration: underline; }
 
 main {
   max-width: min(2200px, 96vw);

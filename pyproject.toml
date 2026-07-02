@@ -7,10 +7,10 @@ name = "finance-helper"
 version = "0.1.0"
 description = "Vendor CSV -> categorized entries -> Sage Intacct / Bill.com"
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6.0", "requests>=2.31"]
+dependencies = ["PyYAML>=6.0", "requests>=2.31", "python-dotenv>=1.0"]
 
 [project.optional-dependencies]
-web = ["Flask>=3.0"]
+web = ["Flask>=3.0", "gunicorn>=22.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

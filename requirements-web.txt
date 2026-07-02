@@ -1,2 +1,4 @@
-# Only needed to run the local review UI: python -m finance_helper.web
+# Only needed to run the review UI: python -m finance_helper.web (local dev)
+# or gunicorn (production hosting — see README's "Hosting it" section).
 Flask>=3.0
+gunicorn>=22.0
