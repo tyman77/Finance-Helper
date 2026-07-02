@@ -37,8 +37,14 @@ def render(doc: SourceDocument, payload: dict) -> str:
     return "\n".join(lines)
 
 
-def save_proposal(doc: SourceDocument, payload: dict, out_dir: str = "out") -> str:
-    """Write the proposal JSON to disk for the audit trail. Returns the path."""
+def save_proposal(doc: SourceDocument, payload: dict, out_dir: str | None = None) -> str:
+    """Write the proposal JSON to disk for the audit trail. Returns the path.
+
+    Defaults to ./out, overridable with FINANCE_HELPER_OUT_DIR (same convention
+    as FINANCE_HELPER_DATA) so a hosted deployment can point it at a persistent
+    volume instead of the container's ephemeral filesystem.
+    """
+    out_dir = out_dir or os.environ.get("FINANCE_HELPER_OUT_DIR", "out")
     os.makedirs(out_dir, exist_ok=True)
     safe_id = "".join(c if c.isalnum() else "_" for c in doc.document_id)
     path = os.path.join(out_dir, f"{doc.source}_{safe_id}.json")

@@ -106,28 +106,43 @@ localhost-only use). Generate a secret with:
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-### Hosting it (not just localhost)
+### Hosting it on Railway
 
-To reach the review UI from more than one computer, run it on a real host
-instead of `python -m finance_helper.web` on your Mac:
+`railway.json` and `Procfile` are already in the repo — Railway just needs to
+be pointed at it:
 
-1. **Set a password** (see above) — non-negotiable once it's on the internet.
-2. Install with the `web` extra so `gunicorn` is available:
-   ```bash
-   pip install -e .[web]
-   ```
-3. Run it with a real WSGI server instead of the Flask dev server:
-   ```bash
-   gunicorn finance_helper.wsgi:app
-   ```
-   (a `Procfile` with this exact command is included for platforms — Render,
-   Railway, Fly.io, etc. — that read one).
-4. Give the host your `.env` values through **its** secrets/environment-variable
-   UI, not by committing `.env` or pasting it anywhere public.
-5. Point `FINANCE_HELPER_DATA` at a **persistent** disk/volume on the host —
-   `data/*.json` (traveler map, project registry, Sage projects) and `out/*.json`
-   (saved proposals) need to survive restarts and redeploys, which an
-   ephemeral container filesystem won't do.
+1. **Set a password first** (see above) — non-negotiable once it's on the
+   internet. Generate `FINANCE_HELPER_SECRET` with the command above too.
+2. In Railway: **New Project → Deploy from GitHub repo** and pick this repo
+   (or, if you already have a project, **New Service → GitHub Repo** into it).
+   Railway auto-detects `railway.json`, which tells it to build with
+   `pip install -e .[web]` (installs Flask + gunicorn, not just the CLI-only
+   core deps) and start with `gunicorn finance_helper.wsgi:app`.
+3. **Add a volume** (service → *Volumes* → *New Volume*) and mount it at, say,
+   `/data`. Without this, every redeploy wipes the traveler map, project
+   registry, Sage project cache, and saved proposals — they live in the
+   container's ephemeral filesystem otherwise.
+4. Set environment variables on the service (**Variables** tab) — this is
+   your `.env`, entered directly in Railway, never committed or pasted here:
+   - `FINANCE_HELPER_WEB_PASSWORD`, `FINANCE_HELPER_SECRET`
+   - `FINANCE_HELPER_DATA=/data` and `FINANCE_HELPER_OUT_DIR=/data/out` (point
+     both at the volume from step 3)
+   - `INTACCT_CLIENT_ID`, `INTACCT_CLIENT_SECRET`, `INTACCT_COMPANY_ID`,
+     `INTACCT_USER_ID`, `INTACCT_USER_PASSWORD`, `INTACCT_CLEARING_ACCOUNT`
+     (and `BILLDOTCOM_*` once that destination is wired up)
+   - Railway sets `PORT` itself — the `Procfile`/`railway.json` start command
+     already binds to it, nothing to add there.
+5. **Get the data onto the volume.** The indices in `data/*.json` (traveler
+   map, schedule/calendar indices, project registry, roster) are gitignored —
+   they're not in the repo, so they won't appear on Railway just by deploying.
+   Either regenerate them by running the `scripts/build_*` / `scripts/fetch_*`
+   commands with `FINANCE_HELPER_DATA` pointed at the mounted volume path (via
+   Railway's shell, or a one-off `railway run` from your Mac), or copy the
+   files up some other way you're comfortable with — just not through this
+   chat, since they contain employee names/schedules.
+6. Once deployed, Railway gives you a `*.up.railway.app` URL (or attach a
+   custom domain under **Settings → Networking**) — that's what you'd open
+   from any computer, behind the login from step 1.
 
 ## United traveler coding (learned from history)
 
