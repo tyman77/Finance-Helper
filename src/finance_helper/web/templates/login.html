@@ -2,17 +2,10 @@
 {% block title %}Finance Helper — Log in{% endblock %}
 {% block content %}
 <h1>Log in</h1>
-<p class="subtle">This tool can post real journal entries to Sage Intacct — a password is required.</p>
+<p class="subtle">
+  This tool can post real journal entries to Sage Intacct — sign in with your
+  {% if allowed_domain %}{{ allowed_domain }} {% endif %}Google account to continue.
+</p>
 
-{% if error %}
-<div class="flash"><p>{{ error }}</p></div>
-{% endif %}
-
-<form method="post" class="upload-form">
-  <label>
-    Password
-    <input type="password" name="password" autofocus required>
-  </label>
-  <button type="submit">Log in</button>
-</form>
+<a class="button" href="{{ url_for('auth_google', next=next) }}">Sign in with Google</a>
 {% endblock %}

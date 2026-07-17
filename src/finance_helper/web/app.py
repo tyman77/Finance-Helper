@@ -11,17 +11,25 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import sys
 import tempfile
 import uuid
 from collections import Counter
 from datetime import datetime
+from urllib.parse import urlencode
 
+import requests
 from dotenv import find_dotenv, load_dotenv
 from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
+
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 # usecwd=True: search from wherever the server is actually started, not from
 # this installed package's location (see cli.py's main() for the same fix).
@@ -189,47 +197,126 @@ def _project_options() -> list[tuple[str, str]]:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    # Railway (and most PaaS hosts) terminate TLS at a proxy and forward over
+    # plain HTTP -- without this, url_for(..., _external=True) below builds
+    # http:// URLs and Google rejects the OAuth redirect_uri as insecure.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-    password = os.environ.get("FINANCE_HELPER_WEB_PASSWORD")
+    google_client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+    google_client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
+    allowed_domain = os.environ.get("GOOGLE_OAUTH_ALLOWED_DOMAIN")
+    google_login_enabled = bool(google_client_id and google_client_secret)
+
     secret = os.environ.get("FINANCE_HELPER_SECRET")
-    if password and not secret:
+    if google_login_enabled and not secret:
         raise RuntimeError(
-            "FINANCE_HELPER_WEB_PASSWORD is set but FINANCE_HELPER_SECRET is not. "
+            "GOOGLE_OAUTH_CLIENT_ID/SECRET are set but FINANCE_HELPER_SECRET is not. "
             "A login without a real session secret can be trivially bypassed by "
             "forging the session cookie -- set FINANCE_HELPER_SECRET to a random "
             "value (e.g. `python3 -c \"import secrets; print(secrets.token_hex(32))\"`) "
-            "before running with a password configured."
+            "before running with Google login configured."
+        )
+    if google_login_enabled and not allowed_domain:
+        raise RuntimeError(
+            "GOOGLE_OAUTH_CLIENT_ID/SECRET are set but GOOGLE_OAUTH_ALLOWED_DOMAIN is "
+            "not -- without it, ANY Google account could log in, not just your company's. "
+            "Set GOOGLE_OAUTH_ALLOWED_DOMAIN to your Workspace domain (e.g. "
+            "summitintegrated.com)."
         )
     app.secret_key = secret or "dev-local-only-not-a-real-secret"
+    app.config["SESSION_COOKIE_SECURE"] = google_login_enabled
 
-    if not password:
+    if not google_login_enabled:
         print(
-            "WARNING: FINANCE_HELPER_WEB_PASSWORD is not set -- this server is "
+            "WARNING: GOOGLE_OAUTH_CLIENT_ID/SECRET are not set -- this server is "
             "running with NO LOGIN. Fine for localhost-only use; do not expose "
-            "this beyond your own machine without setting a password.",
+            "this beyond your own machine without setting up Google login.",
             file=sys.stderr,
         )
 
     @app.before_request
     def _require_login():
-        if not password:
+        if not google_login_enabled:
             return None
-        if request.endpoint in ("login", "static"):
+        if request.endpoint in ("login", "auth_google", "auth_google_callback", "static"):
             return None
         if not session.get("authed"):
             return redirect(url_for("login", next=request.path))
         return None
 
-    @app.route("/login", methods=["GET", "POST"])
+    @app.get("/login")
     def login():
-        if request.method == "POST":
-            if request.form.get("password") == password:
-                session.clear()
-                session["authed"] = True
-                session.permanent = True
-                return redirect(request.args.get("next") or url_for("index"))
-            return render_template("login.html", error="Wrong password."), 401
-        return render_template("login.html", error=None)
+        if not google_login_enabled:
+            return redirect(url_for("index"))
+        return render_template(
+            "login.html", allowed_domain=allowed_domain, next=request.args.get("next")
+        )
+
+    @app.get("/auth/google")
+    def auth_google():
+        state = secrets.token_urlsafe(24)
+        session["oauth_state"] = state
+        session["oauth_next"] = request.args.get("next") or url_for("index")
+        params = {
+            "client_id": google_client_id,
+            "redirect_uri": url_for("auth_google_callback", _external=True),
+            "response_type": "code",
+            "scope": "openid email",
+            "state": state,
+            "prompt": "select_account",
+            "hd": allowed_domain,
+        }
+        return redirect(f"{_GOOGLE_AUTH_URL}?{urlencode(params)}")
+
+    @app.get("/auth/google/callback")
+    def auth_google_callback():
+        if not request.args.get("state") or request.args.get("state") != session.pop(
+            "oauth_state", None
+        ):
+            flash("Login failed (state mismatch) -- please try again.")
+            return redirect(url_for("login"))
+        code = request.args.get("code")
+        if not code:
+            flash("Google sign-in was cancelled or failed.")
+            return redirect(url_for("login"))
+
+        try:
+            token_resp = requests.post(
+                _GOOGLE_TOKEN_URL,
+                data={
+                    "client_id": google_client_id,
+                    "client_secret": google_client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": url_for("auth_google_callback", _external=True),
+                },
+                timeout=10,
+            )
+            token_resp.raise_for_status()
+            access_token = token_resp.json()["access_token"]
+            userinfo_resp = requests.get(
+                _GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            userinfo_resp.raise_for_status()
+            userinfo = userinfo_resp.json()
+        except requests.exceptions.RequestException as exc:
+            flash(f"Google sign-in failed: {exc}")
+            return redirect(url_for("login"))
+
+        email = userinfo.get("email") or ""
+        domain = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+        if not userinfo.get("email_verified") or domain != allowed_domain.lower():
+            flash(f"{email or 'That Google account'} isn't authorized for this tool.")
+            return redirect(url_for("login"))
+
+        next_path = session.pop("oauth_next", None)
+        session.clear()
+        session["authed"] = True
+        session["email"] = email
+        session.permanent = True
+        return redirect(next_path or url_for("index"))
 
     @app.get("/logout")
     def logout():

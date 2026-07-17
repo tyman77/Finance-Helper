@@ -94,44 +94,64 @@ PYTHONPATH=src python -m finance_helper.web        # http://127.0.0.1:5000
 Override the host/port/debug via `FINANCE_HELPER_WEB_HOST` /
 `FINANCE_HELPER_WEB_PORT` / `FINANCE_HELPER_WEB_DEBUG`.
 
-### Login
+### Login (Sign in with Google)
 
-Set `FINANCE_HELPER_WEB_PASSWORD` (and `FINANCE_HELPER_SECRET`, required
-alongside it — the app refuses to start without it) in `.env` to put a login
-in front of every route. This is **required** if the app is reachable by
-anything other than your own machine — it can post real journal entries to
-Sage. With no password set, it runs exactly as before (no login, for
-localhost-only use). Generate a secret with:
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
+Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+`GOOGLE_OAUTH_ALLOWED_DOMAIN`, and `FINANCE_HELPER_SECRET` in `.env` to put a
+Google sign-in in front of every route — only accounts on
+`GOOGLE_OAUTH_ALLOWED_DOMAIN` (your Workspace domain) can log in. This is
+**required** if the app is reachable by anything other than your own machine
+— it can post real journal entries to Sage. With none of these set, it runs
+exactly as before (no login, for localhost-only use).
+
+To set it up:
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   (the same project as the Sheets/Calendar service account, or a new one) —
+   **Create Credentials → OAuth client ID → Web application**.
+2. Add an **Authorized redirect URI**: `https://<your-deployed-URL>/auth/google/callback`
+   (you'll need the URL from hosting it first — see below — then come back
+   and add this).
+3. Copy the generated **Client ID** and **Client secret** into
+   `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`.
+4. Set `GOOGLE_OAUTH_ALLOWED_DOMAIN` to your company's Workspace domain (e.g.
+   `summitintegrated.com`).
+5. Generate `FINANCE_HELPER_SECRET`:
+   ```bash
+   python3 -c "import secrets; print(secrets.token_hex(32))"
+   ```
 
 ### Hosting it on Railway
 
 `railway.json` and `Procfile` are already in the repo — Railway just needs to
 be pointed at it:
 
-1. **Set a password first** (see above) — non-negotiable once it's on the
-   internet. Generate `FINANCE_HELPER_SECRET` with the command above too.
-2. In Railway: **New Project → Deploy from GitHub repo** and pick this repo
+1. In Railway: **New Project → Deploy from GitHub repo** and pick this repo
    (or, if you already have a project, **New Service → GitHub Repo** into it).
    Railway auto-detects `railway.json`, which tells it to build with
    `pip install -e .[web]` (installs Flask + gunicorn, not just the CLI-only
    core deps) and start with `gunicorn finance_helper.wsgi:app`.
-3. **Add a volume** (service → *Volumes* → *New Volume*) and mount it at, say,
+2. **Add a volume** (service → *Volumes* → *New Volume*) and mount it at, say,
    `/data`. Without this, every redeploy wipes the traveler map, project
    registry, Sage project cache, and saved proposals — they live in the
    container's ephemeral filesystem otherwise.
-4. Set environment variables on the service (**Variables** tab) — this is
+3. Set environment variables on the service (**Variables** tab) — this is
    your `.env`, entered directly in Railway, never committed or pasted here:
-   - `FINANCE_HELPER_WEB_PASSWORD`, `FINANCE_HELPER_SECRET`
+   - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+     `GOOGLE_OAUTH_ALLOWED_DOMAIN`, `FINANCE_HELPER_SECRET` (see Login above
+     — you'll need Railway's URL from step 4 before finishing step 2 of that
+     setup)
    - `FINANCE_HELPER_DATA=/data` and `FINANCE_HELPER_OUT_DIR=/data/out` (point
-     both at the volume from step 3)
+     both at the volume from step 2)
    - `INTACCT_CLIENT_ID`, `INTACCT_CLIENT_SECRET`, `INTACCT_COMPANY_ID`,
      `INTACCT_USER_ID`, `INTACCT_USER_PASSWORD`, `INTACCT_CLEARING_ACCOUNT`
      (and `BILLDOTCOM_*` once that destination is wired up)
    - Railway sets `PORT` itself — the `Procfile`/`railway.json` start command
      already binds to it, nothing to add there.
+4. Once deployed, Railway gives you a `*.up.railway.app` URL (or attach a
+   custom domain under **Settings → Networking**). Go back to the Google
+   Cloud Console OAuth client and add `https://<that URL>/auth/google/callback`
+   as an Authorized redirect URI — sign-in will fail with `redirect_uri_mismatch`
+   until this matches exactly.
 5. **Get the data onto the volume.** The indices in `data/*.json` (traveler
    map, schedule/calendar indices, project registry, roster) are gitignored —
    they're not in the repo, so they won't appear on Railway just by deploying.
@@ -140,9 +160,6 @@ be pointed at it:
    Railway's shell, or a one-off `railway run` from your Mac), or copy the
    files up some other way you're comfortable with — just not through this
    chat, since they contain employee names/schedules.
-6. Once deployed, Railway gives you a `*.up.railway.app` URL (or attach a
-   custom domain under **Settings → Networking**) — that's what you'd open
-   from any computer, behind the login from step 1.
 
 ## United traveler coding (learned from history)
 
