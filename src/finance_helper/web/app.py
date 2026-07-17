@@ -8,6 +8,7 @@ single-user review tool, not a multi-tenant service.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -361,6 +362,8 @@ def create_app() -> Flask:
             tmp_path = tmp.name
         try:
             doc = pipeline.process(source, tmp_path)
+            with open(tmp_path, "rb") as fh:
+                csv_b64 = base64.b64encode(fh.read()).decode("ascii")
         except Exception as exc:  # surface a friendly error instead of a 500
             flash(f"Could not process {file.filename}: {exc}")
             return redirect(url_for("index"))
@@ -374,8 +377,33 @@ def create_app() -> Flask:
             "filename": file.filename,
             "created": datetime.now(),
             "posted": None,
+            "csv_b64": csv_b64,  # kept so the coding can be re-run with newer data
         }
         store.save_run(run_id, RUNS[run_id])
+        return redirect(url_for("review_page", run_id=run_id))
+
+    @app.post("/review/<run_id>/rerun")
+    def rerun(run_id):
+        run = _get_run(run_id)
+        if not run:
+            return redirect(url_for("index"))
+        csv_b64 = run.get("csv_b64")
+        if not csv_b64:
+            flash("This review was saved before re-run existed — re-upload the file "
+                  "once to enable re-running.")
+            return redirect(url_for("review_page", run_id=run_id))
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(base64.b64decode(csv_b64))
+            tmp_path = tmp.name
+        try:
+            run["doc"] = pipeline.process(run["source"], tmp_path)
+            run["posted"] = None
+            store.save_run(run_id, run)
+            flash("Re-coded with the latest data.")
+        except Exception as exc:
+            flash(f"Could not re-run: {exc}")
+        finally:
+            os.unlink(tmp_path)
         return redirect(url_for("review_page", run_id=run_id))
 
     def _get_run(run_id):

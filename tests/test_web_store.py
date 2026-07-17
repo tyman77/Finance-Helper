@@ -81,3 +81,34 @@ def test_round_trip_preserves_amounts_and_dimensions(client):
     assert len(reloaded.line_items) == len(original.line_items)
     assert reloaded.line_items[0].amount == original.line_items[0].amount
     assert reloaded.document_id == original.document_id
+
+
+def test_rerun_reprocesses_from_stored_csv(client):
+    run_id = _upload(client, "ups", _UPS)
+    # Corrupt the in-memory doc, then re-run: it should be rebuilt from the CSV.
+    from finance_helper.web.app import RUNS
+    RUNS[run_id]["doc"].line_items = []
+    resp = client.post(f"/review/{run_id}/rerun")
+    assert resp.status_code == 302
+    assert len(RUNS[run_id]["doc"].line_items) > 0  # re-parsed from the stored CSV
+
+
+def test_rerun_persists_across_restart(client):
+    run_id = _upload(client, "ups", _UPS)
+    from finance_helper.web.app import RUNS
+    RUNS.clear()  # simulate restart; stored CSV must survive
+    resp = client.post(f"/review/{run_id}/rerun")
+    assert resp.status_code == 302
+    reloaded = store.load_run(run_id)
+    assert reloaded["csv_b64"] and len(reloaded["doc"].line_items) > 0
+
+
+def test_rerun_without_stored_csv_flashes_guidance(client):
+    run_id = _upload(client, "ups", _UPS)
+    # Simulate a legacy saved run that predates csv storage.
+    from finance_helper.web.app import RUNS
+    RUNS[run_id]["csv_b64"] = None
+    resp = client.post(f"/review/{run_id}/rerun")
+    assert resp.status_code == 302
+    resp2 = client.get(f"/review/{run_id}")
+    assert b"re-upload the file" in resp2.data

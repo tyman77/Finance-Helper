@@ -88,6 +88,7 @@ def _payload_to_run(payload: dict) -> dict:
         "filename": payload["filename"],
         "created": datetime.fromisoformat(payload["created"]),
         "posted": payload.get("posted"),
+        "csv_b64": payload.get("csv_b64"),
     }
 
 
@@ -101,6 +102,7 @@ def save_run(run_id: str, run: dict) -> None:
             "filename": run["filename"],
             "created": run["created"].isoformat(),
             "posted": run.get("posted"),
+            "csv_b64": run.get("csv_b64"),  # original upload, for re-running the coding
             "doc": _doc_to_dict(run["doc"]),
         }
         path = os.path.join(_runs_dir(), f"{run_id}.json")

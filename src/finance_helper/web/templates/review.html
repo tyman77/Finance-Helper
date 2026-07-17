@@ -143,12 +143,19 @@
 </form>
 
 <div class="actions">
+  <form method="post" action="{{ url_for('rerun', run_id=run_id) }}"
+        onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review.');">
+    <button type="submit">Re-run coding</button>
+  </form>
   <form method="post" action="{{ url_for('approve', run_id=run_id) }}"
         onsubmit="return confirm('Post this to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Save changes first if you edited anything.');">
     <button type="submit" class="approve">Approve &amp; Post</button>
   </form>
   <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
 </div>
+<p class="subtle">"Re-run coding" re-processes the original upload with the current
+data — use it after building the hotel cross-reference or rebuilding the
+traveler map so this review picks up the improvements.</p>
 
 <script src="{{ url_for('static', filename='review.js') }}"></script>
 {% endblock %}
