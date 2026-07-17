@@ -255,3 +255,56 @@ def test_enrich_united_never_assigns_an_archived_project(monkeypatch):
                          active_projects=set())  # 5555 is not active
     john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project != "5555"
+
+
+def test_hotel_projects_in_window_matches_overlapping_bookings():
+    idx = [
+        {"start": "2026-05-31", "end": "2026-06-02", "project": "3531", "department": "10", "city": "Denver"},
+        {"start": "2026-06-01", "end": "2026-06-03", "project": "9999", "department": "60", "city": "Phoenix"},
+        {"start": "2026-07-01", "end": "2026-07-02", "project": "1111", "department": "10", "city": "Boise"},
+    ]
+    # A June 1 departure overlaps the first two, not the July booking.
+    assert set(project_resolver.hotel_projects_in_window(idx, date(2026, 6, 1))) == {"3531", "9999"}
+    # Department filter narrows to the sales booking.
+    assert project_resolver.hotel_projects_in_window(idx, date(2026, 6, 1), department="10") == ["3531"]
+    # Archived filter drops codes not in the active set.
+    assert project_resolver.hotel_projects_in_window(
+        idx, date(2026, 6, 1), active_projects={"9999"}) == ["9999"]
+    # Nothing overlaps a far-off date.
+    assert project_resolver.hotel_projects_in_window(idx, date(2026, 9, 1)) == []
+
+
+def test_hotel_cross_reference_auto_fills_single_agreement():
+    """History says several projects; the hotel that week pins exactly one."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Departure Date"] = "06/01/2026"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                         "department_confidence": 1.0, "account_hint": "71000--OH",
+                         "account_confidence": 0.6, "projects": ["3976", "3531", "4152"], "n": 10}}
+    hotel = [{"start": "2026-05-31", "end": "2026-06-02", "project": "3531",
+              "department": "10", "city": "Denver"}]
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects=None, hotel_index=hotel)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project == "3531"
+    assert "hotel booking that week" in john.note
+
+
+def test_hotel_cross_reference_narrows_but_does_not_auto_fill_when_ambiguous():
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Departure Date"] = "06/01/2026"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                         "department_confidence": 1.0, "account_hint": "71000--OH",
+                         "account_confidence": 0.6, "projects": ["3976", "3531", "4152"], "n": 10}}
+    # Two of the traveler's historical projects both had hotels that week.
+    hotel = [{"start": "2026-05-31", "end": "2026-06-02", "project": "3531", "department": "10", "city": "Denver"},
+             {"start": "2026-06-01", "end": "2026-06-02", "project": "4152", "department": "10", "city": "Boise"}]
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects=None, hotel_index=hotel)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None  # ambiguous -> not auto-filled
+    assert "past projects 3531, 4152 — pick one" in john.note  # narrowed to the two with hotels

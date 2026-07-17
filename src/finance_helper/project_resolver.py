@@ -97,6 +97,42 @@ def resolve_schedule(
     }
 
 
+def hotel_projects_in_window(
+    hotel_index: list, dep: date, window_days: int = 3,
+    department: str | None = None, active_projects: set[str] | None = None,
+) -> list[str]:
+    """Project codes that had a Hotel Engine booking overlapping this trip.
+
+    A United flight and the hotel for the same trip fall on nearly the same
+    dates, so a booking whose [start, end] window overlaps [dep-1, dep+N] is a
+    strong same-trip signal for its project — even though Hotel Engine data
+    carries no traveler name (we match on dates, and optionally department, not
+    person). Returns codes most-recent/earliest-overlap first, de-duplicated.
+    """
+    lo = dep - timedelta(days=1)
+    hi = dep + timedelta(days=window_days)
+    seen: set = set()
+    out: list[str] = []
+    for b in hotel_index:
+        try:
+            start = date.fromisoformat(b["start"])
+            end = date.fromisoformat(b.get("end") or b["start"])
+        except (KeyError, ValueError):
+            continue
+        if start > hi or end < lo:
+            continue  # no overlap with the trip window
+        if department and b.get("department") and b["department"] != department:
+            continue
+        code = b.get("project")
+        if not code or code in seen:
+            continue
+        if active_projects is not None and code not in active_projects:
+            continue
+        seen.add(code)
+        out.append(code)
+    return out
+
+
 def _account_for_trip(trip: str) -> str | None:
     t = trip.lower()
     for keys, acct in _TRIP_ACCOUNT:

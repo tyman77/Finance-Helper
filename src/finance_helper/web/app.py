@@ -40,7 +40,8 @@ load_dotenv(find_dotenv(usecwd=True))
 RUNS: dict[str, dict] = {}
 
 _CANDIDATES_RE = re.compile(
-    r"(?:registry: candidate projects|calendar title codes|past projects) ([\d, ]+) — pick one"
+    r"(?:registry: candidate projects|calendar title codes|past projects|hotel-week projects)"
+    r" ([\d, ]+) — pick one"
 )
 
 # Human labels for the status pill — order matters for the filter toolbar.
@@ -100,6 +101,10 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: "Multiple possible projects — pick one below"),
     (re.compile(r"^past projects .+ — pick one$"),
      lambda m: "Past projects (from history) — pick one below"),
+    (re.compile(r"^hotel-week projects .+ — pick one$"),
+     lambda m: "Projects with a hotel booked that week — pick one below"),
+    (re.compile(r"^hotel booking that week -> project (\S+) \(confirm\)$"),
+     lambda m: f"Hotel booked that week → project {m.group(1)} (confirm)"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),

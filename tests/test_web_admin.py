@@ -144,3 +144,43 @@ def test_sage_projects_success_writes_file(client, monkeypatch):
     assert resp.status_code == 302
     out = json.loads((data_dir / "sage_projects.json").read_text())
     assert out["3428"]["status"] == "Active"
+
+
+def _hotel_csv(path):
+    import csv as _csv
+    fieldnames = ["Start Date", "End Date", "Project Name", "Department Name",
+                  "Hotel City", "Hotel Name"]
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = _csv.DictWriter(fh, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerow({"Start Date": "06/01/2026", "End Date": "06/03/2026",
+                    "Project Name": "Northview Church [3531]", "Department Name": "Install",
+                    "Hotel City": "Denver", "Hotel Name": "Fairfield"})
+
+
+def test_hotel_index_upload_builds_and_accumulates(client, tmp_path):
+    c, data_dir = client
+    csv_path = tmp_path / "he.csv"
+    _hotel_csv(csv_path)
+    with open(csv_path, "rb") as fh:
+        resp = c.post("/admin/hotel-index", data={"file": (fh, "he.csv")},
+                      content_type="multipart/form-data")
+    assert resp.status_code == 302
+    idx = json.loads((data_dir / "hotel_project_index.json").read_text())
+    assert idx == [{"start": "2026-06-01", "end": "2026-06-03", "project": "3531",
+                    "department": "60", "city": "Denver"}]
+
+    # Uploading the same file again doesn't duplicate.
+    with open(csv_path, "rb") as fh:
+        c.post("/admin/hotel-index", data={"file": (fh, "he.csv")},
+               content_type="multipart/form-data")
+    idx2 = json.loads((data_dir / "hotel_project_index.json").read_text())
+    assert len(idx2) == 1
+
+
+def test_hotel_index_upload_without_file_flashes(client):
+    c, _ = client
+    resp = c.post("/admin/hotel-index", data={}, content_type="multipart/form-data")
+    assert resp.status_code == 302
+    resp2 = c.get(resp.headers["Location"])
+    assert b"Choose a Hotel Engine statement" in resp2.data

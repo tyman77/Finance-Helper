@@ -78,7 +78,21 @@
   <button type="submit">Fetch Sage projects</button>
 </form>
 
-<h2>6. Chart of accounts</h2>
+<h2>6. Hotel Engine cross-reference (better project matches)</h2>
+<p class="subtle">
+  Upload a Hotel Engine statement CSV. It builds a date&rarr;project index
+  (no traveler names needed) so United flights can be matched to the project
+  that had a hotel booked the same week — narrowing the "pick one" project
+  chips, often to a single confident match. Upload each month's statement as
+  it comes in; they accumulate.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_hotel_index') }}"
+      enctype="multipart/form-data" class="upload-form">
+  <label>CSV file <input type="file" name="file" accept=".csv" required></label>
+  <button type="submit">Add to cross-reference</button>
+</form>
+
+<h2>7. Chart of accounts</h2>
 <p class="subtle">
   Upload a Sage Intacct General Ledger account export CSV to capture
   posting rules (which accounts require a department, which are disallowed

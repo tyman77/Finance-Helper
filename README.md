@@ -203,6 +203,13 @@ For each ticket the tool then:
   there's no live schedule/calendar match (below) — a fallback drawn from the
   `Project` column of the history, so projects can be assigned quickly even
   before the Google side is wired up. Archived codes are dropped.
+- **cross-references Hotel Engine bookings** to sharpen that fallback: a
+  flight's departure date is matched against hotel bookings on the same dates
+  (Hotel Engine has no traveler name, so it matches on date + department, not
+  person). When the traveler's history and the hotel-that-week agree on exactly
+  one project, it's auto-filled (flagged to confirm); when they agree on a few,
+  only those are offered. Build the index by uploading Hotel Engine statements
+  in **Admin → step 6**; each month accumulates.
 
 The map contains employee names and is **gitignored**; only the reproducible
 script and the non-PII `config/accounts.yml` are committed.

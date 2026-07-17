@@ -14,6 +14,7 @@ the installed finance_helper package.
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import json
 import os
@@ -38,6 +39,7 @@ _build_traveler_map = _load_script("build_traveler_map")
 _build_project_registry = _load_script("build_project_registry")
 _build_roster = _load_script("build_roster")
 _build_chart = _load_script("build_chart")
+_build_hotel_index = _load_script("build_hotel_index")
 _fetch_schedule_index = _load_script("fetch_schedule_index")
 _fetch_calendar_index = _load_script("fetch_calendar_index")
 _fetch_sage_projects = _load_script("fetch_sage_projects")
@@ -55,6 +57,14 @@ def _data_path(name: str) -> str:
     return os.path.join(_data_dir(), name)
 
 
+def _load_json_file(name: str):
+    path = _data_path(name)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 # (label, filename, what it's for)
 _FILES = [
     ("Traveler map", "united_travelers.yml", "How United travelers get coded (from historical export)"),
@@ -64,6 +74,8 @@ _FILES = [
     ("Calendars", "calendar_index.json", "Per-traveler calendar events (from Google Calendar)"),
     ("Sage projects", "sage_projects.json", "Active/archived status per project (from Sage Intacct)"),
     ("Chart of accounts", "chart_of_accounts.json", "GL account posting rules (from Sage GL export)"),
+    ("Hotel cross-reference", "hotel_project_index.json",
+     "Hotel booking dates → project, to match United flights (from Hotel Engine statements)"),
 ]
 
 
@@ -141,6 +153,35 @@ def refresh_chart():
         flash(f"Wrote {len(chart)} GL accounts.")
     except Exception as exc:
         flash(f"Could not process that file: {exc}")
+    finally:
+        os.unlink(tmp_path)
+    return redirect(url_for("admin.admin_page"))
+
+
+@admin_bp.post("/hotel-index")
+def refresh_hotel_index():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Choose a Hotel Engine statement CSV first.")
+        return redirect(url_for("admin.admin_page"))
+    tmp_path = _save_upload(file)
+    try:
+        with open(tmp_path, newline="", encoding="utf-8-sig") as fh:
+            rows = list(csv.DictReader(fh))
+        from .. import project_resolver
+        registry = _load_json_file("project_registry.json") or {}
+        active = project_resolver.load_active_projects()
+        recs = _build_hotel_index.build(rows, registry, active)
+
+        existing = _load_json_file("hotel_project_index.json") or []
+        merged = _build_hotel_index.merge(existing, recs)
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(_data_path("hotel_project_index.json"), "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=2)
+        added = len(merged) - len(existing)
+        flash(f"Added {added} hotel bookings ({len(merged)} total) to the cross-reference.")
+    except Exception as exc:
+        flash(f"Could not process that Hotel Engine file: {exc}")
     finally:
         os.unlink(tmp_path)
     return redirect(url_for("admin.admin_page"))

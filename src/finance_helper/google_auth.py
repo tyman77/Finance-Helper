@@ -22,13 +22,18 @@ def credentials(scopes: list[str], subject: str | None = None):
     from google.oauth2 import service_account
 
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    key_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if raw:
         creds = service_account.Credentials.from_service_account_info(
             json.loads(raw), scopes=scopes
         )
+    elif key_file:
+        creds = service_account.Credentials.from_service_account_file(key_file, scopes=scopes)
     else:
-        creds = service_account.Credentials.from_service_account_file(
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"], scopes=scopes
+        raise RuntimeError(
+            "Google credentials aren't configured. Set GOOGLE_SERVICE_ACCOUNT_JSON "
+            "(paste the service-account key file's contents) — or, running locally, "
+            "GOOGLE_APPLICATION_CREDENTIALS with a path to the key file."
         )
     if subject:
         creds = creds.with_subject(subject)  # domain-wide delegation impersonation

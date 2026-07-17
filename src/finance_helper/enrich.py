@@ -95,6 +95,7 @@ def enrich_united(
     roster: dict | None = None,
     registry: dict | None = None,
     active_projects=_UNSET,
+    hotel_index: list | None = None,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
@@ -108,6 +109,8 @@ def enrich_united(
         registry = _load_json("project_registry.json") or {}
     if active_projects is _UNSET:
         active_projects = project_resolver.load_active_projects()
+    if hotel_index is None:
+        hotel_index = _load_json("hotel_project_index.json") or []
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -158,15 +161,43 @@ def enrich_united(
             li.note += "; matched by surname only"
         if context:
             li.note += "; " + context
-        # No live schedule/calendar project match: offer the traveler's own
-        # past project codes (from history) as quick-pick candidates, filtered
-        # to those still active in Sage.
+        # No live schedule/calendar project match: fall back to the traveler's
+        # own past project codes, and — the strongest no-Google signal we have —
+        # cross-reference Hotel Engine bookings on the same dates to narrow them.
         if not li.project:
-            past = _active_history_projects(entry, active_projects)
-            if past:
-                li.note += "; past projects " + ", ".join(past) + " — pick one"
+            _fallback_project(li, entry, hotel_index, active_projects)
 
     return doc
+
+
+def _fallback_project(li, entry, hotel_index, active_projects) -> None:
+    """Suggest a project without live schedule/calendar data.
+
+    Cross-references the traveler's historical project codes with Hotel Engine
+    bookings on the same dates (someone flew United for the same trip they had
+    a hotel for). If the two agree on exactly one code, auto-fill it; if they
+    agree on a few, offer just those; otherwise fall back to the full history.
+    """
+    past = _active_history_projects(entry, active_projects)
+    dep = _parse_date(li.raw.get("Departure Date"))
+    hotel = (
+        project_resolver.hotel_projects_in_window(
+            hotel_index, dep, department=li.department, active_projects=active_projects
+        )
+        if (hotel_index and dep)
+        else []
+    )
+    narrowed = [c for c in past if c in hotel]
+    if len(narrowed) == 1:
+        li.project = narrowed[0]
+        li.note += f"; hotel booking that week -> project {narrowed[0]} (confirm)"
+    elif narrowed:
+        li.note += "; past projects " + ", ".join(narrowed) + " — pick one"
+    elif past:
+        li.note += "; past projects " + ", ".join(past) + " — pick one"
+    elif hotel:
+        # No history for this traveler, but hotels booked that week give options.
+        li.note += "; hotel-week projects " + ", ".join(hotel) + " — pick one"
 
 
 def _active_history_projects(entry: dict, active_projects) -> list[str]:
