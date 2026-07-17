@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
+from . import store
 from .admin import admin_bp
 
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -39,7 +40,7 @@ load_dotenv(find_dotenv(usecwd=True))
 RUNS: dict[str, dict] = {}
 
 _CANDIDATES_RE = re.compile(
-    r"(?:registry: candidate projects|calendar title codes) ([\d, ]+) — pick one"
+    r"(?:registry: candidate projects|calendar title codes|past projects) ([\d, ]+) — pick one"
 )
 
 # Human labels for the status pill — order matters for the filter toolbar.
@@ -97,6 +98,8 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: f'Matched client "{m.group(1)}": project {m.group(2)}'),
     (re.compile(r"^(?:registry: candidate projects|calendar title codes) .+ — pick one$"),
      lambda m: "Multiple possible projects — pick one below"),
+    (re.compile(r"^past projects .+ — pick one$"),
+     lambda m: "Past projects (from history) — pick one below"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),
@@ -328,6 +331,10 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
+        # Pull in any saved reviews from disk (survives restarts / other workers)
+        # without clobbering a run already live in memory.
+        for rid, saved in store.load_all_runs().items():
+            RUNS.setdefault(rid, saved)
         recent = sorted(RUNS.items(), key=lambda kv: kv[1]["created"], reverse=True)
         return render_template("index.html", sources=config.sources(), recent=recent)
 
@@ -363,12 +370,17 @@ def create_app() -> Flask:
             "created": datetime.now(),
             "posted": None,
         }
+        store.save_run(run_id, RUNS[run_id])
         return redirect(url_for("review_page", run_id=run_id))
 
     def _get_run(run_id):
         run = RUNS.get(run_id)
         if not run:
-            flash("That run isn't available (the server may have restarted since).")
+            run = store.load_run(run_id)  # may have been saved by another worker / prior boot
+            if run:
+                RUNS[run_id] = run
+        if not run:
+            flash("That review isn't available — it may have been deleted.")
         return run
 
     @app.get("/review/<run_id>")
@@ -420,6 +432,7 @@ def create_app() -> Flask:
             li.project = (request.form.get(f"project_{i}") or "").strip() or None
             li.needs_review = request.form.get(f"needs_review_{i}") == "on"
         run["posted"] = None  # edits invalidate a prior post attempt's relevance
+        store.save_run(run_id, run)
         flash("Changes saved.")
         return redirect(url_for("review_page", run_id=run_id))
 
@@ -436,7 +449,15 @@ def create_app() -> Flask:
             run["posted"] = {"ok": True, "detail": str(result)}
         except (RuntimeError, NotImplementedError) as exc:
             run["posted"] = {"ok": False, "detail": str(exc)}
+        store.save_run(run_id, run)
         return redirect(url_for("review_page", run_id=run_id))
+
+    @app.post("/review/<run_id>/delete")
+    def delete_run(run_id):
+        RUNS.pop(run_id, None)
+        store.delete_run(run_id)
+        flash("Review deleted.")
+        return redirect(url_for("index"))
 
     @app.get("/review/<run_id>/download")
     def download(run_id):

@@ -57,6 +57,20 @@ def test_enrich_united_from_history():
     assert smith.needs_review
 
 
+def test_past_projects_offered_as_candidates_when_no_live_match():
+    """With no schedule/calendar/registry hit, the traveler's own historical
+    project codes are surfaced as pick-one candidates, archived ones dropped."""
+    doc = sources.load("united", SAMPLES["united"][0])
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                         "department_confidence": 1.0, "account_hint": "71000--OH Travel",
+                         "account_confidence": 0.6, "projects": ["4804", "3428"], "n": 10}}
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects={"4804"})  # 3428 archived
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert "past projects 4804 — pick one" in john.note
+    assert "3428" not in john.note  # archived code never offered
+
+
 @pytest.mark.parametrize("source", ["united", "hotel_engine"])
 def test_sage_journal_entry_balances(source):
     doc = pipeline.process(source, SAMPLES[source][0])

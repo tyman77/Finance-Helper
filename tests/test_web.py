@@ -144,6 +144,10 @@ def test_line_candidates_extracts_registry_and_title_code_forms():
         "registry: candidate projects 2626, 2630, 3063 — pick one"
     ) == ["2626", "2630", "3063"]
     assert _line_candidates("calendar title codes 4471, 3831 — pick one") == ["4471", "3831"]
+    assert _line_candidates(
+        "account hint '71000--x' (used 60% of trips) — confirm project/COGS; "
+        "past projects 4804, 3428 — pick one"
+    ) == ["4804", "3428"]
     assert _line_candidates("crew schedule: project 4499 during stay -> 52200 COGS") == []
     assert _line_candidates(None) == []
 

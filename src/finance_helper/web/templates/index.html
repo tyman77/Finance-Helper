@@ -27,10 +27,12 @@ without real API credentials configured.</p>
 </form>
 
 {% if recent %}
-<h2>Recent runs (this session)</h2>
+<h2>Saved reviews</h2>
+<p class="subtle">These are saved automatically as you work — you can close the
+tab and come back to any of them later, even after the server restarts.</p>
 <table class="runs">
   <thead>
-    <tr><th>Vendor</th><th>File</th><th>Document</th><th class="amt">Total</th><th>Processed</th><th></th></tr>
+    <tr><th>Vendor</th><th>File</th><th>Document</th><th class="amt">Total</th><th>Status</th><th>Saved</th><th></th></tr>
   </thead>
   <tbody>
     {% for run_id, run in recent %}
@@ -39,8 +41,19 @@ without real API credentials configured.</p>
       <td>{{ run.filename }}</td>
       <td>{{ run.doc.document_id }}</td>
       <td class="amt">{{ run.doc.total }} {{ run.doc.currency }}</td>
+      <td>
+        {% if run.posted and run.posted.ok %}<span class="status-pill status-auto">Posted</span>
+        {% elif run.posted %}<span class="status-pill status-unknown">Post failed</span>
+        {% else %}<span class="status-pill status-review">In progress</span>{% endif %}
+      </td>
       <td>{{ run.created.strftime('%Y-%m-%d %H:%M') }}</td>
-      <td><a href="{{ url_for('review_page', run_id=run_id) }}">Open →</a></td>
+      <td>
+        <a href="{{ url_for('review_page', run_id=run_id) }}">Open →</a>
+        <form method="post" action="{{ url_for('delete_run', run_id=run_id) }}"
+              style="display:inline" onsubmit="return confirm('Delete this saved review?')">
+          <button type="submit" class="link-danger">Delete</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
   </tbody>

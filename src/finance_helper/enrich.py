@@ -158,8 +158,24 @@ def enrich_united(
             li.note += "; matched by surname only"
         if context:
             li.note += "; " + context
+        # No live schedule/calendar project match: offer the traveler's own
+        # past project codes (from history) as quick-pick candidates, filtered
+        # to those still active in Sage.
+        if not li.project:
+            past = _active_history_projects(entry, active_projects)
+            if past:
+                li.note += "; past projects " + ", ".join(past) + " — pick one"
 
     return doc
+
+
+def _active_history_projects(entry: dict, active_projects) -> list[str]:
+    """The traveler's historical project codes, most-frequent first, dropping
+    any archived in Sage. Order is preserved (unlike a set intersection)."""
+    codes = entry.get("projects") or []
+    if active_projects is None:
+        return list(codes)
+    return [c for c in codes if c in active_projects]
 
 
 _HE_DEPARTMENTS = {

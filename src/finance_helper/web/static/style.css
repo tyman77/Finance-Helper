@@ -218,6 +218,16 @@ ul.issues li { margin: 2px 0; }
 }
 .chip:hover { background: var(--accent); color: white; }
 
+.link-danger {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 0 0 8px;
+}
+.link-danger:hover { color: var(--err); filter: none; text-decoration: underline; }
+
 .status-pill {
   display: inline-block;
   padding: 2px 9px;

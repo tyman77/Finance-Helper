@@ -86,10 +86,11 @@ PYTHONPATH=src python -m finance_helper.web        # http://127.0.0.1:5000
 - Edit any coding field (autocomplete from the real chart of accounts, once
   fetched) and **Save changes** — this re-runs validation live.
 - **Download proposal JSON** gets you the exact payload that would post.
-- Runs live in memory for the life of the process (a local, single-user tool,
-  not a multi-tenant service) — restarting the server clears the list of
-  in-progress runs, though anything already approved is still written to
-  `out/` as usual.
+- **Saved reviews persist to disk** (`<FINANCE_HELPER_OUT_DIR>/runs/`): every
+  upload and edit is saved automatically, so you can close the tab and come
+  back to a review later — it survives a server restart/redeploy, and shows up
+  under "Saved reviews" on the home page (with an In progress / Posted / Post
+  failed status). Delete one from that list when you're done with it.
 
 Override the host/port/debug via `FINANCE_HELPER_WEB_HOST` /
 `FINANCE_HELPER_WEB_PORT` / `FINANCE_HELPER_WEB_DEBUG`.
@@ -198,6 +199,10 @@ For each ticket the tool then:
 - **suggests the GL account** (the traveler's most-common account) but **flags it
   for review** — historically the account is `52200 COGS Travel` when a project is
   assigned, otherwise an overhead account by trip purpose, which is a human call.
+- **offers the traveler's past project codes as one-click "pick one" chips** when
+  there's no live schedule/calendar match (below) — a fallback drawn from the
+  `Project` column of the history, so projects can be assigned quickly even
+  before the Google side is wired up. Archived codes are dropped.
 
 The map contains employee names and is **gitignored**; only the reproducible
 script and the non-PII `config/accounts.yml` are committed.

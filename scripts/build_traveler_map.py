@@ -35,6 +35,16 @@ from collections import Counter, defaultdict
 # names (data-entry junk) — treated the same as blank.
 _JUNK_PERSON = {"", "customer", "n/a", "na", "tbd", "unknown", "-"}
 
+# Project codes embedded in the historical "Project" column, e.g.
+# "Northview Church, IN [3428] Camera Upgrade" or "Little Country, 4173".
+_CODE_BRACKET = re.compile(r"\[(\d{3,5})\]")
+_CODE_TRAILING = re.compile(r",\s*(\d{3,5})\b")
+
+
+def _project_code(project: str) -> str | None:
+    m = _CODE_BRACKET.search(project) or _CODE_TRAILING.search(project)
+    return m.group(1) if m else None
+
 
 def _guess_person(passenger_name: str) -> str:
     """"JUDY/JOSHUA" -> "Joshua Judy" — best-effort fallback so a traveler with
@@ -66,7 +76,8 @@ def build(path: str) -> dict:
         rows = list(csv.DictReader(fh))
 
     agg: dict[str, dict[str, Counter]] = defaultdict(
-        lambda: {"person": Counter(), "department": Counter(), "account": Counter()}
+        lambda: {"person": Counter(), "department": Counter(), "account": Counter(),
+                 "project": Counter()}
     )
     for row in rows:
         name = (row.get("Passenger Name") or "").strip()
@@ -84,6 +95,9 @@ def build(path: str) -> dict:
             a["department"][row["Department"].strip()] += 1
         if row.get("Account", "").strip():
             a["account"][row["Account"].strip()] += 1
+        code = _project_code((row.get("Project") or "").strip())
+        if code:
+            a["project"][code] += 1
 
     out = {}
     for name, a in sorted(agg.items()):
@@ -98,6 +112,9 @@ def build(path: str) -> dict:
             "department_confidence": round(dept[0][1] / sum(a["department"].values()), 3) if dept else 0,
             "account_hint": acct[0][0] if acct else "",
             "account_confidence": round(acct[0][1] / sum(a["account"].values()), 3) if acct else 0,
+            # The traveler's own past project codes (most-frequent first) — a
+            # fallback suggestion when we have no live schedule/calendar match.
+            "projects": [c for c, _ in a["project"].most_common(4)],
             "n": n,
         }
     return out
@@ -114,6 +131,9 @@ def dump_yaml(data: dict) -> str:
         lines.append(f'  department_confidence: {v["department_confidence"]}')
         lines.append(f'  account_hint: "{v["account_hint"]}"')
         lines.append(f'  account_confidence: {v["account_confidence"]}')
+        # Quote each code so YAML keeps them strings ("3428"), not ints.
+        projects = ", ".join(f'"{c}"' for c in v.get("projects", []))
+        lines.append(f'  projects: [{projects}]')
         lines.append(f'  n: {v["n"]}')
     return "\n".join(lines) + "\n"
 

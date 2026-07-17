@@ -29,11 +29,12 @@ def isolate_data_dir(tmp_path, monkeypatch):
 
 
 def _write_csv(path, rows):
-    fieldnames = ["Passenger Name", "Person", "Department", "Account"]
+    fieldnames = ["Passenger Name", "Person", "Department", "Account", "Project"]
     with open(path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=fieldnames)
+        w = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
-        w.writerows(rows)
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fieldnames})
 
 
 def test_blank_person_falls_back_to_name_guess(tmp_path):
@@ -44,6 +45,35 @@ def test_blank_person_falls_back_to_name_guess(tmp_path):
     ])
     data = build_traveler_map.build(str(path))
     assert data["JUDY/JOSHUA"]["person"] == "Joshua Judy"
+
+
+def test_projects_aggregated_from_history_most_frequent_first(tmp_path):
+    path = tmp_path / "hist.csv"
+    _write_csv(path, [
+        {"Passenger Name": "DOE/JOHN", "Person": "John Doe", "Department": "60--Install Team",
+         "Account": "52200", "Project": "Northview Church, IN [3428] Camera Upgrade"},
+        {"Passenger Name": "DOE/JOHN", "Person": "John Doe", "Department": "60--Install Team",
+         "Account": "52200", "Project": "Northview Church, IN [3428] Camera Upgrade"},
+        {"Passenger Name": "DOE/JOHN", "Person": "John Doe", "Department": "60--Install Team",
+         "Account": "52200", "Project": "Little Country Church, Lighting, 4173"},
+        {"Passenger Name": "DOE/JOHN", "Person": "John Doe", "Department": "60--Install Team",
+         "Account": "52200", "Project": "no code here"},
+    ])
+    data = build_traveler_map.build(str(path))
+    # 3428 appears twice, 4173 once, "no code here" ignored.
+    assert data["DOE/JOHN"]["projects"] == ["3428", "4173"]
+
+
+def test_dump_yaml_keeps_project_codes_as_strings(tmp_path):
+    import yaml
+    path = tmp_path / "hist.csv"
+    _write_csv(path, [
+        {"Passenger Name": "DOE/JOHN", "Person": "John Doe", "Department": "60--Install Team",
+         "Account": "52200", "Project": "Client, 4173"},
+    ])
+    data = build_traveler_map.build(str(path))
+    reloaded = yaml.safe_load(build_traveler_map.dump_yaml(data))
+    assert reloaded["DOE/JOHN"]["projects"] == ["4173"]  # strings, not ints
 
 
 def test_junk_person_value_treated_as_blank(tmp_path):
