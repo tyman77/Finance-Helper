@@ -9,12 +9,13 @@
 <body>
   <header class="topbar">
     <a href="{{ url_for('index') }}" class="brand">Finance Helper</a>
-    {% if session.get('authed') %}
-      <span class="topbar-right">
+    <span class="topbar-right">
+      <a href="{{ url_for('admin.admin_page') }}" class="logout-link">Admin</a>
+      {% if session.get('authed') %}
         <span class="subtle">{{ session.get('email') }}</span>
         <a href="{{ url_for('logout') }}" class="logout-link">Log out</a>
-      </span>
-    {% endif %}
+      {% endif %}
+    </span>
   </header>
   <main>
     {% with messages = get_flashed_messages() %}

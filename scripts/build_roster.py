@@ -62,14 +62,16 @@ def build(travelers: dict) -> tuple[dict, list]:
 
 
 def main(argv):
-    tmap_path = os.path.join("data", "united_travelers.yml")
+    data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
+    tmap_path = os.path.join(data_dir, "united_travelers.yml")
     with open(tmap_path, encoding="utf-8") as fh:
         travelers = yaml.safe_load(fh) or {}
     roster, review = build(travelers)
-    with open(os.path.join("data", "roster.json"), "w", encoding="utf-8") as fh:
+    out = os.path.join(data_dir, "roster.json")
+    with open(out, "w", encoding="utf-8") as fh:
         json.dump(roster, fh, indent=2)
     print("\n".join(review))
-    print(f"\nWrote {len(roster)} people to data/roster.json — review the 'convention' rows.")
+    print(f"\nWrote {len(roster)} people to {out} — review the 'convention' rows.")
     return 0
 
 

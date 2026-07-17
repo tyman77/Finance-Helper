@@ -8,8 +8,9 @@ each cell the project code that person works that day (or a marker like HQ / PTO
     {"<Person Name>": {"YYYY-MM-DD": "<cell>", ...}, ...}
 
 Reads via the Sheets *values* REST API with a service account (google-auth +
-requests — proxy-friendly, unlike httplib2). Set:
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+requests — proxy-friendly, unlike httplib2), via finance_helper.google_auth
+(GOOGLE_APPLICATION_CREDENTIALS=path to a key file, or GOOGLE_SERVICE_ACCOUNT_JSON
+= the key content, for hosts with no local file to point at). Also set:
     SCHEDULE_SHEET_ID=1Pznz22qs2HuAq9iWFZTtcxqJGzzx2QksEPuwwldJOcE
     SCHEDULE_SHEET_RANGE="'2026'!A1:NZ1008"        # tab + range covering the year
     SCHEDULE_NAME_COL=<n>                            # optional: force the name column
@@ -90,22 +91,10 @@ def parse_grid(values: list, year: int, name_col: int | None = None) -> dict:
     return index
 
 
-def _session():
-    from google.auth.transport.requests import AuthorizedSession
-    from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_file(
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    )
-    sess = AuthorizedSession(creds)
-    ca = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
-    if ca:
-        sess.verify = ca
-    return sess
-
-
 def fetch(sheet_id: str, rng: str) -> list:
-    sess = _session()
+    from finance_helper import google_auth
+
+    sess = google_auth.session(["https://www.googleapis.com/auth/spreadsheets.readonly"])
     q = urllib.parse.quote(rng)
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{q}"
            "?valueRenderOption=FORMATTED_VALUE")
@@ -120,10 +109,12 @@ def main(argv):
                    os.environ.get("SCHEDULE_SHEET_RANGE", "'2026'!A1:NZ1008"))
     name_col = os.environ.get("SCHEDULE_NAME_COL")
     index = parse_grid(values, year, int(name_col) if name_col else None)
-    os.makedirs("data", exist_ok=True)
-    with open("data/schedule_index.json", "w", encoding="utf-8") as fh:
+    data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    out = os.path.join(data_dir, "schedule_index.json")
+    with open(out, "w", encoding="utf-8") as fh:
         json.dump(index, fh, indent=2)
-    print(f"Wrote {len(index)} people to data/schedule_index.json")
+    print(f"Wrote {len(index)} people to {out}")
     return 0
 
 

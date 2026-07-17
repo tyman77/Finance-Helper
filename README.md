@@ -152,14 +152,37 @@ be pointed at it:
    Cloud Console OAuth client and add `https://<that URL>/auth/google/callback`
    as an Authorized redirect URI — sign-in will fail with `redirect_uri_mismatch`
    until this matches exactly.
-5. **Get the data onto the volume.** The indices in `data/*.json` (traveler
-   map, schedule/calendar indices, project registry, roster) are gitignored —
-   they're not in the repo, so they won't appear on Railway just by deploying.
-   Either regenerate them by running the `scripts/build_*` / `scripts/fetch_*`
-   commands with `FINANCE_HELPER_DATA` pointed at the mounted volume path (via
-   Railway's shell, or a one-off `railway run` from your Mac), or copy the
-   files up some other way you're comfortable with — just not through this
-   chat, since they contain employee names/schedules.
+5. **Get the data onto the volume** — use the admin panel below (`/admin`),
+   which regenerates all of it directly on the server without needing to
+   touch the container's filesystem by hand.
+
+### Admin panel (`/admin`)
+
+The indices in `data/*.json` (traveler map, project registry, roster, crew
+schedule, calendars, Sage projects, chart of accounts) are gitignored — they
+carry employee/client names — so a fresh deploy never has them. The
+**Admin** link in the header opens a page to regenerate each one on the
+server itself, gated behind the same login as everything else:
+
+- **Historical United export / Chart of accounts** — upload the same CSVs
+  you'd otherwise feed to `scripts/build_traveler_map.py` / `build_chart.py`
+  locally; no extra credentials needed.
+- **Roster** — one click, derived from the traveler map already uploaded.
+- **Crew schedule / Traveler calendars** — need Google credentials as
+  environment variables, since there's no local key file to point at on a
+  host:
+  - `GOOGLE_SERVICE_ACCOUNT_JSON` = the **contents** of the service-account
+    JSON key file (the same one used locally, just pasted in as the env var
+    value instead of a file path)
+  - `SCHEDULE_SHEET_ID`, `SCHEDULE_SHEET_RANGE` for the crew-schedule sheet
+  - `USE_DWD=1` only if domain-wide delegation is set up (per-traveler
+    calendar impersonation); leave unset if each calendar was individually
+    shared with the service account instead
+  - The calendar fetch can take a few minutes for a large roster or wide
+    date range — that's expected, not stuck (gunicorn's timeout is raised to
+    5 minutes in `Procfile`/`railway.json` to accommodate it).
+- **Sage projects** — one click, reuses the `INTACCT_*` credentials already
+  configured for posting.
 
 ## United traveler coding (learned from history)
 

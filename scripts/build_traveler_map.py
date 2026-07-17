@@ -123,7 +123,9 @@ def main(argv):
         print(__doc__)
         return 1
     src = argv[0]
-    out = argv[1] if len(argv) > 1 else os.path.join("data", "united_travelers.yml")
+    out = argv[1] if len(argv) > 1 else os.path.join(
+        os.environ.get("FINANCE_HELPER_DATA", "data"), "united_travelers.yml"
+    )
     data = build(src)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:

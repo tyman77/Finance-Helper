@@ -2,3 +2,5 @@
 # or gunicorn (production hosting — see README's "Hosting it" section).
 Flask>=3.0
 gunicorn>=22.0
+# For the admin panel's Sheets/Calendar refresh actions (same as requirements-google.txt).
+google-auth>=2.23

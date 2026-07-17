@@ -129,6 +129,20 @@ def fetch_projects(token: str) -> list[dict]:
     return records
 
 
+def build(records: list[dict]) -> dict:
+    out = {}
+    for rec in records:
+        pid = _get(rec, _ID_FIELD_CANDIDATES)
+        if not pid:
+            continue
+        out[str(pid)] = {
+            "name": _get(rec, _NAME_FIELD_CANDIDATES) or "",
+            "status": _get(rec, _STATUS_FIELD_CANDIDATES),
+            "raw": rec,
+        }
+    return out
+
+
 def main(argv):
     token = get_token()
     print("Authenticated OK.")
@@ -141,27 +155,17 @@ def main(argv):
     print("\nFirst raw record (eyeball this for the real field names):")
     print(json.dumps(records[0], indent=2)[:2000])
 
-    out = {}
-    missing_status = 0
-    for rec in records:
-        pid = _get(rec, _ID_FIELD_CANDIDATES)
-        if not pid:
-            continue
-        status = _get(rec, _STATUS_FIELD_CANDIDATES)
-        if status is None:
-            missing_status += 1
-        out[str(pid)] = {
-            "name": _get(rec, _NAME_FIELD_CANDIDATES) or "",
-            "status": status,
-            "raw": rec,
-        }
+    out = build(records)
+    missing_status = sum(1 for v in out.values() if v["status"] is None)
 
-    os.makedirs("data", exist_ok=True)
-    with open("data/sage_projects.json", "w", encoding="utf-8") as fh:
+    data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    dest = os.path.join(data_dir, "sage_projects.json")
+    with open(dest, "w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=2, default=str)
 
     active = sum(1 for v in out.values() if (v["status"] or "").lower() == "active")
-    print(f"\nWrote {len(out)} projects to data/sage_projects.json "
+    print(f"\nWrote {len(out)} projects to {dest} "
           f"({active} active, {len(out) - active} not-active-or-unknown)")
     if missing_status:
         print(f"WARNING: {missing_status} records had no recognizable status field — "

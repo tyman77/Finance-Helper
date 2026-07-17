@@ -45,7 +45,9 @@ def main(argv):
         print(__doc__)
         return 1
     chart = build(argv[0])
-    out = argv[1] if len(argv) > 1 else os.path.join("data", "chart_of_accounts.json")
+    out = argv[1] if len(argv) > 1 else os.path.join(
+        os.environ.get("FINANCE_HELPER_DATA", "data"), "chart_of_accounts.json"
+    )
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(chart, fh, indent=2)

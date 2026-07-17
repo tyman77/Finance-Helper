@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Finance Helper — Admin{% endblock %}
+{% block content %}
+
+<a href="{{ url_for('index') }}" class="back">&larr; Back</a>
+<h1>Data admin</h1>
+<p class="subtle">
+  Regenerate the indices this tool learns coding from — traveler history,
+  crew schedule, calendars, project registry, Sage projects, chart of
+  accounts. These files are gitignored (they carry employee/client names),
+  so a deploy doesn't bring them along — run them here instead of copying
+  files off a laptop.
+</p>
+
+<table class="runs">
+  <thead><tr><th>Data</th><th>What it's for</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for label, filename, note, status in rows %}
+    <tr>
+      <td>{{ label }}</td>
+      <td class="subtle">{{ note }}</td>
+      <td>{{ status }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>1. Historical United export</h2>
+<p class="subtle">
+  Upload the same "United Flights" historical categorization CSV used
+  locally. Builds both the traveler map and the client&rarr;project
+  registry from it.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_traveler_map') }}"
+      enctype="multipart/form-data" class="upload-form">
+  <label>CSV file <input type="file" name="file" accept=".csv" required></label>
+  <button type="submit">Rebuild from CSV</button>
+</form>
+
+<h2>2. Roster (traveler &rarr; calendar)</h2>
+<p class="subtle">
+  Auto-drafted from the traveler map, via the work-email convention plus
+  known vanity calendars. Requires step 1 first.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_roster') }}" class="upload-form">
+  <button type="submit">Rebuild roster</button>
+</form>
+
+<h2>3. Crew schedule (installers)</h2>
+<p class="subtle">
+  Reads the crew-schedule Google Sheet live. Requires
+  <code>SCHEDULE_SHEET_ID</code> and Google credentials configured as
+  environment variables.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_schedule') }}" class="upload-form">
+  <label>Year <input type="number" name="year" value="{{ default_year }}" required></label>
+  <button type="submit">Fetch crew schedule</button>
+</form>
+
+<h2>4. Traveler calendars</h2>
+<p class="subtle">
+  Reads each traveler's own Google Calendar for trip context. Requires
+  step 2 (roster) first, and Google credentials configured. Can take a
+  few minutes for a large roster or wide date range — let it run.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_calendars') }}" class="upload-form">
+  <label>From <input type="date" name="start" required></label>
+  <label>To <input type="date" name="end" required></label>
+  <button type="submit">Fetch calendars</button>
+</form>
+
+<h2>5. Sage projects (active/archived)</h2>
+<p class="subtle">
+  Pulls the Projects list from Sage Intacct using the same credentials
+  already configured for posting journal entries.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_sage_projects') }}" class="upload-form">
+  <button type="submit">Fetch Sage projects</button>
+</form>
+
+<h2>6. Chart of accounts</h2>
+<p class="subtle">
+  Upload a Sage Intacct General Ledger account export CSV to capture
+  posting rules (which accounts require a department, which are disallowed
+  for direct posting).
+</p>
+<form method="post" action="{{ url_for('admin.refresh_chart') }}"
+      enctype="multipart/form-data" class="upload-form">
+  <label>CSV file <input type="file" name="file" accept=".csv" required></label>
+  <button type="submit">Rebuild chart of accounts</button>
+</form>
+
+{% endblock %}

@@ -13,7 +13,9 @@ Access model (set env):
   - Domain-wide delegation                         -> set USE_DWD=1; the service
     account impersonates each calendar owner (roster value = the owner email).
 
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+Credentials, via finance_helper.google_auth:
+    GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json, or
+    GOOGLE_SERVICE_ACCOUNT_JSON=<the key content>   # for hosts with no local file
     USE_DWD=1            # optional; requires domain-wide delegation authorized
 
 Usage:
@@ -31,28 +33,9 @@ _INTERNAL_DOMAIN = "summitintegrated.com"
 _SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
-_BASE_CREDS = None
-
-
-def _base_creds():
-    global _BASE_CREDS
-    if _BASE_CREDS is None:
-        from google.oauth2 import service_account
-        _BASE_CREDS = service_account.Credentials.from_service_account_file(
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"], scopes=_SCOPES)
-    return _BASE_CREDS
-
-
 def _session(subject: str | None = None):
-    from google.auth.transport.requests import AuthorizedSession
-    creds = _base_creds()
-    if subject:
-        creds = creds.with_subject(subject)   # domain-wide delegation impersonation
-    sess = AuthorizedSession(creds)
-    ca = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
-    if ca:
-        sess.verify = ca
-    return sess
+    from finance_helper import google_auth
+    return google_auth.session(_SCOPES, subject=subject)
 
 
 def _external_domains(ev: dict) -> list:
@@ -97,30 +80,39 @@ def fetch_calendar(cal_id: str, start: str, end: str, subject: str | None) -> li
             return events
 
 
-def main(argv):
-    if len(argv) < 2:
-        print(__doc__)
-        return 1
-    with open("data/roster.json", encoding="utf-8") as fh:
-        roster = json.load(fh)
-    use_dwd = bool(os.environ.get("USE_DWD"))
-
+def fetch_all(roster: dict, start: str, end: str, use_dwd: bool, checkpoint_path: str | None = None):
+    """Fetch every calendar in the roster; returns (index, skipped_ids). Writes
+    a checkpoint after each calendar (if checkpoint_path is given) so a
+    timeout partway through doesn't lose the calendars already fetched."""
     ids = sorted(set(roster.values()))
-    index = {}
-    skipped = []
+    index: dict = {}
+    skipped: list[str] = []
     for i, cal_id in enumerate(ids, 1):
         subject = cal_id if use_dwd else None
         try:
-            index[cal_id] = fetch_calendar(cal_id, argv[0], argv[1], subject)
+            index[cal_id] = fetch_calendar(cal_id, start, end, subject)
             print(f"  [{i}/{len(ids)}] {cal_id}: {len(index[cal_id])} events", flush=True)
         except Exception as exc:  # keep going; report the calendars we couldn't read
             skipped.append(cal_id)
             print(f"  [{i}/{len(ids)}] {cal_id}: SKIPPED ({type(exc).__name__})", flush=True)
-        # Checkpoint after every calendar so a timeout doesn't lose earlier work.
-        with open("data/calendar_index.json", "w", encoding="utf-8") as fh:
-            json.dump(index, fh, indent=2)
-    print(f"Wrote {len(index)} calendars to data/calendar_index.json "
-          f"({len(skipped)} skipped)")
+        if checkpoint_path:
+            with open(checkpoint_path, "w", encoding="utf-8") as fh:
+                json.dump(index, fh, indent=2)
+    return index, skipped
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(__doc__)
+        return 1
+    data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
+    with open(os.path.join(data_dir, "roster.json"), encoding="utf-8") as fh:
+        roster = json.load(fh)
+    use_dwd = bool(os.environ.get("USE_DWD"))
+
+    out = os.path.join(data_dir, "calendar_index.json")
+    index, skipped = fetch_all(roster, argv[0], argv[1], use_dwd, checkpoint_path=out)
+    print(f"Wrote {len(index)} calendars to {out} ({len(skipped)} skipped)")
     return 0
 
 

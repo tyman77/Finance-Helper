@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import config, destinations, pipeline, validate
 from .. import review as proposal_review
+from .admin import admin_bp
 
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -322,6 +323,8 @@ def create_app() -> Flask:
     def logout():
         session.clear()
         return redirect(url_for("login"))
+
+    app.register_blueprint(admin_bp)
 
     @app.get("/")
     def index():
