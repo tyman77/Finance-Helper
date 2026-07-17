@@ -124,7 +124,10 @@ def enrich_united(
 
         li.person = entry.get("person") or None
         dept = entry.get("department") or None
-        li.department = dept
+        # Store the bare department code ("60--Install Team" -> "60") so it
+        # matches the code-keyed dropdown in the web UI and the department id
+        # the Sage/Bill.com payloads expect.
+        li.department = dept.split("--")[0].strip() if dept else None
         if not (dept and entry.get("department_confidence", 0) >= _DEPT_CONF_MIN):
             li.needs_review = True
             li.note = "low-confidence department"

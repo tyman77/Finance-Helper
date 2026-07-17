@@ -49,7 +49,7 @@ def test_enrich_united_from_history():
     enrich.enrich_united(doc, tmap)
     john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.person == "John Doe"
-    assert john.department == "10--Sales Team"
+    assert john.department == "10"  # bare code, normalized from "10--Sales Team"
     assert john.gl_account == "52200"
     assert john.needs_review, "account must be confirmed by a human"
     # Unknown travelers are flagged, not silently coded.
