@@ -88,3 +88,25 @@ def test_runs_listed_on_landing(client):
     run_id = _post_run(client)
     body = client.get("/cashproof/").data
     assert run_id.encode() in body or b"open" in body
+
+
+def test_fraud_checks_render_on_run_page(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path / "data"))
+    import json as _json
+    import os as _os
+    _os.makedirs(tmp_path / "data", exist_ok=True)
+    # A per-diem with no trip evidence anywhere -> one review finding.
+    (_json.dump([{"person": "Ghost Rider", "date": "2026-06-15",
+                  "amount": "250", "memo": "per diem"}],
+                open(tmp_path / "data" / "ramp_reimbursements.json", "w")))
+    run_id = _post_run(client)
+    body = client.get(f"/cashproof/{run_id}").data
+    assert b"Fraud checks" in body
+    assert b"Per diem with no trip evidence: Ghost Rider" in body
+    # Disposition attaches to the finding id and survives re-render.
+    import re as _re
+    fid = _re.search(rb'value="(check:[0-9a-f]+)"', body).group(1).decode()
+    client.post(f"/cashproof/{run_id}/disposition",
+                data={"source_id": fid, "action": "investigate", "note": "who is this"})
+    body2 = client.get(f"/cashproof/{run_id}").data
+    assert b"investigate" in body2 and b"who is this" in body2

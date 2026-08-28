@@ -15,10 +15,43 @@ from decimal import Decimal
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
+import json
+
 from ..recon import bank as bank_mod
-from ..recon import engine, sage_api, sage_xml, summary
+from ..recon import checks, engine, sage_api, sage_xml, summary
 from ..recon import sage as sage_mod
 from ..recon import store as recon_store
+
+
+def _data_json(name, default):
+    data_dir = os.environ.get(
+        "FINANCE_HELPER_DATA",
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
+    path = os.path.join(data_dir, name)
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def _flight_pairs():
+    """(person, date) for every line of every saved United statement."""
+    from .app import RUNS
+    from . import store as review_store
+    for rid, saved in review_store.load_all_runs().items():
+        RUNS.setdefault(rid, saved)
+    pairs = []
+    for run in RUNS.values():
+        doc = run.get("doc")
+        if doc is None or doc.source != "united":
+            continue
+        for li in doc.line_items:
+            if li.person and li.date:
+                pairs.append((li.person, li.date))
+    return pairs
 
 
 def _sage_fetcher():
@@ -138,9 +171,18 @@ def run_page(run_id):
         [(b["label"], b["total"]) for b in activity["buckets"] if b["kind"] != "sweep"][:10],
         label_w=210)
 
+    fraud = checks.run_all(
+        result.bank,
+        _data_json("ramp_reimbursements.json", []),
+        _data_json("hotel_project_index.json", []),
+        _data_json("timecards_index.json", {}),
+        _flight_pairs(),
+    )
+
     return render_template(
         "cashproof_run.html",
         run_id=run_id,
+        fraud=fraud,
         meta=payload.get("meta", {}),
         result=result,
         has_ledger=bool(result.ledger),

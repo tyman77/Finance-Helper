@@ -88,6 +88,48 @@ export to get the tie-out and exceptions queue.</p>
 <p class="subtle">None — everything tied or is a timing item. 🎉</p>
 {% endif %}
 
+<h2>Fraud checks</h2>
+<p class="subtle">
+  Reimbursements: {{ fraud.reimb.matched }}/{{ fraud.reimb.checked }} bank payouts tied to Ramp
+  {%- if not fraud.reimb.coverage %} — <strong>no Ramp data for this period; fetch it in Admin → step 7</strong>{% endif %}.
+  Per-diem scanned: {{ fraud.perdiem.checked }}.
+  Payees analyzed: {{ fraud.vendors.vendors }}.
+</p>
+{% if fraud.findings %}
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Severity</th><th>Finding</th><th>Detail</th><th>Disposition</th></tr></thead>
+  <tbody>
+  {% for f in fraud.findings %}
+    <tr>
+      <td><span class="status-pill {{ 'status-unknown' if f.severity == 'critical' else 'status-pick' if f.severity == 'high' else 'status-review' if f.severity == 'review' else 'neutral' }}">{{ f.severity }}</span></td>
+      <td>{{ f.title }}</td>
+      <td class="subtle">{{ f.detail }}</td>
+      <td>
+        {% set d = dispositions.get(f.id) %}
+        {% if d %}
+          <span class="status-pill {{ 'status-auto' if d.action == 'accept' else 'status-unknown' if d.action == 'confirmed_issue' else 'status-review' }}">{{ d.action.replace('_', ' ') }}</span>
+          <div class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+        {% else %}
+        <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo">
+          <input type="hidden" name="source_id" value="{{ f.id }}">
+          <select name="action">
+            <option value="accept">Accept (fine)</option>
+            <option value="investigate">Investigating</option>
+            <option value="confirmed_issue">Confirmed issue</option>
+          </select>
+          <input type="text" name="note" placeholder="why / what was found" size="18">
+          <button type="submit">Save</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="subtle">No findings — reimbursements tie, per-diems have trip evidence, no payee patterns flagged.</p>
+{% endif %}
+
 {% if confirms %}
 <h2>Needs confirmation ({{ confirms | length }})</h2>
 <div class="tablewrap"><table class="runs">

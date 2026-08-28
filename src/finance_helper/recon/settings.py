@@ -28,6 +28,15 @@ _DEFAULTS = {
         "timing_window_days": 5,
         "aged_timing_days": 30,
     },
+    "checks": {
+        "reimb_window_days": 5,        # bank RMPR debit vs Ramp record date slack
+        "perdiem_evidence_days": 10,   # trip evidence window around a per-diem
+        "new_vendor_days": 30,         # "first-ever payment" recency to flag
+        "approval_thresholds": [5000, 10000],
+        "threshold_band": 0.8,         # flag payments in [band*T, T)
+        "velocity_count": 4,           # N payments to one vendor within...
+        "velocity_days": 7,            # ...this many days
+    },
 }
 
 
