@@ -158,6 +158,58 @@ def _first_col(row: dict, candidates: tuple) -> str:
     return ""
 
 
+def _split_names(cell: str) -> list[str]:
+    """Split a multi-guest cell without breaking "Last, First" single names.
+
+    ";", "&", and " and " always separate. A comma separates only when every
+    comma-part looks like a full name (contains a space) — "Jake Cody, Natalie
+    Brady" splits, "Cody, Jake" stays one person.
+    """
+    text = cell.replace("&", ";").replace(" and ", ";")
+    parts = [p.strip() for p in text.split(";") if p.strip()]
+    out: list[str] = []
+    for part in parts:
+        commas = [c.strip() for c in part.split(",") if c.strip()]
+        if len(commas) > 1 and all(" " in c for c in commas):
+            out.extend(commas)
+        else:
+            out.append(part)
+    return out
+
+
+def statement_occupants(raw: dict) -> tuple[list[str], int, int]:
+    """(guest names, guest count, room count) straight from a statement row.
+
+    Real Hotel Engine exports vary; rather than pin one header, any column
+    whose name says guest/traveler-ish is read — text cells as names, numeric
+    cells as counts, Single/Double words as counts of 1/2.
+    """
+    names: list[str] = []
+    count = rooms = 0
+    for key, value in raw.items():
+        kl = (key or "").lower().strip()
+        val = str(value or "").strip()
+        if not val or "hotel" in kl:
+            continue
+        if "room" in kl and val.isdigit():
+            rooms = max(rooms, int(val))
+            continue
+        guestish = ("guest" in kl or "traveler" in kl
+                    or kl in ("booked for", "booked by", "employee", "attendee", "occupancy"))
+        if not guestish:
+            continue
+        low = val.lower()
+        if low in ("single", "double"):
+            count = max(count, 1 if low == "single" else 2)
+        elif val.replace(".", "", 1).isdigit():
+            count = max(count, int(float(val)))
+        else:
+            for n in _split_names(val):
+                if n not in names:
+                    names.append(n)
+    return names, count, rooms
+
+
 def build_guest_index(rows: list[dict]) -> dict:
     """Hotel Engine guest/trips CSV -> {booking id: {guests: [...], rooms, count}}.
 
@@ -171,8 +223,7 @@ def build_guest_index(rows: list[dict]) -> dict:
             continue
         entry = index.setdefault(bid, {"guests": [], "rooms": 0, "count": 0})
         name = _first_col(row, _GUEST_NAME_COLS)
-        # A cell may carry several guests ("Jane Doe; John Doe").
-        for part in [p.strip() for p in name.replace(";", ",").split(",") if p.strip()]:
+        for part in _split_names(name):
             if part not in entry["guests"]:
                 entry["guests"].append(part)
         entry["rooms"] = max(entry["rooms"], int(_num(_first_col(row, _ROOM_COUNT_COLS) or 0)))
@@ -267,7 +318,9 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
             b = bookings.get(inv)
             if b is None:
                 nights = int(_num(raw.get("Nights")))
+                st_guests, st_count, st_rooms = statement_occupants(raw)
                 b = bookings[inv] = {
+                    "guests": st_guests, "_count": st_count, "_rooms": st_rooms,
                     "invoice": inv,
                     "type": (raw.get("Invoice Type") or "").strip() or "Hotel",
                     "hotel": (raw.get("Hotel Name") or "").strip(),
@@ -303,13 +356,23 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
     ordered = sorted(bookings.values(), key=lambda b: b["start"], reverse=True)
 
     guest_index = guest_index or {}
+    by_traveler: dict[str, dict] = defaultdict(lambda: {"spend": Decimal("0"), "stays": 0})
     for b in ordered:
         entry = guest_index.get(b["invoice"], {})
-        b["guests"] = entry.get("guests", [])
-        b["occupancy"] = occupancy_label(
-            entry.get("count") or len(b["guests"]), entry.get("rooms") or 0)
+        for g in entry.get("guests", []):
+            if g not in b["guests"]:
+                b["guests"].append(g)
+        guests_n = max(len(b["guests"]), b.pop("_count", 0), entry.get("count") or 0)
+        rooms_n = max(b.pop("_rooms", 0), entry.get("rooms") or 0)
+        b["occupancy"] = occupancy_label(guests_n, rooms_n)
         b["inferred"] = ([] if b["guests"] else
                          _infer_travelers(b, flight_docs or []))
+        if b["guests"]:
+            share = b["total"] / len(b["guests"])   # co-stays split evenly
+            for g in b["guests"]:
+                t = by_traveler[g]
+                t["spend"] += share
+                t["stays"] += 1
 
     return {
         "bookings": ordered,
@@ -324,6 +387,8 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
         "cities": sorted(((name, v["spend"], v["nights"]) for name, v in by_city.items()),
                          key=lambda t: -abs(t[1])),
         "guest_bookings": sum(1 for b in ordered if b["guests"]),
+        "travelers": sorted(((n, v["spend"], v["stays"]) for n, v in by_traveler.items()),
+                            key=lambda t: -abs(t[1])),
     }
 
 

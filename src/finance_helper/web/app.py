@@ -368,13 +368,17 @@ def create_app() -> Flask:
                 "cities": insights.hbar_chart([(n, v) for n, v, _ in detail["cities"][:8]]),
                 "departments": insights.hbar_chart(detail["departments"][:8], label_w=190),
             }
+        # For hotels, statement guest columns beat li.person (unset for HE).
+        people = data["people"][:8]
+        if detail and detail.get("travelers"):
+            people = [(n, s, c) for n, s, c in detail["travelers"][:8]]
         return render_template(
             "domain.html",
             d=data,
             domain=domain,
             monthly=insights.monthly_chart(data["months"], data["by_month_group"], [data["group"]]),
             projects_chart=insights.hbar_chart([(plabel(c), v) for c, v in data["projects"][:8]]),
-            people_chart=insights.hbar_chart([(n, a) for n, a, _ in data["people"][:8]]),
+            people_chart=insights.hbar_chart([(n, a) for n, a, _ in people]),
             detail=detail,
             dc=detail_charts,
         )

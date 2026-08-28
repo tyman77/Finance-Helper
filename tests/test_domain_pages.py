@@ -149,3 +149,41 @@ def test_guest_upload_shows_actual_travelers_and_occupancy(client, tmp_path, mon
     assert b"Jake Cody" in body
     assert b"Double" in body
     assert b"Guest list loaded: 1 bookings" in body
+
+
+def test_statement_guest_columns_are_read_directly():
+    """The real HE export carries traveler names per row — read them without
+    knowing the exact header, plus occupancy words/counts and rooms."""
+    names, count, rooms = insights.statement_occupants({
+        "Hotel Name": "La Quinta", "Guest Name": "Jake Cody; Natalie Brady",
+        "Occupancy": "Double", "Rooms": "1",
+    })
+    assert names == ["Jake Cody", "Natalie Brady"]
+    assert count == 2 and rooms == 1
+    # "Last, First" in a single cell stays one person.
+    names2, _, _ = insights.statement_occupants({"Traveler": "Cody, Jake"})
+    assert names2 == ["Cody, Jake"]
+    # Numeric guest counts, e.g. "Guests": "2".
+    _, count3, _ = insights.statement_occupants({"Guests": "2"})
+    assert count3 == 2
+
+
+def test_hotels_detail_uses_statement_guests_and_ranks_travelers():
+    from finance_helper import pipeline
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    # Simulate the real export: raw rows carry a guest column.
+    for li in doc.line_items:
+        if li.raw.get("Invoice Number") == "260615000002":
+            li.raw["Guest Name"] = "Jake Cody"
+        elif li.raw.get("Invoice Number") == "260615000001":
+            li.raw["Guest Name"] = "Natalie Brady, Jane Smith"
+    detail = insights.hotels_detail([doc])
+    b2 = next(b for b in detail["bookings"] if b["invoice"] == "260615000002")
+    assert b2["guests"] == ["Jake Cody"]
+    assert b2["occupancy"] == "Single"
+    b1 = next(b for b in detail["bookings"] if b["invoice"] == "260615000001")
+    assert b1["guests"] == ["Natalie Brady", "Jane Smith"]
+    assert b1["occupancy"] == "Double"
+    assert detail["travelers"][0][0] in ("Jake Cody", "Natalie Brady", "Jane Smith")
+    # Statement guests suppress flight inference entirely.
+    assert b2["inferred"] == []
