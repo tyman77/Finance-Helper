@@ -24,15 +24,19 @@ _DEFAULT_BASE = "https://gateway.prod.bill.com/connect/v3"
 _REQUIRED = ["BILLDOTCOM_DEV_KEY", "BILLDOTCOM_USERNAME",
              "BILLDOTCOM_PASSWORD", "BILLDOTCOM_ORG_ID"]
 
-# Candidates cover both API records and the payments CSV export's headers.
+# Candidates cover both API records and the payments CSV export's headers
+# (which vary by which report/export screen produced the file).
 _VENDOR_KEYS = ("vendorName", "vendor_name", "name", "payee",
-                "Vendor", "Vendor Name", "Payee", "Pay To")
+                "Vendor", "Vendor Name", "Payee", "Payee Name", "Pay To",
+                "Paid To", "Recipient")
 _DATE_KEYS = ("processDate", "paymentDate", "sentDate", "createdTime", "date",
-              "Process Date", "Payment Date", "Date")
+              "Process Date", "Payment Date", "Sent Date", "Paid Date",
+              "Date", "Processed Date")
 _AMOUNT_KEYS = ("amount", "paymentAmount", "totalAmount",
-                "Amount", "Payment Amount")
+                "Amount", "Payment Amount", "Paid Amount", "Total Amount")
 _ID_KEYS = ("id", "paymentId", "Payment Confirmation Number",
-            "Confirmation Number", "Payment #", "Check #")
+            "Confirmation Number", "Payment #", "Payment Number",
+            "Check #", "Check Number", "Ref #", "Reference")
 
 
 def credentials_present() -> bool:
