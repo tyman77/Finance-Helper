@@ -346,6 +346,28 @@ def create_app() -> Flask:
         recent = sorted(RUNS.items(), key=lambda kv: kv[1]["created"], reverse=True)
         return render_template("index.html", sources=config.sources(), recent=recent)
 
+    @app.get("/d/<domain>")
+    def domain_page(domain):
+        if domain not in insights.DOMAINS:
+            return redirect(url_for("index"))
+        for rid, saved in store.load_all_runs().items():
+            RUNS.setdefault(rid, saved)
+        data = insights.build_domain(list(RUNS.items()), domain)
+        registry = _load_json_data("project_registry.json").get("registry", {})
+
+        def plabel(code):
+            client = (registry.get(code) or {}).get("client")
+            return f"{code} — {client}" if client else code
+
+        return render_template(
+            "domain.html",
+            d=data,
+            domain=domain,
+            monthly=insights.monthly_chart(data["months"], data["by_month_group"], [data["group"]]),
+            projects_chart=insights.hbar_chart([(plabel(c), v) for c, v in data["projects"][:8]]),
+            people_chart=insights.hbar_chart([(n, a) for n, a, _ in data["people"][:8]]),
+        )
+
     @app.get("/insights")
     def insights_page():
         for rid, saved in store.load_all_runs().items():

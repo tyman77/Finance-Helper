@@ -9,10 +9,11 @@ without real API credentials configured.</p>
 <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data" class="upload-form">
   <label>
     Source
+    {% set pre = request.args.get('source') %}
     <select name="source" required>
-      <option value="" disabled selected>Choose a source…</option>
+      <option value="" disabled {{ 'selected' if not pre }}>Choose a source…</option>
       {% for key, cfg in sources.items() %}
-        <option value="{{ key }}">
+        <option value="{{ key }}" {{ 'selected' if key == pre }}>
           {{ cfg.get('display_name', key) }} &rarr;
           {{ 'Sage Intacct' if cfg.destination == 'sage' else 'Bill.com' }}
         </option>

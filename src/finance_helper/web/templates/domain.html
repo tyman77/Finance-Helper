@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} — Scout{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1><span class="swatch big s{{ d.slot }}"></span> {{ d.title }}</h1>
+  <p class="subtle">{{ d.vendor }} spend, learned coding, and statements — one place.</p>
+</div>
+
+{% if d.line_count == 0 %}
+<div class="panel">
+  <p class="subtle">No {{ d.title|lower }} data yet — process a {{ d.vendor }} statement and
+  this page fills in.</p>
+  <a class="button" href="{{ url_for('index', source=d.sources[0]) }}">Upload a {{ d.vendor }} statement</a>
+</div>
+{% else %}
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Total spend</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(d.total) }}</div>
+    <div class="kpi-sub">{{ d.line_count }} lines</div></div>
+  <div class="kpi"><div class="kpi-label">Statements</div>
+    <div class="kpi-value">{{ d.statements | length }}</div>
+    <div class="kpi-sub">{{ d.statements | selectattr('posted') | list | length }} posted</div></div>
+  <div class="kpi"><div class="kpi-label">Flagged for review</div>
+    <div class="kpi-value">{{ d.flagged }}</div>
+    <div class="kpi-sub">lines awaiting a human</div></div>
+  <div class="kpi kpi-action">
+    <div class="kpi-label">New statement</div>
+    <a class="button" href="{{ url_for('index', source=d.sources[0]) }}">Upload {{ d.vendor }} CSV</a>
+  </div>
+</div>
+
+{% if monthly.columns %}
+<div class="panel">
+  <h2>Monthly {{ d.title|lower }} spend</h2>
+  <svg viewBox="0 0 {{ monthly.width }} {{ monthly.height }}" class="chart" role="img"
+       aria-label="Monthly {{ d.title|lower }} spend">
+    {% for t in monthly.ticks %}
+    <line x1="{{ monthly.pad_l }}" x2="{{ monthly.width - monthly.pad_r }}"
+          y1="{{ t.y }}" y2="{{ t.y }}" class="grid"/>
+    <text x="{{ monthly.pad_l - 6 }}" y="{{ t.y + 3 }}" class="tick" text-anchor="end">{{ t.label }}</text>
+    {% endfor %}
+    <line x1="{{ monthly.pad_l }}" x2="{{ monthly.width - monthly.pad_r }}"
+          y1="{{ monthly.baseline_y }}" y2="{{ monthly.baseline_y }}" class="baseline"/>
+    {% for col in monthly.columns %}
+      {% for seg in col.segments %}
+      <rect x="{{ seg.x }}" y="{{ seg.y }}" width="{{ seg.w }}" height="{{ seg.h }}"
+            class="seg s{{ d.slot }}" rx="2">
+        <title>{{ col.label }}: ${{ '{:,.0f}'.format(seg.value) }}</title>
+      </rect>
+      {% endfor %}
+      <text x="{{ col.cx }}" y="{{ monthly.baseline_y + 14 }}" class="tick" text-anchor="middle">{{ col.label }}</text>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
+
+<div class="panel-grid">
+  <div class="panel">
+    <h2>Top projects</h2>
+    {% if projects_chart.rows %}
+    <svg viewBox="0 0 {{ projects_chart.width }} {{ projects_chart.height }}" class="chart" role="img"
+         aria-label="Top projects by {{ d.title|lower }} spend">
+      {% for r in projects_chart.rows %}
+      <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(24, True) }}</text>
+      <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s{{ d.slot }}" rx="2">
+        <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+      </rect>
+      <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+      {% endfor %}
+    </svg>
+    {% else %}<p class="subtle">No project-coded {{ d.title|lower }} spend yet.</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Top travelers</h2>
+    {% if people_chart.rows %}
+    <svg viewBox="0 0 {{ people_chart.width }} {{ people_chart.height }}" class="chart" role="img"
+         aria-label="Top travelers by {{ d.title|lower }} spend">
+      {% for r in people_chart.rows %}
+      <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(24, True) }}</text>
+      <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s{{ d.slot }}" rx="2">
+        <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+      </rect>
+      <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+      {% endfor %}
+    </svg>
+    {% else %}<p class="subtle">No traveler-level detail for this vendor.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Statements</h2>
+  <table class="runs">
+    <thead><tr><th>Document</th><th>File</th><th class="amt">Total</th><th>Status</th><th>Processed</th><th></th></tr></thead>
+    <tbody>
+      {% for s in d.statements %}
+      <tr>
+        <td>{{ s.document_id }}</td>
+        <td class="subtle">{{ s.filename }}</td>
+        <td class="amt">${{ '{:,.2f}'.format(s.total) }}</td>
+        <td>{% if s.posted %}<span class="status-pill status-auto">Posted</span>
+            {% else %}<span class="status-pill status-review">In progress</span>{% endif %}</td>
+        <td class="subtle">{{ s.created.strftime('%Y-%m-%d %H:%M') if s.created else '' }}</td>
+        <td>{% if s.run_id %}<a href="{{ url_for('review_page', run_id=s.run_id) }}">Open →</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

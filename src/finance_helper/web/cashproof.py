@@ -115,6 +115,14 @@ def run_page(run_id):
     )
     confirms = [m for m in result.matches if not m.confirmed]
     txn_by_id = {t.source_id: t for t in result.bank + result.ledger}
+    activity = summary.build(result.bank)
+
+    from collections import Counter
+    from ..insights import hbar_chart
+    sev_counts = Counter(engine.severity_of(t) for t in exceptions)
+    buckets_chart = hbar_chart(
+        [(b["label"], b["total"]) for b in activity["buckets"] if b["kind"] != "sweep"][:10],
+        label_w=210)
 
     return render_template(
         "cashproof_run.html",
@@ -123,7 +131,10 @@ def run_page(run_id):
         result=result,
         has_ledger=bool(result.ledger),
         stats=summary.tie_stats(result.bank),
-        activity=summary.build(result.bank),
+        activity=activity,
+        flow=summary.flow_chart(activity["months"]),
+        buckets_chart=buckets_chart,
+        sev_counts=sev_counts,
         exceptions=exceptions,
         timing=result.timing,
         confirms=confirms,

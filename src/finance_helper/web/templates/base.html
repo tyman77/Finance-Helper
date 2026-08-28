@@ -4,17 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Scout{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  {% set ep = request.endpoint or '' %}
   <header class="topbar">
-    <a href="{{ url_for('index') }}" class="brand">Scout</a>
+    <a href="{{ url_for('index') }}" class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 3 3 10.5l7 2.6 2.6 7L21 3Z" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linejoin="round"/>
+        <path d="M10 13 21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Scout
+    </a>
+    <nav class="nav">
+      <a href="{{ url_for('domain_page', domain='flights') }}"
+         class="navlink {{ 'active' if ep == 'domain_page' and request.view_args.get('domain') == 'flights' }}">
+        <span class="navdot s0"></span>Flights</a>
+      <a href="{{ url_for('domain_page', domain='hotels') }}"
+         class="navlink {{ 'active' if ep == 'domain_page' and request.view_args.get('domain') == 'hotels' }}">
+        <span class="navdot s1"></span>Hotels</a>
+      <a href="{{ url_for('domain_page', domain='cars') }}"
+         class="navlink {{ 'active' if ep == 'domain_page' and request.view_args.get('domain') == 'cars' }}">
+        <span class="navdot s2"></span>Rental Cars</a>
+      <a href="{{ url_for('cashproof.landing') }}"
+         class="navlink {{ 'active' if ep.startswith('cashproof.') }}">Cash Proof</a>
+    </nav>
     <span class="topbar-right">
-      <a href="{{ url_for('insights_page') }}" class="logout-link">Insights</a>
-      <a href="{{ url_for('cashproof.landing') }}" class="logout-link">Cash Proof</a>
-      <a href="{{ url_for('admin.admin_page') }}" class="logout-link">Admin</a>
+      <a href="{{ url_for('insights_page') }}" class="logout-link {{ 'active' if ep == 'insights_page' }}">All spend</a>
+      <a href="{{ url_for('admin.admin_page') }}" class="logout-link {{ 'active' if ep.startswith('admin.') }}">Admin</a>
       {% if session.get('authed') %}
-        <span class="subtle">{{ session.get('email') }}</span>
+        <span class="subtle whoami">{{ session.get('email') }}</span>
         <a href="{{ url_for('logout') }}" class="logout-link">Log out</a>
       {% endif %}
     </span>

@@ -18,6 +18,17 @@ from typing import Iterable
 # categorical color order (validated for the app's dark surface).
 GROUPS = ["Flights", "Hotels", "Cars", "Shipping"]
 
+# Which upload sources feed each domain page, and the fixed palette slot each
+# domain owns everywhere in the UI (chart hue, KPI swatch, nav accent).
+DOMAINS = {
+    "flights": {"group": "Flights", "sources": ["united"], "slot": 0,
+                "title": "Flights", "vendor": "United Airlines"},
+    "hotels": {"group": "Hotels", "sources": ["hotel_engine"], "slot": 1,
+               "title": "Hotels", "vendor": "Hotel Engine"},
+    "cars": {"group": "Cars", "sources": ["national"], "slot": 2,
+             "title": "Rental Cars", "vendor": "National Car Rental"},
+}
+
 _CATEGORY_GROUP = {
     "travel_airfare": "Flights",
     "travel_airfare_fees": "Flights",
@@ -102,6 +113,79 @@ def build(runs: Iterable[dict]) -> dict:
         "review_lines": review_lines,
         "line_count": line_count,
         "run_count": len(deduped),
+    }
+
+
+def build_domain(run_items: list[tuple], domain_key: str) -> dict:
+    """Everything one domain page (Flights / Hotels / Rental Cars) shows.
+
+    run_items is (run_id, run) pairs so the page can link back to each
+    statement's review screen. Lines are included when their category maps to
+    the domain's group OR the whole statement came from one of the domain's
+    sources (so uncategorized lines of a United upload still count as Flights).
+    """
+    dom = DOMAINS[domain_key]
+    group, sources = dom["group"], set(dom["sources"])
+
+    deduped = dedupe_runs([r for _, r in run_items])
+    id_by_run = {id(run): rid for rid, run in run_items}
+    kept = {id(r) for r in deduped}
+
+    total = Decimal("0")
+    by_month: dict[str, Decimal] = defaultdict(Decimal)
+    by_project: dict[str, Decimal] = defaultdict(Decimal)
+    by_person: dict[str, dict] = defaultdict(lambda: {"amount": Decimal("0"), "lines": 0})
+    flagged = 0
+    line_count = 0
+    statements = []
+
+    for rid, run in run_items:
+        if id(run) not in kept:
+            continue
+        doc = run["doc"]
+        from_source = doc.source in sources
+        stmt_amount = Decimal("0")
+        touched = False
+        for li in doc.line_items:
+            if not (from_source or group_for(li.category) == group):
+                continue
+            touched = True
+            amt = li.amount
+            total += amt
+            stmt_amount += amt
+            line_count += 1
+            m = _month(li.date) or _month(doc.document_date)
+            if m:
+                by_month[m] += amt
+            if li.project:
+                by_project[li.project] += amt
+            if li.person:
+                p = by_person[li.person]
+                p["amount"] += amt
+                p["lines"] += 1
+            if li.needs_review:
+                flagged += 1
+        if touched and from_source:
+            statements.append({
+                "run_id": id_by_run.get(id(run)), "filename": run.get("filename", ""),
+                "document_id": doc.document_id, "total": stmt_amount,
+                "created": run.get("created"),
+                "posted": bool((run.get("posted") or {}).get("ok")),
+            })
+
+    from datetime import datetime as _dt
+    statements.sort(key=lambda s: s["created"] or _dt.min, reverse=True)
+    months = sorted(by_month)
+    return {
+        "title": dom["title"], "vendor": dom["vendor"], "slot": dom["slot"],
+        "group": group, "sources": dom["sources"],
+        "total": total, "line_count": line_count, "flagged": flagged,
+        "months": months,
+        "by_month_group": {m: {group: by_month[m]} for m in months},
+        "projects": sorted(by_project.items(), key=lambda kv: -abs(kv[1])),
+        "people": sorted(((n, v["amount"], v["lines"]) for n, v in by_person.items()),
+                         key=lambda t: -abs(t[1])),
+        "statements": statements,
     }
 
 

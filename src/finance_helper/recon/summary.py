@@ -61,6 +61,46 @@ def build(bank: list[Txn]) -> dict:
     }
 
 
+_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def flow_chart(months: list[dict], width: int = 720, height: int = 230) -> dict:
+    """Grouped monthly columns: cash in vs cash out (two fixed-hue series).
+
+    Geometry only — the template renders dumb SVG, same pattern as
+    insights.monthly_chart.
+    """
+    pad_l, pad_r, pad_t, pad_b = 52, 8, 8, 22
+    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
+    peak = max((max(float(m["in"]), float(-m["out"])) for m in months), default=0.0) or 1.0
+    step = 10 ** max(len(str(int(peak))) - 1, 1)
+    top = ((int(peak) // step) + 1) * step
+
+    n = max(len(months), 1)
+    slot = plot_w / n
+    bar_w = min(max(slot * 0.28, 6), 34)
+
+    columns = []
+    for i, m in enumerate(months):
+        cx = pad_l + slot * i + slot / 2
+        bars = []
+        for series, value, offset in (("in", float(m["in"]), -bar_w - 1),
+                                      ("out", float(-m["out"]), 1)):
+            h = value / top * plot_h
+            bars.append({"series": series, "value": value,
+                         "x": round(cx + offset, 1), "w": round(bar_w, 1),
+                         "y": round(pad_t + plot_h - h, 1), "h": round(h, 1)})
+        y_, mo_ = m["month"].split("-")
+        columns.append({"label": f"{_MONTH_ABBR[int(mo_) - 1]} {y_}",
+                        "cx": round(cx, 1), "bars": bars})
+
+    ticks = [{"y": round(pad_t + plot_h * (1 - f), 1), "label": f"{top * f:,.0f}"}
+             for f in (0, 0.5, 1)]
+    return {"width": width, "height": height, "columns": columns, "ticks": ticks,
+            "baseline_y": round(pad_t + plot_h, 1), "pad_l": pad_l, "pad_r": pad_r}
+
+
 def tie_stats(bank: list[Txn]) -> dict:
     """Share of posted outflow dollars that tie (or are internal/pending)."""
     out_total = Decimal("0")
