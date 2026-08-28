@@ -78,6 +78,8 @@ _FILES = [
      "Hotel booking dates → project, to match United flights (from Hotel Engine statements)"),
     ("Ramp per-diem", "ramp_reimbursements.json",
      "Reimbursement dates & memos per person, to corroborate trips and tag flights (from Ramp API)"),
+    ("Timecards", "timecards_index.json",
+     "Logged hours per person/day/job — the strongest flight-project signal (Paychex API or CSV export)"),
 ]
 
 
@@ -205,6 +207,53 @@ def refresh_ramp():
               "number in the memo. Flights now cross-reference them on re-run.")
     except Exception as exc:
         flash(f"Could not fetch Ramp reimbursements: {exc}")
+    return redirect(url_for("admin.admin_page"))
+
+
+def _write_timecards(index: dict) -> None:
+    os.makedirs(_data_dir(), exist_ok=True)
+    with open(_data_path("timecards_index.json"), "w", encoding="utf-8") as fh:
+        json.dump(index, fh, indent=2)
+
+
+@admin_bp.post("/timecards")
+def refresh_timecards():
+    from datetime import timedelta
+
+    from .. import paychex_api
+    days = int(request.form.get("days") or 120)
+    try:
+        index = paychex_api.fetch_index(date.today() - timedelta(days=days), date.today())
+        _write_timecards(index)
+        entries = sum(len(v) for v in index.values())
+        flash(f"Fetched timecards for {len(index)} people ({entries} day-entries "
+              "with a project code). Flights use them on re-run.")
+    except Exception as exc:
+        flash(f"Could not fetch Paychex timecards: {exc}")
+    return redirect(url_for("admin.admin_page"))
+
+
+@admin_bp.post("/timecards-csv")
+def upload_timecards_csv():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Choose a timecard export CSV first.")
+        return redirect(url_for("admin.admin_page"))
+    import io as _io
+
+    from .. import paychex_api
+    try:
+        rows = list(csv.DictReader(_io.StringIO(file.read().decode("utf-8-sig"))))
+        index = paychex_api.build_index(rows)
+        # Merge into what's there so months accumulate.
+        existing = _load_json_file("timecards_index.json") or {}
+        for person, days_ in index.items():
+            existing.setdefault(person, {}).update(days_)
+        _write_timecards(existing)
+        entries = sum(len(v) for v in index.values())
+        flash(f"Loaded timecards for {len(index)} people ({entries} day-entries) from the CSV.")
+    except Exception as exc:
+        flash(f"Could not read that timecard CSV: {exc}")
     return redirect(url_for("admin.admin_page"))
 
 

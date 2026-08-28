@@ -105,7 +105,26 @@
   <button type="submit">Fetch Ramp reimbursements</button>
 </form>
 
-<h2>8. Chart of accounts</h2>
+<h2>8. Timecards (the strongest flight-project signal)</h2>
+<p class="subtle">
+  Logged hours per person/day/job — if someone billed time to a project the
+  week they flew, the flight is that project. Pull from the Paychex Flex API
+  (needs <code>PAYCHEX_CLIENT_ID</code> / <code>PAYCHEX_CLIENT_SECRET</code> /
+  <code>PAYCHEX_COMPANY_ID</code> — API access is granted through Paychex's
+  developer program), or upload a timecard export CSV — no API needed.
+  CSV uploads accumulate by month.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_timecards') }}" class="upload-form">
+  <label>Days back <input type="number" name="days" value="120" required></label>
+  <button type="submit">Fetch from Paychex</button>
+</form>
+<form method="post" action="{{ url_for('admin.upload_timecards_csv') }}"
+      enctype="multipart/form-data" class="upload-form">
+  <label>Timecard CSV <input type="file" name="file" accept=".csv" required></label>
+  <button type="submit">Load timecard CSV</button>
+</form>
+
+<h2>9. Chart of accounts</h2>
 <p class="subtle">
   Upload a Sage Intacct General Ledger account export CSV to capture
   posting rules (which accounts require a department, which are disallowed

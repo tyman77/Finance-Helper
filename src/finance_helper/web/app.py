@@ -119,6 +119,8 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: "Projects from Ramp per-diem memos — pick one below"),
     (re.compile(r"^ramp per-diem memo -> project (\S+) \+ 52200 COGS \(confirm\)$"),
      lambda m: f"Ramp per-diem memo → project {m.group(1)} (confirm)"),
+    (re.compile(r"^timecards: (.+) logged hours to project (\S+) during the stay -> 52200 COGS$"),
+     lambda m: f"{m.group(1)} logged hours to project {m.group(2)} that week (timecards)"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),

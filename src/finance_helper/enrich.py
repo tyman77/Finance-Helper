@@ -102,6 +102,7 @@ def enrich_united(
     active_projects=_UNSET,
     hotel_index: list | None = None,
     ramp_index: list | None = None,
+    timecard_index: dict | None = None,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_data_dir(), "united_travelers.yml"))
@@ -119,6 +120,8 @@ def enrich_united(
         hotel_index = _load_json("hotel_project_index.json") or []
     if ramp_index is None:
         ramp_index = _load_json("ramp_reimbursements.json") or []
+    if timecard_index is None:
+        timecard_index = _load_json("timecards_index.json") or {}
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -154,7 +157,7 @@ def enrich_united(
 
         # 1) Installers: pin project + 52200 COGS from the crew schedule.
         resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster,
-                                    registry, active_projects)
+                                    registry, active_projects, timecard_index)
         if resolved and resolved.get("account"):
             li.gl_account = resolved["account"]
             if resolved.get("project"):
@@ -426,10 +429,27 @@ def enrich_ups(doc: SourceDocument, registry: dict | None = None, active_project
     return doc
 
 
-def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster, registry, active_projects):
+def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster,
+                     registry, active_projects, timecard_index=None):
     dep = _parse_date(li.raw.get("Departure Date"))
     if dep is None:
         return None
+    person = entry.get("person", "")
+    # Timecards first — logged labor is the ground truth for who worked which
+    # project on which days, for every department, not just installers.
+    if timecard_index:
+        rows = timecard_index.get(person)
+        if rows is None:
+            rows = next((v for k, v in timecard_index.items()
+                         if project_resolver.same_person(person, k)), None)
+        if rows:
+            result = project_resolver.resolve_schedule(
+                "_", dep, {"_": rows}, active_projects)
+            if result:
+                code = result["project"]
+                return {"project": code, "account": "52200", "source": "timecards",
+                        "note": f"timecards: {person} logged hours to project {code} "
+                                "during the stay -> 52200 COGS"}
     dept = (entry.get("department") or "")
     # Installers are on the crew schedule; try it first, but fall through to
     # their calendar if they're not on the sheet (e.g. not current crew) or the
