@@ -168,7 +168,7 @@ def test_hotel_index_upload_builds_and_accumulates(client, tmp_path):
     assert resp.status_code == 302
     idx = json.loads((data_dir / "hotel_project_index.json").read_text())
     assert idx == [{"start": "2026-06-01", "end": "2026-06-03", "project": "3531",
-                    "department": "60", "city": "Denver"}]
+                    "department": "60", "city": "Denver", "guests": []}]
 
     # Uploading the same file again doesn't duplicate.
     with open(csv_path, "rb") as fh:

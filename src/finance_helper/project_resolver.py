@@ -133,6 +133,45 @@ def hotel_projects_in_window(
     return out
 
 
+def hotel_projects_for_person(
+    hotel_index: list, person: str, dep: date, window_days: int = 3,
+    active_projects: set[str] | None = None,
+) -> list[str]:
+    """Project codes of hotel stays that NAME this traveler and overlap the trip.
+
+    Statement guest columns give person-level bookings; a stay that names the
+    flyer and overlaps the departure is the strongest no-Google project signal
+    there is — much stronger than the date+department heuristic in
+    hotel_projects_in_window, so callers may auto-fill on a unique hit.
+    """
+    who = " ".join((person or "").lower().split())
+    if not who:
+        return []
+    lo = dep - timedelta(days=1)
+    hi = dep + timedelta(days=window_days)
+    seen: set = set()
+    out: list[str] = []
+    for b in hotel_index:
+        guests = [" ".join(str(g).lower().split()) for g in (b.get("guests") or [])]
+        if who not in guests:
+            continue
+        try:
+            start = date.fromisoformat(b["start"])
+            end = date.fromisoformat(b.get("end") or b["start"])
+        except (KeyError, ValueError):
+            continue
+        if start > hi or end < lo:
+            continue
+        code = b.get("project")
+        if not code or code in seen:
+            continue
+        if active_projects is not None and code not in active_projects:
+            continue
+        seen.add(code)
+        out.append(code)
+    return out
+
+
 def _account_for_trip(trip: str) -> str | None:
     t = trip.lower()
     for keys, acct in _TRIP_ACCOUNT:

@@ -308,3 +308,58 @@ def test_hotel_cross_reference_narrows_but_does_not_auto_fill_when_ambiguous():
     john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project is None  # ambiguous -> not auto-filled
     assert "past projects 3531, 4152 — pick one" in john.note  # narrowed to the two with hotels
+
+
+def test_hotel_projects_for_person_requires_named_guest_and_overlap():
+    idx = [
+        {"start": "2026-06-01", "end": "2026-06-05", "project": "4499",
+         "guests": ["Jake Cody"], "department": "60"},
+        {"start": "2026-06-01", "end": "2026-06-05", "project": "9999",
+         "guests": ["Someone Else"], "department": "60"},
+        {"start": "2026-07-10", "end": "2026-07-12", "project": "1111",
+         "guests": ["Jake Cody"], "department": "60"},
+    ]
+    got = project_resolver.hotel_projects_for_person(idx, "Jake Cody", date(2026, 6, 2))
+    assert got == ["4499"]                       # names him AND overlaps
+    assert project_resolver.hotel_projects_for_person(idx, "jake  CODY", date(2026, 6, 2)) == ["4499"]
+    assert project_resolver.hotel_projects_for_person(idx, "Jake Cody", date(2026, 6, 2),
+                                                      active_projects=set()) == []
+
+
+def test_flight_auto_tags_project_from_named_hotel_stay():
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Departure Date"] = "06/02/2026"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                         "department_confidence": 1.0, "account_hint": "71000--OH",
+                         "account_confidence": 0.6, "projects": [], "n": 10}}
+    hotel = [{"start": "2026-06-01", "end": "2026-06-05", "project": "3531",
+              "guests": ["John Doe"], "department": "10", "city": "Denver"}]
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects=None, hotel_index=hotel)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project == "3531"
+    assert john.gl_account == "52200"            # project work -> COGS
+    assert "hotel stay names John Doe" in john.note
+
+
+def test_flight_offers_chips_when_person_has_two_stays_that_week():
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Departure Date"] = "06/02/2026"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                         "department_confidence": 1.0, "account_hint": "71000--OH",
+                         "account_confidence": 0.6, "projects": [], "n": 10}}
+    hotel = [{"start": "2026-06-01", "end": "2026-06-03", "project": "3531",
+              "guests": ["John Doe"]},
+             {"start": "2026-06-03", "end": "2026-06-05", "project": "4499",
+              "guests": ["John Doe"]}]
+    enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects=None, hotel_index=hotel)
+    john = next(li for li in doc.line_items if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None
+    assert "hotel-stay projects 3531, 4499 — pick one" in john.note
+    from finance_helper.web.app import _line_candidates
+    assert _line_candidates(john.note) == ["3531", "4499"]

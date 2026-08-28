@@ -21,7 +21,7 @@ def test_build_extracts_dates_project_department_city():
     recs = build_hotel_index.build(rows)
     assert recs == [{
         "start": "2026-06-01", "end": "2026-06-03", "project": "3531",
-        "department": "60", "city": "Denver",
+        "department": "60", "city": "Denver", "guests": [],
     }]
 
 

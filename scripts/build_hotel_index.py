@@ -77,12 +77,14 @@ def build(rows, registry=None, active_projects=None):
         code = _project_code(pname, row.get("Hotel Name", ""), registry, active_projects)
         if not code:
             continue
+        from finance_helper.insights import statement_occupants
         records.append({
             "start": start.isoformat(),
             "end": end.isoformat(),
             "project": code,
             "department": _department(row.get("Department Name", "")),
             "city": (row.get("Hotel City") or "").strip(),
+            "guests": statement_occupants(row)[0],
         })
     return records
 

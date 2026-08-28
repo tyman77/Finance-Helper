@@ -178,13 +178,26 @@ def enrich_united(
 def _fallback_project(li, entry, hotel_index, active_projects) -> None:
     """Suggest a project without live schedule/calendar data.
 
-    Cross-references the traveler's historical project codes with Hotel Engine
-    bookings on the same dates (someone flew United for the same trip they had
-    a hotel for). If the two agree on exactly one code, auto-fill it; if they
-    agree on a few, offer just those; otherwise fall back to the full history.
+    Strongest first: a hotel stay that NAMES this traveler (statement guest
+    columns) and overlaps the flight auto-fills its project. Then the
+    date+department cross-reference narrows the traveler's historical codes;
+    then history alone.
     """
     past = _active_history_projects(entry, active_projects)
     dep = _parse_date(li.raw.get("Departure Date"))
+
+    if hotel_index and dep and li.person:
+        mine = project_resolver.hotel_projects_for_person(
+            hotel_index, li.person, dep, active_projects=active_projects)
+        if len(mine) == 1:
+            li.project = mine[0]
+            li.gl_account = "52200"     # project work -> COGS Travel
+            li.note += (f"; hotel stay names {li.person} that week -> "
+                        f"project {mine[0]} + 52200 COGS (confirm)")
+            return
+        if mine:
+            li.note += "; hotel-stay projects " + ", ".join(mine) + " — pick one"
+            return
     hotel = (
         project_resolver.hotel_projects_in_window(
             hotel_index, dep, department=li.department, active_projects=active_projects

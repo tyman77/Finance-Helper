@@ -42,7 +42,8 @@ load_dotenv(find_dotenv(usecwd=True))
 RUNS: dict[str, dict] = {}
 
 _CANDIDATES_RE = re.compile(
-    r"(?:registry: candidate projects|calendar title codes|past projects|hotel-week projects)"
+    r"(?:registry: candidate projects|calendar title codes|past projects"
+    r"|hotel-week projects|hotel-stay projects)"
     r" ([\d, ]+) — pick one"
 )
 
@@ -105,8 +106,12 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: "Past projects (from history) — pick one below"),
     (re.compile(r"^hotel-week projects .+ — pick one$"),
      lambda m: "Projects with a hotel booked that week — pick one below"),
+    (re.compile(r"^hotel-stay projects .+ — pick one$"),
+     lambda m: "This traveler's hotel stays that week — pick one below"),
     (re.compile(r"^hotel booking that week -> project (\S+) \(confirm\)$"),
      lambda m: f"Hotel booked that week → project {m.group(1)} (confirm)"),
+    (re.compile(r"^hotel stay names (.+) that week -> project (\S+) \+ 52200 COGS \(confirm\)$"),
+     lambda m: f"{m.group(1)}'s hotel stay that week → project {m.group(2)} (confirm)"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),
@@ -427,6 +432,48 @@ def create_app() -> Flask:
             people_rows=data["people"][:25],
         )
 
+    def _refresh_hotel_index():
+        """Rebuild data/hotel_project_index.json from the saved Hotel Engine
+        statements, guests included — so United coding always cross-references
+        the freshest stays without a separate admin upload. Best-effort: a
+        failure here must never block statement processing."""
+        try:
+            for rid, saved in store.load_all_runs().items():
+                RUNS.setdefault(rid, saved)
+            docs = [r["doc"] for r in RUNS.values() if r["doc"].source == "hotel_engine"]
+            if not docs:
+                return
+            from .. import insights as _ins
+            from ..enrich import _HE_DEPARTMENTS
+            detail = _ins.hotels_detail(docs)
+            records = []
+            for b in detail["bookings"]:
+                m = re.search(r"\b(\d{3,5})\b", str(b.get("project") or ""))
+                start = _ins._parse_mdy(b["start"])
+                if not m or start is None:
+                    continue
+                end = _ins._parse_mdy(b["end"]) or start
+                dept_id = None
+                dn = (b.get("department") or "").lower()
+                for key, did in _HE_DEPARTMENTS.items():
+                    if key in dn:
+                        dept_id = did
+                        break
+                records.append({
+                    "start": start.isoformat(), "end": end.isoformat(),
+                    "project": m.group(1), "department": dept_id,
+                    "city": b.get("city") or "", "guests": b.get("guests") or [],
+                })
+            data_dir = os.environ.get(
+                "FINANCE_HELPER_DATA",
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
+            os.makedirs(data_dir, exist_ok=True)
+            with open(os.path.join(data_dir, "hotel_project_index.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump(records, fh, indent=2)
+        except Exception:
+            pass
+
     @app.post("/upload")
     def upload():
         source = request.form.get("source", "")
@@ -440,6 +487,8 @@ def create_app() -> Flask:
             flash(str(exc))
             return redirect(url_for("index"))
 
+        if source == "united":
+            _refresh_hotel_index()      # freshest stays before coding flights
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
             file.save(tmp.name)
             tmp_path = tmp.name
@@ -463,6 +512,8 @@ def create_app() -> Flask:
             "csv_b64": csv_b64,  # kept so the coding can be re-run with newer data
         }
         store.save_run(run_id, RUNS[run_id])
+        if source == "hotel_engine":
+            _refresh_hotel_index()      # new stays feed future flight coding
         return redirect(url_for("review_page", run_id=run_id))
 
     @app.post("/review/<run_id>/rerun")
@@ -475,6 +526,8 @@ def create_app() -> Flask:
             flash("This review was saved before re-run existed — re-upload the file "
                   "once to enable re-running.")
             return redirect(url_for("review_page", run_id=run_id))
+        if run["source"] == "united":
+            _refresh_hotel_index()
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
             tmp.write(base64.b64decode(csv_b64))
             tmp_path = tmp.name

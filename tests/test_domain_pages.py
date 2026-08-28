@@ -187,3 +187,15 @@ def test_hotels_detail_uses_statement_guests_and_ranks_travelers():
     assert detail["travelers"][0][0] in ("Jake Cody", "Natalie Brady", "Jane Smith")
     # Statement guests suppress flight inference entirely.
     assert b2["inferred"] == []
+
+
+def test_hotel_index_auto_refreshes_from_saved_statements(client, tmp_path, monkeypatch):
+    import json as _json
+    import os as _os
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path / "data"))
+    _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    path = _os.path.join(str(tmp_path / "data"), "hotel_project_index.json")
+    assert _os.path.exists(path)                 # no admin step needed
+    records = _json.load(open(path))
+    assert any(r["project"] == "4499" for r in records)
+    assert all("guests" in r for r in records)
