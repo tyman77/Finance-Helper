@@ -43,7 +43,7 @@ RUNS: dict[str, dict] = {}
 
 _CANDIDATES_RE = re.compile(
     r"(?:registry: candidate projects|calendar title codes|past projects"
-    r"|hotel-week projects|hotel-stay projects)"
+    r"|hotel-week projects|hotel-stay projects|ramp-memo projects)"
     r" ([\d, ]+) — pick one"
 )
 
@@ -115,6 +115,10 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: f"Hotel booked that week → project {m.group(1)} (confirm)"),
     (re.compile(r"^hotel stay names (.+) that week -> project (\S+) \+ 52200 COGS \(confirm\)$"),
      lambda m: f"{m.group(1)}'s hotel stay that week → project {m.group(2)} (confirm)"),
+    (re.compile(r"^ramp-memo projects .+ — pick one$"),
+     lambda m: "Projects from Ramp per-diem memos — pick one below"),
+    (re.compile(r"^ramp per-diem memo -> project (\S+) \+ 52200 COGS \(confirm\)$"),
+     lambda m: f"Ramp per-diem memo → project {m.group(1)} (confirm)"),
     (re.compile(r"^traveler not found in history — assign department & account$"),
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),

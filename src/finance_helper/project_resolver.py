@@ -226,6 +226,37 @@ def hotel_projects_for_person(
     return out
 
 
+def ramp_matches_for_person(
+    ramp_index: list, person: str, dep: date,
+    days_before: int = 5, days_after: int = 21,
+    active_projects: set[str] | None = None,
+) -> tuple[list[str], list[dict]]:
+    """(project codes from memos, all matching reimbursements) for a trip.
+
+    Per-diem usually pays out during or shortly after travel, so the window
+    is asymmetric: a few days before departure through ~3 weeks after. Even a
+    code-less reimbursement corroborates that the person traveled then.
+    """
+    lo = dep - timedelta(days=days_before)
+    hi = dep + timedelta(days=days_after)
+    codes: list[str] = []
+    hits: list[dict] = []
+    for r in ramp_index:
+        if not same_person(person, r.get("person", "")):
+            continue
+        try:
+            when = date.fromisoformat(r["date"])
+        except (KeyError, ValueError):
+            continue
+        if not (lo <= when <= hi):
+            continue
+        hits.append(r)
+        code = r.get("project")
+        if code and code not in codes and (active_projects is None or code in active_projects):
+            codes.append(code)
+    return codes, hits
+
+
 def _account_for_trip(trip: str) -> str | None:
     t = trip.lower()
     for keys, acct in _TRIP_ACCOUNT:

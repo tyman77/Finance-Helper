@@ -101,6 +101,7 @@ def enrich_united(
     registry: dict | None = None,
     active_projects=_UNSET,
     hotel_index: list | None = None,
+    ramp_index: list | None = None,
 ) -> SourceDocument:
     if tmap is None:
         tmap = load_traveler_map(os.path.join(_data_dir(), "united_travelers.yml"))
@@ -116,6 +117,8 @@ def enrich_united(
         active_projects = project_resolver.load_active_projects()
     if hotel_index is None:
         hotel_index = _load_json("hotel_project_index.json") or []
+    if ramp_index is None:
+        ramp_index = _load_json("ramp_reimbursements.json") or []
 
     surname_index: dict[str, list] = {}
     for k, v in tmap.items():
@@ -179,12 +182,12 @@ def enrich_united(
         # own past project codes, and — the strongest no-Google signal we have —
         # cross-reference Hotel Engine bookings on the same dates to narrow them.
         if not li.project:
-            _fallback_project(li, entry, hotel_index, active_projects)
+            _fallback_project(li, entry, hotel_index, ramp_index, active_projects)
 
     return doc
 
 
-def _fallback_project(li, entry, hotel_index, active_projects) -> None:
+def _fallback_project(li, entry, hotel_index, ramp_index, active_projects) -> None:
     """Suggest a project without live schedule/calendar data.
 
     Strongest first: a hotel stay that NAMES this traveler (statement guest
@@ -226,6 +229,24 @@ def _fallback_project(li, entry, hotel_index, active_projects) -> None:
             li.note += "; hotel index has no guest names — check the HE statement's guest column"
     elif not hotel_index and dep and li.person:
         li.note += "; no hotel stays indexed yet (upload Hotel Engine statements)"
+
+    # Next rung: Ramp per-diem reimbursements. A memo with a project number
+    # tags the flight; a code-less payout still corroborates the trip.
+    if ramp_index and dep and li.person and not li.project:
+        codes, hits = project_resolver.ramp_matches_for_person(
+            ramp_index, li.person, dep, active_projects=active_projects)
+        if len(codes) == 1:
+            li.project = codes[0]
+            li.gl_account = "52200"
+            li.note += (f"; ramp per-diem memo -> project {codes[0]} "
+                        "+ 52200 COGS (confirm)")
+            return
+        if codes:
+            li.note += "; ramp-memo projects " + ", ".join(codes) + " — pick one"
+            return
+        if hits:
+            li.note += (f"; per diem paid to {li.person} on {hits[0]['date']}"
+                        " — trip corroborated, but no project in the memo")
     hotel = (
         project_resolver.hotel_projects_in_window(
             hotel_index, dep, department=li.department, active_projects=active_projects

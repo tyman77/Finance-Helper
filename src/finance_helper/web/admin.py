@@ -76,6 +76,8 @@ _FILES = [
     ("Chart of accounts", "chart_of_accounts.json", "GL account posting rules (from Sage GL export)"),
     ("Hotel cross-reference", "hotel_project_index.json",
      "Hotel booking dates → project, to match United flights (from Hotel Engine statements)"),
+    ("Ramp per-diem", "ramp_reimbursements.json",
+     "Reimbursement dates & memos per person, to corroborate trips and tag flights (from Ramp API)"),
 ]
 
 
@@ -184,6 +186,25 @@ def refresh_hotel_index():
         flash(f"Could not process that Hotel Engine file: {exc}")
     finally:
         os.unlink(tmp_path)
+    return redirect(url_for("admin.admin_page"))
+
+
+@admin_bp.post("/ramp")
+def refresh_ramp():
+    from datetime import timedelta
+
+    from .. import ramp_api
+    days = int(request.form.get("days") or 365)
+    try:
+        idx = ramp_api.fetch_index(date.today() - timedelta(days=days), date.today())
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(_data_path("ramp_reimbursements.json"), "w", encoding="utf-8") as fh:
+            json.dump(idx, fh, indent=2)
+        coded = sum(1 for r in idx if r.get("project"))
+        flash(f"Fetched {len(idx)} Ramp reimbursements — {coded} carry a project "
+              "number in the memo. Flights now cross-reference them on re-run.")
+    except Exception as exc:
+        flash(f"Could not fetch Ramp reimbursements: {exc}")
     return redirect(url_for("admin.admin_page"))
 
 
