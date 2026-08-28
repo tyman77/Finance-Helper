@@ -392,6 +392,107 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
     }
 
 
+# Rows that aren't a flight ticket (they inherit the traveler's coding but
+# would poison fare and lead-time math).
+_ANCILLARY_WORDS = ("BAG", "SEAT", "ZONE", "WI-FI", "WIFI", "UPGRADE")
+_ROUTING_COLS = ("Routing (Origin To To To To )", "Routing")
+_AIRPORT = __import__("re").compile(r"\b[A-Z]{3}\b")
+
+
+def trip_type(routing: str) -> str:
+    """"DEN AUS DEN" -> round trip; "DEN PHX" -> one-way; open-jaw -> multi."""
+    airports = _AIRPORT.findall(routing or "")
+    if len(airports) >= 3 and airports[0] == airports[-1]:
+        return "round"
+    if len(airports) == 2:
+        return "oneway"
+    if len(airports) >= 3:
+        return "multi"
+    return "unknown"
+
+
+def flights_detail(docs: list) -> dict:
+    """Ticket-level Flights report: fares split by round-trip vs one-way,
+    booking lead time (issue -> departure) overall and per traveler.
+
+    Fee rows (bags/seats/wifi) and refunds count toward spend but are excluded
+    from fare averages and lead times — averaging a $60 bag fee or a credit
+    into "average flight price" would be nonsense.
+    """
+    fares: dict[str, list] = {"round": [], "oneway": [], "multi": []}
+    leads: list[int] = []
+    by_person: dict[str, dict] = defaultdict(lambda: {
+        "spend": Decimal("0"), "tickets": 0, "fares": [], "leads": [], "round": 0})
+    fees_total = Decimal("0")
+    refunds_total = Decimal("0")
+    short_notice = 0
+    tickets = 0
+
+    for doc in docs:
+        for li in doc.line_items:
+            raw = li.raw
+            passenger = (raw.get("Passenger Name") or "").upper()
+            person = li.person
+            if person:
+                by_person[person]["spend"] += li.amount
+            if any(w in passenger for w in _ANCILLARY_WORDS):
+                fees_total += li.amount
+                continue
+            if li.amount < 0:
+                refunds_total += li.amount
+                continue
+            kind = trip_type(_first_col(raw, _ROUTING_COLS))
+            issue = _parse_mdy(raw.get("Issue Date", ""))
+            depart = _parse_mdy(raw.get("Departure Date", ""))
+            lead = (depart - issue).days if issue and depart and depart >= issue else None
+
+            tickets += 1
+            if kind in fares:
+                fares[kind].append(li.amount)
+            if lead is not None:
+                leads.append(lead)
+                if lead <= 7:
+                    short_notice += 1
+            if person:
+                p = by_person[person]
+                p["tickets"] += 1
+                p["fares"].append(li.amount)
+                if lead is not None:
+                    p["leads"].append(lead)
+                if kind == "round":
+                    p["round"] += 1
+
+    def _avg(values):
+        return (sum(values) / len(values)) if values else None
+
+    people = []
+    for name, p in by_person.items():
+        people.append({
+            "person": name,
+            "tickets": p["tickets"],
+            "spend": p["spend"],
+            "avg_fare": _avg(p["fares"]),
+            "avg_lead": _avg([Decimal(l) for l in p["leads"]]),
+            "round_pct": (100 * p["round"] // p["tickets"]) if p["tickets"] else 0,
+        })
+    people.sort(key=lambda r: -abs(r["spend"]))
+
+    return {
+        "kind": "flights",
+        "tickets": tickets,
+        "avg_round": _avg(fares["round"]),
+        "avg_oneway": _avg(fares["oneway"]),
+        "avg_multi": _avg(fares["multi"]),
+        "counts": {k: len(v) for k, v in fares.items()},
+        "avg_lead": _avg([Decimal(l) for l in leads]),
+        "short_notice": short_notice,
+        "short_notice_pct": (100 * short_notice // len(leads)) if leads else 0,
+        "fees_total": fees_total,
+        "refunds_total": refunds_total,
+        "people": people,
+    }
+
+
 def build_domain(run_items: list[tuple], domain_key: str) -> dict:
     """Everything one domain page (Flights / Hotels / Rental Cars) shows.
 
@@ -459,6 +560,9 @@ def build_domain(run_items: list[tuple], domain_key: str) -> dict:
         flight_docs = [run["doc"] for _, run in run_items
                        if id(run) in kept and run["doc"].source in DOMAINS["flights"]["sources"]]
         detail = hotels_detail(dom_docs, flight_docs, load_guest_index())
+        detail["kind"] = "hotels"
+    elif domain_key == "flights" and dom_docs:
+        detail = flights_detail(dom_docs)
     return {
         "title": dom["title"], "vendor": dom["vendor"], "slot": dom["slot"],
         "group": group, "sources": dom["sources"],

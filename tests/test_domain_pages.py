@@ -199,3 +199,57 @@ def test_hotel_index_auto_refreshes_from_saved_statements(client, tmp_path, monk
     records = _json.load(open(path))
     assert any(r["project"] == "4499" for r in records)
     assert all("guests" in r for r in records)
+
+
+def test_trip_type_classification():
+    assert insights.trip_type("DEN AUS DEN") == "round"
+    assert insights.trip_type("SMF DEN SMF") == "round"
+    assert insights.trip_type("JAN IAH AUS IAH JAN") == "round"   # multi-leg, returns home
+    assert insights.trip_type("DEN PHX") == "oneway"
+    assert insights.trip_type("DEN IND SFO") == "multi"           # open jaw
+    assert insights.trip_type("") == "unknown"
+
+
+def test_flights_detail_separates_round_trip_and_oneway_fares():
+    from datetime import date as _date
+    from decimal import Decimal as D
+
+    from finance_helper.models import LineItem, SourceDocument
+
+    def li(passenger, amount, routing, issue, depart, person="Jake Cody"):
+        return LineItem(description=passenger, amount=D(amount), person=person,
+                        raw={"Passenger Name": passenger, "Routing": routing,
+                             "Issue Date": issue, "Departure Date": depart})
+
+    doc = SourceDocument(source="united", destination="sage", vendor="U",
+                         document_id="x", currency="USD", line_items=[
+        li("CODY/JAKE", "400", "DEN AUS DEN", "05/01/2026", "05/15/2026"),
+        li("CODY/JAKE", "600", "DEN OMA DEN", "05/01/2026", "05/29/2026"),
+        li("BRADY/NATALIE", "250", "DEN PHX", "05/09/2026", "05/10/2026", person="Natalie Brady"),
+        li("CODY /SECOND CHECKED BAG", "60", "DEN AUS", "05/01/2026", "05/15/2026"),
+        li("BRADY/NATALIE", "-100", "DEN PHX", "05/09/2026", "05/10/2026", person="Natalie Brady"),
+    ])
+    d = insights.flights_detail([doc])
+    assert d["tickets"] == 3
+    assert d["avg_round"] == D("500")            # (400+600)/2, bag fee excluded
+    assert d["avg_oneway"] == D("250")
+    assert d["fees_total"] == D("60")
+    assert d["refunds_total"] == D("-100")
+    assert d["avg_lead"].quantize(D("0.01")) == D("14.33")   # (14+28+1)/3
+    jake = next(p for p in d["people"] if p["person"] == "Jake Cody")
+    assert jake["tickets"] == 2 and jake["round_pct"] == 100
+    assert jake["avg_lead"] == D("21")           # (14+28)/2
+    nat = next(p for p in d["people"] if p["person"] == "Natalie Brady")
+    assert nat["spend"] == D("150")              # 250 - 100 refund
+    assert nat["avg_fare"] == D("250")           # refund excluded from average
+    assert d["short_notice"] == 1 and d["short_notice_pct"] == 33
+
+
+def test_flights_page_renders_fare_and_lead_report(client):
+    _upload(client, "united", "samples/united_sample.csv")
+    body = client.get("/d/flights").data
+    assert b"Avg round-trip fare" in body
+    assert b"Booking lead time by traveler" in body
+    assert b"Round trips" in body
+    # Hotels page keeps its own report, not the flights one.
+    assert b"Avg round-trip fare" not in client.get("/d/hotels").data

@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}{{ d.title }} — Scout{% endblock %}
 {% block content %}
+{% macro hbars(chart, aria, fmt='money') %}
+<svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" class="chart" role="img" aria-label="{{ aria }}">
+  {% for r in chart.rows %}
+  <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(26, True) }}</text>
+  <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s{{ d.slot }}" rx="2">
+    <title>{{ r.label }}: {% if fmt == 'days' %}{{ '%.0f'|format(r.value) }} days{% else %}${{ '{:,.0f}'.format(r.value) }}{% endif %}</title>
+  </rect>
+  <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">{% if fmt == 'days' %}{{ '%.0f'|format(r.value) }}d{% else %}${{ '{:,.0f}'.format(r.value) }}{% endif %}</text>
+  {% endfor %}
+</svg>
+{% endmacro %}
 <div class="page-head">
   <h1><span class="swatch big s{{ d.slot }}"></span> {{ d.title }}</h1>
   <p class="subtle">{{ d.vendor }} spend, learned coding, and statements — one place.</p>
@@ -18,7 +29,18 @@
   <div class="kpi"><div class="kpi-label">Total spend</div>
     <div class="kpi-value">${{ '{:,.0f}'.format(d.total) }}</div>
     <div class="kpi-sub">{{ d.line_count }} lines</div></div>
-  {% if detail %}
+  {% if detail and detail.kind == 'flights' %}
+  <div class="kpi"><div class="kpi-label">Avg round-trip fare</div>
+    <div class="kpi-value">{% if detail.avg_round is not none %}${{ '{:,.0f}'.format(detail.avg_round) }}{% else %}—{% endif %}</div>
+    <div class="kpi-sub">{{ detail.counts.round }} round trips</div></div>
+  <div class="kpi"><div class="kpi-label">Avg one-way fare</div>
+    <div class="kpi-value">{% if detail.avg_oneway is not none %}${{ '{:,.0f}'.format(detail.avg_oneway) }}{% else %}—{% endif %}</div>
+    <div class="kpi-sub">{{ detail.counts.oneway }} one-ways{% if detail.counts.multi %} · {{ detail.counts.multi }} multi-city{% endif %}</div></div>
+  <div class="kpi"><div class="kpi-label">Avg booking lead</div>
+    <div class="kpi-value">{% if detail.avg_lead is not none %}{{ '%.0f'|format(detail.avg_lead) }}d{% else %}—{% endif %}</div>
+    <div class="kpi-sub">{{ detail.short_notice_pct }}% booked ≤ 7 days out</div></div>
+  {% endif %}
+  {% if detail and detail.kind == 'hotels' %}
   <div class="kpi"><div class="kpi-label">Bookings</div>
     <div class="kpi-value">{{ detail.booking_count }}</div>
     <div class="kpi-sub">{{ detail.total_nights }} nights</div></div>
@@ -97,19 +119,46 @@
   </div>
 </div>
 
-{% if detail %}
-{% macro hbars(chart, aria) %}
-<svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" class="chart" role="img" aria-label="{{ aria }}">
-  {% for r in chart.rows %}
-  <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(26, True) }}</text>
-  <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s{{ d.slot }}" rx="2">
-    <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
-  </rect>
-  <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
-  {% endfor %}
-</svg>
-{% endmacro %}
+{% if detail and detail.kind == 'flights' %}
+<div class="panel-grid">
+  <div class="panel">
+    <h2>Booking lead time by traveler</h2>
+    <p class="subtle">Days between ticket purchase and departure — short bars book last-minute.</p>
+    {% if dc.lead.rows %}{{ hbars(dc.lead, "Average booking lead time by traveler", fmt='days') }}
+    {% else %}<p class="subtle">No lead-time data yet.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>Average fare by traveler</h2>
+    <p class="subtle">Tickets only — bag/seat fees and refunds are excluded from averages.</p>
+    {% if dc.fare.rows %}{{ hbars(dc.fare, "Average fare by traveler") }}
+    {% else %}<p class="subtle">No fare data yet.</p>{% endif %}
+  </div>
+</div>
 
+<div class="panel">
+  <h2>Travelers ({{ detail.people | length }})</h2>
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Traveler</th><th class="amt">Tickets</th><th class="amt">Spend</th>
+      <th class="amt">Avg fare</th><th class="amt">Avg lead</th><th class="amt">Round trips</th></tr></thead>
+    <tbody>
+      {% for p in detail.people[:40] %}
+      <tr>
+        <td>{{ p.person }}</td>
+        <td class="amt">{{ p.tickets }}</td>
+        <td class="amt">${{ '{:,.2f}'.format(p.spend) }}</td>
+        <td class="amt">{% if p.avg_fare is not none %}${{ '{:,.0f}'.format(p.avg_fare) }}{% endif %}</td>
+        <td class="amt">{% if p.avg_lead is not none %}{{ '%.0f'|format(p.avg_lead) }}d{% endif %}</td>
+        <td class="amt">{{ p.round_pct }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="subtle">Fees (bags/seats/wifi) total {{ '${:,.0f}'.format(detail.fees_total) }};
+  refunds {{ '${:,.0f}'.format(detail.refunds_total) }} — included in spend, excluded from averages.</p>
+</div>
+{% endif %}
+
+{% if detail and detail.kind == 'hotels' %}
 <div class="panel-grid">
   <div class="panel">
     <h2>What each stay is made of</h2>

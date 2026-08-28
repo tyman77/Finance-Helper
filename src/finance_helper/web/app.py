@@ -366,12 +366,23 @@ def create_app() -> Flask:
 
         detail = data.get("detail")
         detail_charts = {}
-        if detail:
+        if detail and detail.get("kind") == "hotels":
             detail_charts = {
                 "components": insights.hbar_chart(detail["components"], label_w=150),
                 "hotels": insights.hbar_chart([(n, v) for n, v, _ in detail["hotels"][:8]]),
                 "cities": insights.hbar_chart([(n, v) for n, v, _ in detail["cities"][:8]]),
                 "departments": insights.hbar_chart(detail["departments"][:8], label_w=190),
+            }
+        elif detail and detail.get("kind") == "flights":
+            with_lead = [p for p in detail["people"] if p["avg_lead"] is not None]
+            with_fare = [p for p in detail["people"] if p["avg_fare"] is not None]
+            detail_charts = {
+                "lead": insights.hbar_chart(
+                    [(p["person"], p["avg_lead"]) for p in
+                     sorted(with_lead, key=lambda p: p["avg_lead"])[:10]], label_w=190),
+                "fare": insights.hbar_chart(
+                    [(p["person"], p["avg_fare"]) for p in
+                     sorted(with_fare, key=lambda p: -p["avg_fare"])[:10]], label_w=190),
             }
         # For hotels, statement guest columns beat li.person (unset for HE).
         people = data["people"][:8]
