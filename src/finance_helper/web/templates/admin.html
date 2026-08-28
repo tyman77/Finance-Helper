@@ -124,7 +124,19 @@
   <button type="submit">Load timecard CSV</button>
 </form>
 
-<h2>9. Chart of accounts</h2>
+<h2>9. Bill.com payments (double-payment scan)</h2>
+<p class="subtle">
+  Pulls disbursed payments from the Bill.com API. Feeds two Cash Proof
+  checks: expanding each BILL.COM funding debit into the vendor payments
+  behind it, and catching the same vendor+amount paid via Bill.com AND
+  again by check/ACH. Requires the <code>BILLDOTCOM_*</code> environment
+  variables.
+</p>
+<form method="post" action="{{ url_for('admin.refresh_billdotcom') }}" class="upload-form">
+  <button type="submit">Fetch Bill.com payments</button>
+</form>
+
+<h2>10. Chart of accounts</h2>
 <p class="subtle">
   Upload a Sage Intacct General Ledger account export CSV to capture
   posting rules (which accounts require a department, which are disallowed

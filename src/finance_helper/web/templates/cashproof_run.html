@@ -94,6 +94,9 @@ export to get the tie-out and exceptions queue.</p>
   {%- if not fraud.reimb.coverage %} — <strong>no Ramp data for this period; fetch it in Admin → step 7</strong>{% endif %}.
   Per-diem scanned: {{ fraud.perdiem.checked }}.
   Payees analyzed: {{ fraud.vendors.vendors }}.
+  Bill.com debits: {{ fraud.billcom.matched }}/{{ fraud.billcom.checked }} tied
+  {%- if not fraud.billcom.coverage %} — <strong>no Bill.com data; fetch it in Admin → step 9</strong>{% endif %};
+  duplicate scan over {{ fraud.dupes.checked }} payments.
 </p>
 {% if fraud.findings %}
 <div class="tablewrap"><table class="runs">

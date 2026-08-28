@@ -246,14 +246,114 @@ def vendor_integrity(bank: list[Txn]) -> dict:
     return {"findings": findings, "vendors": len(by_vendor)}
 
 
+# ---------------------------------------------------------------------------
+# 4. Bill.com: expand funding debits into payments; cross-system duplicates.
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in (text or "").lower().split() if len(t) >= 3
+            and t not in ("inc", "llc", "corp", "the", "and")}
+
+
+def _vendors_alike(bank_norm: str, vendor: str) -> bool:
+    a, b = _tokens(bank_norm), _tokens(vendor)
+    strong = {t for t in (a & b) if len(t) >= 4}
+    return bool(strong) or len(a & b) >= 2
+
+
+def billcom_tieout(bank: list[Txn], bill_index: list) -> dict:
+    """Every BILL.COM funding debit must equal one payment (±3d) or the sum
+    of that day's payments; every disbursed payment in the period should be
+    funded from this account."""
+    debits = [t for t in bank if t.kind == "billcom" and not t.pending and t.amount < 0]
+    findings: list[dict] = []
+    if not debits:
+        return {"findings": [], "checked": 0, "matched": 0, "coverage": True}
+    if not bill_index:
+        return {"findings": [], "checked": len(debits), "matched": 0, "coverage": False}
+
+    pays = []
+    for p in bill_index:
+        try:
+            pays.append((date.fromisoformat(p["date"]), Decimal(p["amount"]), p))
+        except (KeyError, ValueError, InvalidOperation):
+            continue
+    used: set[int] = set()
+    matched = 0
+    for t in debits:
+        amount = -t.amount
+        hit = next((i for i, (d, a, _p) in enumerate(pays)
+                    if i not in used and a == amount
+                    and abs((d - t.posted_date).days) <= 3), None)
+        if hit is None:
+            # A funding debit can cover several same-day payments.
+            for offset in (0, -1, 1, -2, 2, -3, 3):
+                day = t.posted_date + timedelta(days=offset)
+                day_ix = [i for i, (d, _a, _p) in enumerate(pays)
+                          if i not in used and d == day]
+                if day_ix and sum(pays[i][1] for i in day_ix) == amount:
+                    used.update(day_ix)
+                    matched += 1
+                    break
+            else:
+                findings.append(_finding(
+                    "billcom_unmatched", "critical",
+                    f"Bill.com funding debit with no matching payments",
+                    f"${amount:,.2f} left the bank on {t.posted_date} as a Bill.com "
+                    "debit, but no Bill.com payment (or same-day payment batch) "
+                    "matches it. Verify in Bill.com what this funded.",
+                    t.source_id))
+            continue
+        used.add(hit)
+        matched += 1
+    return {"findings": findings, "checked": len(debits), "matched": matched, "coverage": True}
+
+
+def cross_system_duplicates(bank: list[Txn], bill_index: list, window_days: int = 60) -> dict:
+    """The same vendor + amount paid via Bill.com AND again by check/ACH/wire
+    from the bank — the classic double payment."""
+    pays = [t for t in bank
+            if t.kind in _VENDOR_KINDS and not t.pending and t.amount < 0]
+    findings: list[dict] = []
+    for p in bill_index:
+        try:
+            when = date.fromisoformat(p["date"])
+            amount = Decimal(p["amount"])
+        except (KeyError, ValueError, InvalidOperation):
+            continue
+        if amount <= 0 or not p.get("vendor"):
+            continue
+        for t in pays:
+            if -t.amount != amount:
+                continue
+            if abs((t.posted_date - when).days) > window_days:
+                continue
+            if not _vendors_alike(t.counterparty_norm, p["vendor"]):
+                continue
+            findings.append(_finding(
+                "cross_duplicate", "high",
+                f"Paid twice? {p['vendor']} — ${amount:,.2f}",
+                f"Bill.com paid {p['vendor']} ${amount:,.2f} on {when}, and the bank "
+                f"also shows a direct payment of the same amount to "
+                f"'{t.counterparty_raw[:40]}' on {t.posted_date}. If these settle the "
+                "same invoice, one is a double payment — pull both backups.",
+                p.get("id"), t.source_id))
+    return {"findings": findings, "checked": len(bill_index)}
+
+
 SEVERITY_ORDER = {"critical": 0, "high": 1, "review": 2, "info": 3}
 
 
 def run_all(bank: list[Txn], ramp_index: list, hotel_index: list,
-            timecard_index: dict, flight_pairs: list[tuple]) -> dict:
+            timecard_index: dict, flight_pairs: list[tuple],
+            bill_index: list | None = None) -> dict:
+    bill_index = bill_index or []
     reimb = reimbursement_tieout(bank, ramp_index)
     perdiem = perdiem_no_trip(ramp_index, hotel_index, timecard_index, flight_pairs)
     vendors = vendor_integrity(bank)
-    findings = sorted(reimb["findings"] + perdiem["findings"] + vendors["findings"],
+    billcom = billcom_tieout(bank, bill_index)
+    dupes = cross_system_duplicates(bank, bill_index)
+    findings = sorted(reimb["findings"] + perdiem["findings"] + vendors["findings"]
+                      + billcom["findings"] + dupes["findings"],
                       key=lambda f: SEVERITY_ORDER.get(f["severity"], 9))
-    return {"findings": findings, "reimb": reimb, "perdiem": perdiem, "vendors": vendors}
+    return {"findings": findings, "reimb": reimb, "perdiem": perdiem,
+            "vendors": vendors, "billcom": billcom, "dupes": dupes}

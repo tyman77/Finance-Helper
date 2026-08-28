@@ -104,3 +104,43 @@ def test_finding_ids_are_stable_across_runs():
                                             "amount": "1", "memo": ""}])
     assert a["findings"][0]["id"] == b["findings"][0]["id"]
     assert a["findings"][0]["id"].startswith("check:")
+
+
+def test_billcom_tieout_single_and_batch_and_residual():
+    d = date
+    bank = [
+        _t("billcom", "-1234.56", d(2026, 7, 10), "BILL.COM A", "bill.com"),   # 1:1
+        _t("billcom", "-3000.00", d(2026, 7, 15), "BILL.COM B", "bill.com"),   # batch of 2
+        _t("billcom", "-999.99", d(2026, 7, 20), "BILL.COM C", "bill.com"),    # residual
+    ]
+    bills = [
+        {"id": "p1", "vendor": "Acme Supply", "amount": "1234.56", "date": "2026-07-09"},
+        {"id": "p2", "vendor": "CleanCo", "amount": "1800.00", "date": "2026-07-15"},
+        {"id": "p3", "vendor": "Yamaha", "amount": "1200.00", "date": "2026-07-15"},
+    ]
+    out = checks.billcom_tieout(bank, bills)
+    assert out["matched"] == 2 and out["checked"] == 3
+    assert len(out["findings"]) == 1
+    assert out["findings"][0]["severity"] == "critical"
+    assert "999.99" in out["findings"][0]["detail"]
+
+
+def test_billcom_no_data_reports_coverage_gap():
+    bank = [_t("billcom", "-100", date(2026, 7, 1), "BILL.COM", "bill.com")]
+    out = checks.billcom_tieout(bank, [])
+    assert out["coverage"] is False and out["findings"] == []
+
+
+def test_cross_system_duplicate_same_vendor_same_amount():
+    bank = [_t("ach_debit", "-4600.00", date(2026, 7, 20),
+               "ACME AV SUPPLY ACH DEBIT", "acme av supply")]
+    bills = [{"id": "p9", "vendor": "Acme AV Supply Inc", "amount": "4600.00",
+              "date": "2026-07-05"}]
+    out = checks.cross_system_duplicates(bank, bills)
+    assert len(out["findings"]) == 1
+    f = out["findings"][0]
+    assert f["severity"] == "high" and "Paid twice?" in f["title"]
+    # Different vendor, same amount -> no finding.
+    bills2 = [{"id": "p9", "vendor": "Totally Different Name", "amount": "4600.00",
+               "date": "2026-07-05"}]
+    assert checks.cross_system_duplicates(bank, bills2)["findings"] == []

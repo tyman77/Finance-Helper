@@ -177,6 +177,7 @@ def run_page(run_id):
         _data_json("hotel_project_index.json", []),
         _data_json("timecards_index.json", {}),
         _flight_pairs(),
+        bill_index=_data_json("billdotcom_payments.json", []),
     )
 
     return render_template(

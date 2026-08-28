@@ -80,6 +80,8 @@ _FILES = [
      "Reimbursement dates & memos per person, to corroborate trips and tag flights (from Ramp API)"),
     ("Timecards", "timecards_index.json",
      "Logged hours per person/day/job — the strongest flight-project signal (Paychex API or CSV export)"),
+    ("Bill.com payments", "billdotcom_payments.json",
+     "Disbursed payments per vendor — funds the Bill.com tie-out and the double-payment scan (from Bill.com API)"),
 ]
 
 
@@ -254,6 +256,21 @@ def upload_timecards_csv():
         flash(f"Loaded timecards for {len(index)} people ({entries} day-entries) from the CSV.")
     except Exception as exc:
         flash(f"Could not read that timecard CSV: {exc}")
+    return redirect(url_for("admin.admin_page"))
+
+
+@admin_bp.post("/billdotcom")
+def refresh_billdotcom():
+    from .. import billdotcom_api
+    try:
+        index = billdotcom_api.fetch_index()
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(_data_path("billdotcom_payments.json"), "w", encoding="utf-8") as fh:
+            json.dump(index, fh, indent=2)
+        flash(f"Fetched {len(index)} Bill.com payments. The Cash Proof page's "
+              "Bill.com tie-out and duplicate scan use them on next view.")
+    except Exception as exc:
+        flash(f"Could not fetch Bill.com payments: {exc}")
     return redirect(url_for("admin.admin_page"))
 
 
