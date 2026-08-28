@@ -296,3 +296,31 @@ def test_project_options_no_sage_data_shows_everything(tmp_path, monkeypatch):
     # No sage_projects.json fetched yet -> don't filter anything out.
     options = _project_options()
     assert {code for code, _ in options} == {"4804", "3190"}
+
+
+def test_wifi_lines_are_auto_accepted_not_unknown():
+    from finance_helper import sources, enrich
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Passenger Name"] = "LLC /INFLIGHT WI-FI STR DEN PHX"
+    enrich.enrich_united(doc, {}, schedule_index={}, calendar_index={}, roster={},
+                         registry={}, active_projects=None, hotel_index=[])
+    wifi = next(li for li in doc.line_items
+                if "WI-FI" in li.raw.get("Passenger Name", ""))
+    assert not wifi.needs_review                  # policy: ignore wifi charges
+    assert "auto-accepted" in wifi.note
+    assert _line_status(wifi, []) == "wifi"
+
+
+def test_traveler_column_edits_persist(client):
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    assert 'name="person_0"' in body              # editable Traveler column
+    fields = dict(re.findall(r'name="([a-z_]+_\d+)" value="([^"]*)"', body))
+    fields["person_0"] = "Jeremy McKee"
+    resp = client.post(f"/review/{run_id}/update", data=fields)
+    assert resp.status_code == 302
+    assert RUNS[run_id]["doc"].line_items[0].person == "Jeremy McKee"
+    # And the name feeds the autocomplete on the next render.
+    assert "Jeremy McKee" in client.get(f"/review/{run_id}").data.decode()

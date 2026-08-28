@@ -53,6 +53,7 @@ STATUS_LABELS = {
     "pick": "Pick one",
     "review": "Confirm hint",
     "unknown": "Unknown traveler",
+    "wifi": "Wi-Fi / no traveler",
 }
 
 
@@ -70,6 +71,8 @@ def _line_status(li, candidates: list[str]) -> str:
     """Classify a line for the status pill / filter toolbar, purely from
     signals already on the line — no change to the underlying coding logic."""
     note = li.note or ""
+    if "inflight wifi" in note:
+        return "wifi"
     if "not found in history" in note:
         return "unknown"
     if candidates:
@@ -582,8 +585,20 @@ def create_app() -> Flask:
         account_options = _account_options()
         account_titles = dict(account_options)
 
+        # Traveler autocomplete: everyone the map knows plus anyone already on
+        # this document (so a name typed once suggests itself on other lines).
+        from .. import enrich as _enrich
+        data_dir = os.environ.get(
+            "FINANCE_HELPER_DATA",
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
+        tmap = _enrich.load_traveler_map(os.path.join(data_dir, "united_travelers.yml"))
+        travelers = sorted(
+            {v.get("person") for v in tmap.values() if isinstance(v, dict) and v.get("person")}
+            | {li.person for li in doc.line_items if li.person})
+
         return render_template(
             "review.html",
+            travelers=travelers,
             run_id=run_id,
             run=run,
             doc=doc,
@@ -610,6 +625,8 @@ def create_app() -> Flask:
             li.gl_account = (request.form.get(f"gl_account_{i}") or "").strip() or None
             li.department = (request.form.get(f"department_{i}") or "").strip() or None
             li.project = (request.form.get(f"project_{i}") or "").strip() or None
+            if f"person_{i}" in request.form:
+                li.person = (request.form.get(f"person_{i}") or "").strip() or None
             li.needs_review = request.form.get(f"needs_review_{i}") == "on"
         run["posted"] = None  # edits invalidate a prior post attempt's relevance
         store.save_run(run_id, run)

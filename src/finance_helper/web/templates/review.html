@@ -31,7 +31,7 @@
 
 <div class="filters">
   <button type="button" class="filter-btn active" data-filter="all">All ({{ doc.line_items|length }})</button>
-  {% for key in ["pick", "unknown", "review", "auto"] %}
+  {% for key in ["pick", "unknown", "review", "auto", "wifi"] %}
     {% if status_counts.get(key) %}
     <button type="button" class="filter-btn status-{{ key }}" data-filter="{{ key }}">
       {{ status_labels[key] }} ({{ status_counts[key] }})
@@ -50,6 +50,9 @@
   <option value="{{ code }}">{{ code }} — {{ client }}</option>
   {% endfor %}
 </datalist>
+<datalist id="travelers">
+  {% for name in travelers %}<option value="{{ name }}"></option>{% endfor %}
+</datalist>
 
 <form method="post" action="{{ url_for('update_line', run_id=run_id) }}">
 <div class="table-wrap">
@@ -58,12 +61,13 @@
     <col style="width: 3%">   {# flag checkbox #}
     <col style="width: 8%">   {# status pill #}
     <col style="width: 6%">   {# date #}
-    <col style="width: 14%">  {# description + matched name #}
+    <col style="width: 12%">  {# description #}
+    <col style="width: 9%">   {# traveler (editable) #}
     <col style="width: 6%">   {# amount #}
     <col style="width: 10%">  {# GL account + title #}
-    <col style="width: 12%">  {# department select #}
+    <col style="width: 11%">  {# department select #}
     <col style="width: 10%">  {# project + candidate chips #}
-    <col style="width: 31%">  {# why / context #}
+    <col style="width: 25%">  {# why / context #}
   </colgroup>
   <thead>
     <tr>
@@ -71,6 +75,7 @@
       <th>Status</th>
       <th>Date</th>
       <th>Description</th>
+      <th>Traveler</th>
       <th class="amt">Amount</th>
       <th>GL Account</th>
       <th>Dept</th>
@@ -88,7 +93,10 @@
       <td class="nowrap">{{ li.date or '' }}</td>
       <td class="desc" title="{{ li.description }}">
         {{ li.description }}
-        {% if li.person %}<div class="hint">→ {{ li.person }}</div>{% endif %}
+      </td>
+      <td>
+        <input type="text" list="travelers" name="person_{{ idx }}" value="{{ li.person or '' }}"
+               placeholder="{{ '—' if status == 'wifi' else 'name…' }}">
       </td>
       <td class="amt">{{ li.amount }}</td>
       <td>

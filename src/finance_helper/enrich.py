@@ -124,6 +124,15 @@ def enrich_united(
     for li in doc.line_items:
         # Prefer the original Passenger Name column; fall back to the description.
         passenger = (li.raw.get("Passenger Name") or li.description).strip()
+        upper = passenger.upper()
+        if "WI-FI" in upper or "WIFI" in upper:
+            # Inflight wifi purchases carry no traveler by nature. Per policy
+            # these are accepted as-is (default travel account, no review) —
+            # they stay in the entry so the statement still ties out, but they
+            # never demand human attention.
+            li.needs_review = False
+            li.note = "inflight wifi purchase — auto-accepted, no traveler"
+            continue
         entry, exact = _lookup(passenger, tmap, surname_index)
         if not entry:
             li.needs_review = True
