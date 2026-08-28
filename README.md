@@ -1,4 +1,4 @@
-# Finance Helper
+# Scout
 
 Turns raw vendor CSV files into categorized accounting entries and routes them to
 the right system — **Sage Intacct** (journal entries) or **Bill.com** (bills) — with

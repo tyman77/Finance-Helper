@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "finance-helper"
 version = "0.1.0"
-description = "Vendor CSV -> categorized entries -> Sage Intacct / Bill.com"
+description = "Scout — vendor CSV -> categorized entries -> Sage Intacct / Bill.com"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0", "requests>=2.31", "python-dotenv>=1.0"]
 

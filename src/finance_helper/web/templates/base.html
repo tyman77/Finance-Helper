@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Finance Helper{% endblock %}</title>
+  <title>{% block title %}Scout{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <a href="{{ url_for('index') }}" class="brand">Finance Helper</a>
+    <a href="{{ url_for('index') }}" class="brand">Scout</a>
     <span class="topbar-right">
       <a href="{{ url_for('insights_page') }}" class="logout-link">Insights</a>
       <a href="{{ url_for('cashproof.landing') }}" class="logout-link">Cash Proof</a>
