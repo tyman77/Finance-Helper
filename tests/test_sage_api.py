@@ -87,7 +87,8 @@ def test_web_run_with_api_pull(client, monkeypatch):
         called["range"] = (start, end)
         return ledger
 
-    monkeypatch.setattr(sage_api, "fetch_ledger", fake_fetch)
+    from finance_helper.web import cashproof
+    monkeypatch.setattr(cashproof, "_sage_fetcher", lambda: (fake_fetch, "Sage API"))
     data = {"bank_file": (io.BytesIO(open("samples/bank_sample.csv", "rb").read()), "bank.csv"),
             "sage_api": "on"}
     resp = client.post("/cashproof/run", data=data, content_type="multipart/form-data")
@@ -103,7 +104,8 @@ def test_web_run_with_api_pull(client, monkeypatch):
 def test_web_api_pull_error_flashes_cleanly(client, monkeypatch):
     def boom(start, end):
         raise RuntimeError("Sage token request failed: HTTP 401")
-    monkeypatch.setattr(sage_api, "fetch_ledger", boom)
+    from finance_helper.web import cashproof
+    monkeypatch.setattr(cashproof, "_sage_fetcher", lambda: (boom, "Sage API"))
     data = {"bank_file": (io.BytesIO(open("samples/bank_sample.csv", "rb").read()), "bank.csv"),
             "sage_api": "on"}
     resp = client.post("/cashproof/run", data=data, content_type="multipart/form-data")

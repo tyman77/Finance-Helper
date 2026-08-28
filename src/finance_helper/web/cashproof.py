@@ -16,9 +16,19 @@ from decimal import Decimal
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from ..recon import bank as bank_mod
-from ..recon import engine, sage_api, summary
+from ..recon import engine, sage_api, sage_xml, summary
 from ..recon import sage as sage_mod
 from ..recon import store as recon_store
+
+
+def _sage_fetcher():
+    """Prefer the XML gateway (this company's proven credential style); fall
+    back to REST OAuth when only client id/secret are configured."""
+    if sage_xml.credentials_present():
+        return sage_xml.fetch_ledger, "Sage API (XML gateway)"
+    if sage_api.credentials_present():
+        return sage_api.fetch_ledger, "Sage API"
+    return None, None
 
 cashproof_bp = Blueprint("cashproof", __name__, url_prefix="/cashproof")
 
@@ -46,7 +56,7 @@ def _save_upload(file) -> str:
 @cashproof_bp.get("/")
 def landing():
     return render_template("cashproof.html", runs=recon_store.list_runs(),
-                           sage_api_ready=sage_api.credentials_present())
+                           sage_api_ready=_sage_fetcher()[0] is not None)
 
 
 @cashproof_bp.post("/run")
@@ -70,11 +80,15 @@ def run():
             ledger_txns = sage_mod.load_sage_csv(sage_path)
             ledger_label = sage_file.filename
         elif use_api:
+            fetch, label = _sage_fetcher()
+            if fetch is None:
+                raise RuntimeError("No Sage credentials configured — set the "
+                                   "INTACCT_SENDER_* (XML) or INTACCT_CLIENT_* (REST) variables.")
             posted = [t for t in bank_txns if not t.pending]
             start = min(t.posted_date for t in posted)
             end = max(t.posted_date for t in posted)
-            ledger_txns = sage_api.fetch_ledger(start, end)
-            ledger_label = f"Sage API ({start} → {end})"
+            ledger_txns = fetch(start, end)
+            ledger_label = f"{label} ({start} → {end})"
         else:
             ledger_txns, ledger_label = [], None
         result = engine.reconcile(bank_txns, ledger_txns)
