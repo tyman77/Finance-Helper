@@ -207,6 +207,25 @@ def _fallback_project(li, entry, hotel_index, active_projects) -> None:
         if mine:
             li.note += "; hotel-stay projects " + ", ".join(mine) + " — pick one"
             return
+        # Nothing matched — say which link of the chain broke, so a quiet
+        # result is diagnosable from the line itself instead of a mystery.
+        overlapping = project_resolver.person_stays_in_window(hotel_index, li.person, dep)
+        if overlapping:
+            coded = [b["project"] for b in overlapping if b.get("project")]
+            where = overlapping[0].get("hotel") or overlapping[0].get("city") or "a hotel"
+            if coded:
+                li.note += (f"; hotel stay that week is project {coded[0]}, "
+                            "which is archived in Sage — confirm by hand")
+            else:
+                li.note += (f"; {li.person} stayed at {where} that week but the booking "
+                            "carries no project number — add it in Hotel Engine")
+        elif project_resolver.person_has_any_stay(hotel_index, li.person):
+            li.note += (f"; {li.person} has hotel stays on other dates — "
+                        "none overlap this flight")
+        elif not any(b.get("guests") for b in hotel_index):
+            li.note += "; hotel index has no guest names — check the HE statement's guest column"
+    elif not hotel_index and dep and li.person:
+        li.note += "; no hotel stays indexed yet (upload Hotel Engine statements)"
     hotel = (
         project_resolver.hotel_projects_in_window(
             hotel_index, dep, department=li.department, active_projects=active_projects

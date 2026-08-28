@@ -363,3 +363,55 @@ def test_flight_offers_chips_when_person_has_two_stays_that_week():
     assert "hotel-stay projects 3531, 4499 — pick one" in john.note
     from finance_helper.web.app import _line_candidates
     assert _line_candidates(john.note) == ["3531", "4499"]
+
+
+def test_same_person_handles_real_name_variants():
+    assert project_resolver.same_person("Jake Cody", "Jacob Cody")          # nickname
+    assert project_resolver.same_person("Jake Cody", "Jake Lee Cody")       # middle name
+    assert project_resolver.same_person("Jake Cody", "Cody, Jake")          # last-first
+    assert project_resolver.same_person("JAKE CODY", "jake cody")           # case
+    assert not project_resolver.same_person("Jake Cody", "Natalie Cody")    # sibling
+    assert not project_resolver.same_person("Jake Cody", "Jake Brady")
+    assert not project_resolver.same_person("", "Jake Cody")
+
+
+def test_fuzzy_guest_names_still_match_stays():
+    idx = [{"start": "2026-07-06", "end": "2026-07-09", "project": "4232",
+            "guests": ["Keanon James Davidson"]}]
+    got = project_resolver.hotel_projects_for_person(idx, "Keanon Davidson", date(2026, 7, 6))
+    assert got == ["4232"]
+
+
+def test_no_match_notes_explain_which_link_broke():
+    def run_with(hotel_index, active=None):
+        doc = sources.load("united", "samples/united_sample.csv")
+        for li in doc.line_items:
+            if li.raw.get("Passenger Name") == "DOE/JOHN":
+                li.raw["Departure Date"] = "07/06/2026"
+        tmap = {"DOE/JOHN": {"person": "John Doe", "department": "10--Sales Team",
+                             "department_confidence": 1.0, "account_hint": "71000--OH",
+                             "account_confidence": 0.6, "projects": [], "n": 10}}
+        enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={}, roster={},
+                             registry={}, active_projects=active, hotel_index=hotel_index)
+        return next(li for li in doc.line_items
+                    if li.raw.get("Passenger Name") == "DOE/JOHN").note
+
+    # Stay overlaps but carries no project number.
+    note = run_with([{"start": "2026-07-05", "end": "2026-07-08", "project": None,
+                      "guests": ["John Doe"], "hotel": "La Quinta"}])
+    assert "carries no project number" in note and "La Quinta" in note
+    # Stay overlaps but its code is archived.
+    note = run_with([{"start": "2026-07-05", "end": "2026-07-08", "project": "5555",
+                      "guests": ["John Doe"]}], active=set())
+    assert "archived in Sage" in note
+    # Stays exist, wrong dates.
+    note = run_with([{"start": "2026-05-01", "end": "2026-05-03", "project": "4499",
+                      "guests": ["John Doe"]}])
+    assert "other dates" in note
+    # Index has no guest names at all.
+    note = run_with([{"start": "2026-07-05", "end": "2026-07-08", "project": "4499",
+                      "guests": []}])
+    assert "no guest names" in note
+    # No index at all.
+    note = run_with([])
+    assert "no hotel stays indexed yet" in note

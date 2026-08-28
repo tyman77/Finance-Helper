@@ -133,6 +133,62 @@ def hotel_projects_in_window(
     return out
 
 
+def same_person(a: str, b: str) -> bool:
+    """Do two name strings plausibly name the same human?
+
+    Real data never matches exactly: the traveler map says "Jake Cody", the
+    hotel guest column says "Jacob Lee Cody" or "Cody, Jake". Tokens are
+    compared: exact set match, one name containing the other (middle names),
+    or same surname + same first initial (nicknames: Jake/Jacob).
+    """
+    def toks(name):
+        parts = [t for t in re.split(r"[^a-z]+", (name or "").lower()) if t]
+        return parts
+
+    ta, tb = toks(a), toks(b)
+    if not ta or not tb:
+        return False
+    sa, sb = set(ta), set(tb)
+    if sa == sb or sa <= sb or sb <= sa:
+        return True
+
+    def surname_first(parts, raw):
+        # "Cody, Jake" puts the surname first; otherwise it's last.
+        if "," in (raw or ""):
+            return parts[0], (parts[1] if len(parts) > 1 else "")
+        return parts[-1], parts[0]
+
+    surn_a, first_a = surname_first(ta, a)
+    surn_b, first_b = surname_first(tb, b)
+    return bool(surn_a and surn_a == surn_b and first_a and first_b
+                and first_a[0] == first_b[0])
+
+
+def person_has_any_stay(hotel_index: list, person: str) -> bool:
+    return any(any(same_person(person, g) for g in (b.get("guests") or []))
+               for b in hotel_index)
+
+
+def person_stays_in_window(hotel_index: list, person: str, dep: date,
+                           window_days: int = 3) -> list[dict]:
+    """Stays naming this person that overlap the trip — coded or not
+    (uncoded stays can't tag a flight but explain why nothing did)."""
+    lo = dep - timedelta(days=1)
+    hi = dep + timedelta(days=window_days)
+    out = []
+    for b in hotel_index:
+        if not any(same_person(person, g) for g in (b.get("guests") or [])):
+            continue
+        try:
+            start = date.fromisoformat(b["start"])
+            end = date.fromisoformat(b.get("end") or b["start"])
+        except (KeyError, ValueError):
+            continue
+        if start <= hi and end >= lo:
+            out.append(b)
+    return out
+
+
 def hotel_projects_for_person(
     hotel_index: list, person: str, dep: date, window_days: int = 3,
     active_projects: set[str] | None = None,
@@ -144,16 +200,14 @@ def hotel_projects_for_person(
     there is — much stronger than the date+department heuristic in
     hotel_projects_in_window, so callers may auto-fill on a unique hit.
     """
-    who = " ".join((person or "").lower().split())
-    if not who:
+    if not (person or "").strip():
         return []
     lo = dep - timedelta(days=1)
     hi = dep + timedelta(days=window_days)
     seen: set = set()
     out: list[str] = []
     for b in hotel_index:
-        guests = [" ".join(str(g).lower().split()) for g in (b.get("guests") or [])]
-        if who not in guests:
+        if not any(same_person(person, g) for g in (b.get("guests") or [])):
             continue
         try:
             start = date.fromisoformat(b["start"])

@@ -464,8 +464,11 @@ def create_app() -> Flask:
             for b in detail["bookings"]:
                 m = re.search(r"\b(\d{3,5})\b", str(b.get("project") or ""))
                 start = _ins._parse_mdy(b["start"])
-                if not m or start is None:
+                if start is None:
                     continue
+                # Uncoded stays stay in the index with project=None: they can't
+                # tag a flight, but they make "stay found, no project number"
+                # diagnosable instead of looking like no stay at all.
                 end = _ins._parse_mdy(b["end"]) or start
                 dept_id = None
                 dn = (b.get("department") or "").lower()
@@ -475,8 +478,9 @@ def create_app() -> Flask:
                         break
                 records.append({
                     "start": start.isoformat(), "end": end.isoformat(),
-                    "project": m.group(1), "department": dept_id,
+                    "project": m.group(1) if m else None, "department": dept_id,
                     "city": b.get("city") or "", "guests": b.get("guests") or [],
+                    "hotel": b.get("hotel") or "",
                 })
             data_dir = os.environ.get(
                 "FINANCE_HELPER_DATA",
