@@ -97,3 +97,55 @@ def test_hotels_page_renders_booking_report(client):
     assert b"Fairfield Inn Example" in body
     # Flights page must not grow hotel sections.
     assert b"Avg nightly rate" not in client.get("/d/flights").data
+
+
+def test_guest_index_and_occupancy_labels():
+    rows = [
+        {"Confirmation Number": "260615000001", "Guest Name": "Natalie Brady", "Guests": "2"},
+        {"Confirmation Number": "260615000001", "Guest Name": "Jane Smith"},
+        {"Confirmation Number": "260615000002", "Guest Name": "Jake Cody", "Rooms": "1", "Guests": "1"},
+    ]
+    idx = insights.build_guest_index(rows)
+    assert idx["260615000001"]["guests"] == ["Natalie Brady", "Jane Smith"]
+    assert insights.occupancy_label(2, 0) == "Double"
+    assert insights.occupancy_label(1, 0) == "Single"
+    assert insights.occupancy_label(4, 2) == "2 rooms"
+    with pytest.raises(ValueError, match="Columns present"):
+        insights.build_guest_index([{"Something": "x"}])
+
+
+def test_travelers_inferred_from_matching_flights():
+    from datetime import date as _date
+    from decimal import Decimal as D
+
+    from finance_helper import pipeline
+    from finance_helper.models import LineItem, SourceDocument
+    he = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    # The Omaha stay (06/02-06/07) is Install dept, project 4499. A United
+    # flight by an Install traveler on that project, departing 06/02, matches.
+    flight = SourceDocument(
+        source="united", destination="sage", vendor="United Airlines",
+        document_id="x", currency="USD",
+        line_items=[LineItem(description="CODY/JAKE OMA", amount=D("400"),
+                             date=_date(2026, 6, 2), person="Jake Cody",
+                             department="60", project="4499")])
+    detail = insights.hotels_detail([he], flight_docs=[flight])
+    omaha = next(b for b in detail["bookings"] if b["city"] == "Omaha")
+    assert omaha["inferred"] == ["Jake Cody"]
+    # Other stays (different dept/project) must not inherit the traveler.
+    assert all(b["inferred"] == [] for b in detail["bookings"] if b["city"] != "Omaha")
+
+
+def test_guest_upload_shows_actual_travelers_and_occupancy(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path / "data"))
+    _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    csv_body = ("Confirmation Number,Guest Name,Guests\n"
+                "260615000002,Jake Cody,2\n")
+    resp = client.post("/d/hotels/guests",
+                       data={"file": (io.BytesIO(csv_body.encode()), "trips.csv")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 302
+    body = client.get("/d/hotels").data
+    assert b"Jake Cody" in body
+    assert b"Double" in body
+    assert b"Guest list loaded: 1 bookings" in body

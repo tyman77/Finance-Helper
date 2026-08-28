@@ -138,15 +138,27 @@
 
 <div class="panel">
   <h2>Bookings ({{ detail.booking_count }})</h2>
+  {% if detail.guest_bookings == 0 %}
+  <p class="subtle">Traveler names shown as <em>likely</em> are inferred from United flights on the
+  same dates/project — upload Hotel Engine's trips/guests export below to get actual guests and
+  single/double occupancy.</p>
+  {% endif %}
   <div class="tablewrap"><table class="runs">
-    <thead><tr><th>Dates</th><th>Hotel</th><th>City</th><th class="amt">Nights</th>
-      <th class="amt">Rate</th><th class="amt">Total</th><th>Department</th><th>Project</th><th></th></tr></thead>
+    <thead><tr><th>Dates</th><th>Hotel</th><th>City</th><th>Travelers</th><th>Occupancy</th>
+      <th class="amt">Nights</th><th class="amt">Rate</th><th class="amt">Total</th>
+      <th>Department</th><th>Project</th><th></th></tr></thead>
     <tbody>
       {% for b in detail.bookings[:40] %}
       <tr>
         <td class="nowrap">{{ b.start }} → {{ b.end }}</td>
         <td>{{ b.hotel or b.type }}</td>
         <td>{{ b.city }}</td>
+        <td>
+          {% if b.guests %}{{ b.guests | join(', ') }}
+          {% elif b.inferred %}<span class="subtle">{{ b.inferred | join(', ') }} <em>(likely)</em></span>
+          {% endif %}
+        </td>
+        <td>{{ b.occupancy }}</td>
         <td class="amt">{{ b.nights or '' }}</td>
         <td class="amt">{% if b.rate %}${{ '{:,.0f}'.format(b.rate) }}{% endif %}</td>
         <td class="amt">${{ '{:,.2f}'.format(b.total) }}</td>
@@ -160,6 +172,19 @@
   {% if detail.booking_count > 40 %}
   <p class="subtle">Showing the 40 most recent of {{ detail.booking_count }} bookings.</p>
   {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Guest list (travelers &amp; occupancy)</h2>
+  <p class="subtle">The billing statement carries no guest names. Hotel Engine's
+  <strong>trips/guests export</strong> does — upload it here and stays gain their actual
+  travelers plus a Single / Double designation (matched by confirmation or invoice number;
+  uploads accumulate, so add each month's alongside its statement).</p>
+  <form method="post" action="{{ url_for('hotels_guests_upload') }}"
+        enctype="multipart/form-data" class="upload-form">
+    <label>Trips/guests CSV <input type="file" name="file" accept=".csv" required></label>
+    <button type="submit">Add guest list</button>
+  </form>
 </div>
 {% endif %}
 

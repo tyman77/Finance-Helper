@@ -379,6 +379,24 @@ def create_app() -> Flask:
             dc=detail_charts,
         )
 
+    @app.post("/d/hotels/guests")
+    def hotels_guests_upload():
+        file = request.files.get("file")
+        if not file or not file.filename:
+            flash("Choose the Hotel Engine trips/guests CSV first.")
+            return redirect(url_for("domain_page", domain="hotels"))
+        import csv as _csv
+        import io as _io
+        try:
+            rows = list(_csv.DictReader(_io.StringIO(file.read().decode("utf-8-sig"))))
+            index = insights.build_guest_index(rows)
+            total = insights.save_guest_index(index)
+            flash(f"Guest list loaded: {len(index)} bookings from this file ({total} total). "
+                  "Travelers and occupancy now show on matching stays.")
+        except Exception as exc:
+            flash(f"Could not read that guest list: {exc}")
+        return redirect(url_for("domain_page", domain="hotels"))
+
     @app.get("/insights")
     def insights_page():
         for rid, saved in store.load_all_runs().items():

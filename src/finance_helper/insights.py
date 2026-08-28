@@ -140,7 +140,106 @@ def _num(value) -> Decimal:
         return Decimal("0")
 
 
-def hotels_detail(docs: list) -> dict:
+# Guest-list export column candidates (Hotel Engine's trips/guests report —
+# separate from the billing statement, which carries no guest names).
+_GUEST_ID_COLS = ("Invoice Number", "Confirmation Number", "Confirmation", "Booking ID",
+                  "Itinerary Number", "Reservation ID", "Trip ID")
+_GUEST_NAME_COLS = ("Guest", "Guest Name", "Traveler", "Traveler Name", "Primary Guest",
+                    "Guests", "Guest(s)", "Name")
+_GUEST_COUNT_COLS = ("Guests", "Guest Count", "Number of Guests", "Occupancy", "Adults")
+_ROOM_COUNT_COLS = ("Rooms", "Room Count", "Number of Rooms")
+
+
+def _first_col(row: dict, candidates: tuple) -> str:
+    for c in candidates:
+        v = str(row.get(c) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+def build_guest_index(rows: list[dict]) -> dict:
+    """Hotel Engine guest/trips CSV -> {booking id: {guests: [...], rooms, count}}.
+
+    Multiple rows for one booking accumulate guests. Raises with the columns
+    found when nothing maps, so a mismatched export is a one-line fix here.
+    """
+    index: dict[str, dict] = {}
+    for row in rows:
+        bid = _first_col(row, _GUEST_ID_COLS)
+        if not bid:
+            continue
+        entry = index.setdefault(bid, {"guests": [], "rooms": 0, "count": 0})
+        name = _first_col(row, _GUEST_NAME_COLS)
+        # A cell may carry several guests ("Jane Doe; John Doe").
+        for part in [p.strip() for p in name.replace(";", ",").split(",") if p.strip()]:
+            if part not in entry["guests"]:
+                entry["guests"].append(part)
+        entry["rooms"] = max(entry["rooms"], int(_num(_first_col(row, _ROOM_COUNT_COLS) or 0)))
+        entry["count"] = max(entry["count"], int(_num(_first_col(row, _GUEST_COUNT_COLS) or 0)))
+    if rows and not index:
+        raise ValueError(
+            "No booking ids recognized in that file. Columns present: "
+            + ", ".join(sorted((rows[0] or {}).keys()))
+            + f" — expected one of {_GUEST_ID_COLS}.")
+    return index
+
+
+def occupancy_label(guests: int, rooms: int) -> str:
+    if rooms > 1:
+        return f"{rooms} rooms"
+    if guests <= 0:
+        return ""
+    return {1: "Single", 2: "Double"}.get(guests, f"{guests} guests")
+
+
+def _parse_mdy(value: str):
+    from datetime import datetime
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        try:
+            return datetime.strptime((value or "").strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _infer_travelers(booking: dict, flight_docs: list) -> list[str]:
+    """Likely guests for a stay, from United flights that overlap it.
+
+    Conservative: a flight only counts when its departure falls inside the
+    stay window (±2 days) AND its project or department agrees with the
+    booking's — dates alone are too weak to name a person.
+    """
+    from datetime import timedelta
+
+    from .enrich import _HE_DEPARTMENTS
+
+    start = _parse_mdy(booking["start"])
+    end = _parse_mdy(booking["end"]) or start
+    if start is None:
+        return []
+    lo, hi = start - timedelta(days=2), end + timedelta(days=2)
+    dept_id = None
+    dn = booking["department"].lower()
+    for key, did in _HE_DEPARTMENTS.items():
+        if key in dn:
+            dept_id = did
+            break
+
+    names: list[str] = []
+    for doc in flight_docs:
+        for li in doc.line_items:
+            if not li.person or li.date is None or not (lo <= li.date <= hi):
+                continue
+            same_project = booking["project"] and li.project and booking["project"] == li.project
+            same_dept = dept_id and li.department and li.department.split("--")[0] == dept_id
+            if (same_project or same_dept) and li.person not in names:
+                names.append(li.person)
+    return names
+
+
+def hotels_detail(docs: list, flight_docs: list | None = None,
+                  guest_index: dict | None = None) -> dict:
     """The booking-level Hotels report: nights, rates, hotels, cities,
     departments, cost composition, and one row per booking.
 
@@ -203,6 +302,15 @@ def hotels_detail(docs: list) -> dict:
     room_spend = by_component.get("travel_lodging", Decimal("0"))
     ordered = sorted(bookings.values(), key=lambda b: b["start"], reverse=True)
 
+    guest_index = guest_index or {}
+    for b in ordered:
+        entry = guest_index.get(b["invoice"], {})
+        b["guests"] = entry.get("guests", [])
+        b["occupancy"] = occupancy_label(
+            entry.get("count") or len(b["guests"]), entry.get("rooms") or 0)
+        b["inferred"] = ([] if b["guests"] else
+                         _infer_travelers(b, flight_docs or []))
+
     return {
         "bookings": ordered,
         "booking_count": len(bookings),
@@ -215,6 +323,7 @@ def hotels_detail(docs: list) -> dict:
                          key=lambda t: -abs(t[1])),
         "cities": sorted(((name, v["spend"], v["nights"]) for name, v in by_city.items()),
                          key=lambda t: -abs(t[1])),
+        "guest_bookings": sum(1 for b in ordered if b["guests"]),
     }
 
 
@@ -280,6 +389,11 @@ def build_domain(run_items: list[tuple], domain_key: str) -> dict:
     months = sorted(by_month)
     dom_docs = [run["doc"] for _, run in run_items
                 if id(run) in kept and run["doc"].source in sources]
+    detail = None
+    if domain_key == "hotels" and dom_docs:
+        flight_docs = [run["doc"] for _, run in run_items
+                       if id(run) in kept and run["doc"].source in DOMAINS["flights"]["sources"]]
+        detail = hotels_detail(dom_docs, flight_docs, load_guest_index())
     return {
         "title": dom["title"], "vendor": dom["vendor"], "slot": dom["slot"],
         "group": group, "sources": dom["sources"],
@@ -290,8 +404,41 @@ def build_domain(run_items: list[tuple], domain_key: str) -> dict:
         "people": sorted(((n, v["amount"], v["lines"]) for n, v in by_person.items()),
                          key=lambda t: -abs(t[1])),
         "statements": statements,
-        "detail": hotels_detail(dom_docs) if domain_key == "hotels" and dom_docs else None,
+        "detail": detail,
     }
+
+
+def _guest_index_path() -> str:
+    import os
+    data_dir = os.environ.get(
+        "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+    return os.path.join(data_dir, "hotel_guests.json")
+
+
+def load_guest_index() -> dict:
+    import json
+    import os
+    path = _guest_index_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_guest_index(index: dict) -> int:
+    """Merge into the stored guest index; returns the total booking count."""
+    import json
+    import os
+    merged = load_guest_index()
+    merged.update(index)
+    path = _guest_index_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(merged, fh, indent=2)
+    return len(merged)
 
 
 # ---------------------------------------------------------------------------
