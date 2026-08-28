@@ -58,7 +58,11 @@ def fetch_reimbursements(start: date, end: date) -> list[dict]:
     token = _get_token()
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{_API}/reimbursements"
-    params = {"from_date": start.isoformat(), "to_date": end.isoformat(), "page_size": 100}
+    # Confirmed live (2026-08-28): bare dates get HTTP 422 "Not a valid
+    # datetime." — the endpoint wants full RFC3339 datetimes.
+    params = {"from_date": f"{start.isoformat()}T00:00:00Z",
+              "to_date": f"{end.isoformat()}T23:59:59Z",
+              "page_size": 100}
     records: list[dict] = []
     for _page in range(200):
         resp = requests.get(url, headers=headers, params=params, timeout=60)
