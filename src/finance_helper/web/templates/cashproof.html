@@ -9,6 +9,12 @@ GL-detail export (cash account) to run the full tie-out — bank alone gives the
 <form method="post" action="{{ url_for('cashproof.run') }}" enctype="multipart/form-data" class="upload-form">
   <label>Bank statement CSV <input type="file" name="bank_file" accept=".csv" required></label>
   <label>Sage GL detail CSV (optional) <input type="file" name="sage_file" accept=".csv"></label>
+  {% if sage_api_ready %}
+  <label><input type="checkbox" name="sage_api"> Pull ledger from Sage Intacct
+    <span class="subtle">(cash-account GL detail for the bank file's date range — no CSV needed)</span></label>
+  {% else %}
+  <p class="subtle">Sage API pull unavailable — set the INTACCT_* variables to enable it; a GL CSV works meanwhile.</p>
+  {% endif %}
   <button type="submit">Run Cash Proof</button>
 </form>
 

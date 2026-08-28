@@ -16,7 +16,7 @@ from decimal import Decimal
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from ..recon import bank as bank_mod
-from ..recon import engine, summary
+from ..recon import engine, sage_api, summary
 from ..recon import sage as sage_mod
 from ..recon import store as recon_store
 
@@ -45,7 +45,8 @@ def _save_upload(file) -> str:
 
 @cashproof_bp.get("/")
 def landing():
-    return render_template("cashproof.html", runs=recon_store.list_runs())
+    return render_template("cashproof.html", runs=recon_store.list_runs(),
+                           sage_api_ready=sage_api.credentials_present())
 
 
 @cashproof_bp.post("/run")
@@ -55,6 +56,7 @@ def run():
         flash("Choose a bank statement CSV first.")
         return redirect(url_for("cashproof.landing"))
     sage_file = request.files.get("sage_file")
+    use_api = request.form.get("sage_api") == "on"
     has_sage = bool(sage_file and sage_file.filename)
 
     bank_path = _save_upload(bank_file)
@@ -64,7 +66,17 @@ def run():
         if not bank_txns:
             flash("No transactions found in that file — is it the bank's CSV export?")
             return redirect(url_for("cashproof.landing"))
-        ledger_txns = sage_mod.load_sage_csv(sage_path) if sage_path else []
+        if has_sage:
+            ledger_txns = sage_mod.load_sage_csv(sage_path)
+            ledger_label = sage_file.filename
+        elif use_api:
+            posted = [t for t in bank_txns if not t.pending]
+            start = min(t.posted_date for t in posted)
+            end = max(t.posted_date for t in posted)
+            ledger_txns = sage_api.fetch_ledger(start, end)
+            ledger_label = f"Sage API ({start} → {end})"
+        else:
+            ledger_txns, ledger_label = [], None
         result = engine.reconcile(bank_txns, ledger_txns)
         result.integrity = bank_mod.integrity_check(bank_path)
     except Exception as exc:
@@ -78,11 +90,11 @@ def run():
     run_id = uuid.uuid4().hex[:12]
     recon_store.save_run(run_id, result, {
         "bank_filename": bank_file.filename,
-        "sage_filename": sage_file.filename if has_sage else None,
+        "sage_filename": ledger_label,
         "created": datetime.now().isoformat(timespec="seconds"),
         "created_by": session.get("email", ""),
     })
-    if not has_sage:
+    if not has_sage and not use_api:
         flash("Bank statement analyzed. Upload a Sage GL-detail export with it "
               "to run the full tie-out — this run shows cash activity only.")
     return redirect(url_for("cashproof.run_page", run_id=run_id))
