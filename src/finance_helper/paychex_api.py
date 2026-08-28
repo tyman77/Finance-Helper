@@ -49,11 +49,14 @@ def _get_token() -> str:
     import requests
 
     try:
+        # Confirmed live (2026-08-28): Paychex rejects HTTP Basic with
+        # "Client does not support this authentication method" — the client
+        # credentials go in the form body (client_secret_post style).
         resp = requests.post(
             f"{_api()}/auth/oauth/v2/token",
-            data={"grant_type": "client_credentials"},
-            auth=(os.environ["PAYCHEX_CLIENT_ID"].strip(),
-                  os.environ["PAYCHEX_CLIENT_SECRET"].strip()),
+            data={"grant_type": "client_credentials",
+                  "client_id": os.environ["PAYCHEX_CLIENT_ID"].strip(),
+                  "client_secret": os.environ["PAYCHEX_CLIENT_SECRET"].strip()},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
         )
