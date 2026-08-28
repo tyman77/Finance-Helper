@@ -56,8 +56,9 @@ def credentials_present() -> bool:
 def _get_token() -> str:
     import requests
 
+    from ..intacct_auth import web_services_username
     data = {"grant_type": "client_credentials",
-            "username": os.environ["INTACCT_USER_ID"],
+            "username": web_services_username(),
             "password": os.environ["INTACCT_USER_PASSWORD"]}
     try:
         resp = requests.post(

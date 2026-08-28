@@ -126,7 +126,8 @@ def _get_token() -> str:
     # username/password identify the authorized Web Services User within it.
     data = {"grant_type": "client_credentials"}
     if os.environ.get("INTACCT_USER_ID"):
-        data["username"] = os.environ["INTACCT_USER_ID"]
+        from ..intacct_auth import web_services_username
+        data["username"] = web_services_username()  # "user@company" format required
     if os.environ.get("INTACCT_USER_PASSWORD"):
         data["password"] = os.environ["INTACCT_USER_PASSWORD"]
     try:

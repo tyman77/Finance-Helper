@@ -109,3 +109,17 @@ def test_web_api_pull_error_flashes_cleanly(client, monkeypatch):
     resp = client.post("/cashproof/run", data=data, content_type="multipart/form-data")
     assert resp.status_code == 302
     assert b"Sage token request failed" in client.get("/cashproof/").data
+
+
+def test_username_gets_company_suffix(monkeypatch):
+    from finance_helper.intacct_auth import web_services_username
+    monkeypatch.setenv("INTACCT_USER_ID", "scout_ws")
+    monkeypatch.setenv("INTACCT_COMPANY_ID", "SummitIntegrated")
+    assert web_services_username() == "scout_ws@SummitIntegrated"
+    # Already-qualified ids pass through untouched.
+    monkeypatch.setenv("INTACCT_USER_ID", "scout_ws@SummitIntegrated")
+    assert web_services_username() == "scout_ws@SummitIntegrated"
+    # No company id -> best effort, unchanged.
+    monkeypatch.setenv("INTACCT_USER_ID", "bare")
+    monkeypatch.delenv("INTACCT_COMPANY_ID", raising=False)
+    assert web_services_username() == "bare"
