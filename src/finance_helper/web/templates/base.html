@@ -10,6 +10,7 @@
   <header class="topbar">
     <a href="{{ url_for('index') }}" class="brand">Finance Helper</a>
     <span class="topbar-right">
+      <a href="{{ url_for('insights_page') }}" class="logout-link">Insights</a>
       <a href="{{ url_for('admin.admin_page') }}" class="logout-link">Admin</a>
       {% if session.get('authed') %}
         <span class="subtle">{{ session.get('email') }}</span>

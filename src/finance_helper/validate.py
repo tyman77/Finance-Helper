@@ -22,13 +22,16 @@ import os
 
 from .models import SourceDocument
 
-_DATA_DIR = os.environ.get(
-    "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data")
-)
+def _data_dir() -> str:
+    # Read the env at call time (not import time) so FINANCE_HELPER_DATA set
+    # after import — e.g. per-test monkeypatching — is honored.
+    return os.environ.get(
+        "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data")
+    )
 
 
 def load_chart(path: str | None = None) -> dict:
-    path = path or os.path.join(_DATA_DIR, "chart_of_accounts.json")
+    path = path or os.path.join(_data_dir(), "chart_of_accounts.json")
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
@@ -38,7 +41,7 @@ def load_chart(path: str | None = None) -> dict:
 def load_projects(path: str | None = None) -> dict:
     """{"<project_id>": {"name": ..., "status": ...}, ...} from
     scripts/fetch_sage_projects.py. {} if that file doesn't exist yet."""
-    path = path or os.path.join(_DATA_DIR, "sage_projects.json")
+    path = path or os.path.join(_data_dir(), "sage_projects.json")
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:

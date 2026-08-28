@@ -25,9 +25,14 @@ import yaml
 from . import config, project_resolver
 from .models import SourceDocument
 
-_DATA_DIR = os.environ.get(
-    "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data")
-)
+def _data_dir() -> str:
+    # Read the env at call time (not import time) so FINANCE_HELPER_DATA set
+    # after import — e.g. per-test monkeypatching — is honored.
+    return os.environ.get(
+        "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "data")
+    )
+
+
 _DEPT_CONF_MIN = 0.9   # department is trusted above this
 
 # Distinguishes "caller didn't pass active_projects" (load from disk) from
@@ -47,7 +52,7 @@ def load_traveler_map(path: str) -> dict:
 
 
 def _load_json(name: str):
-    path = os.path.join(_DATA_DIR, name)
+    path = os.path.join(_data_dir(), name)
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as fh:
@@ -98,7 +103,7 @@ def enrich_united(
     hotel_index: list | None = None,
 ) -> SourceDocument:
     if tmap is None:
-        tmap = load_traveler_map(os.path.join(_DATA_DIR, "united_travelers.yml"))
+        tmap = load_traveler_map(os.path.join(_data_dir(), "united_travelers.yml"))
     if schedule_index is None:
         schedule_index = _load_json("schedule_index.json") or {}
     if calendar_index is None:

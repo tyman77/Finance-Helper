@@ -259,3 +259,43 @@ ul.issues li { margin: 2px 0; }
 
 .actions { display: flex; gap: 12px; margin: 16px 0; align-items: center; }
 .actions form { margin: 0; }
+
+/* ---- Insights page ---- */
+/* Categorical slots validated for this dark surface (#171a21):
+   worst adjacent CVD dE 8.4, normal-vision 19.8, all >= 3:1 contrast. */
+.s0 { fill: #3987e5; } .swatch.s0 { background: #3987e5; }
+.s1 { fill: #d95926; } .swatch.s1 { background: #d95926; }
+.s2 { fill: #199e70; } .swatch.s2 { background: #199e70; }
+.s3 { fill: #c98500; } .swatch.s3 { background: #c98500; }
+
+.kpi-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.kpi {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 18px; min-width: 150px; flex: 1;
+}
+.kpi-label { color: var(--muted); font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
+.kpi-value { font-size: 1.6rem; font-weight: 600; margin-top: 4px; }
+.kpi-sub { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px 20px; margin: 16px 0;
+}
+.panel h2 { margin: 0 0 10px; font-size: 1rem; }
+.panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .panel-grid { grid-template-columns: 1fr; } }
+
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: #262b35; stroke-width: 1; }
+.chart .baseline { stroke: #3a4150; stroke-width: 1; }
+.chart .tick, .chart .rowlabel, .chart .rowvalue {
+  fill: var(--muted); font-size: 11px; font-family: inherit;
+}
+.chart .rowvalue { fill: var(--text); font-variant-numeric: tabular-nums; }
+/* 2px panel-colored ring = the spacer between stacked segments / bars. */
+.chart .seg { stroke: var(--panel); stroke-width: 2; }
+.chart .seg:hover { filter: brightness(1.25); }
+
+.legend { display: flex; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+.legend-item { color: var(--muted); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }

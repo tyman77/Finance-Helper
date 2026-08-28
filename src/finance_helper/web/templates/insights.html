@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Insights — Finance Helper{% endblock %}
+{% block content %}
+<h1>Travel &amp; spend insights</h1>
+<p class="subtle">Across {{ d.run_count }} saved statement{{ '' if d.run_count == 1 else 's' }}
+  ({{ d.line_count }} lines). Duplicate uploads of the same statement are counted once.</p>
+
+{% if d.line_count == 0 %}
+<div class="panel"><p class="subtle">No data yet — process a vendor statement and it will show up here.</p></div>
+{% else %}
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-label">Total spend</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(d.total) }}</div>
+  </div>
+  {% for g in groups %}
+  <div class="kpi">
+    <div class="kpi-label"><span class="swatch s{{ loop.index0 }}"></span>{{ g }}</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(d.by_group[g]) }}</div>
+  </div>
+  {% endfor %}
+  <div class="kpi">
+    <div class="kpi-label">Coded to a project</div>
+    <div class="kpi-value">{{ '%.0f'|format(d.coded_pct) }}%</div>
+    <div class="kpi-sub">{{ d.review_lines }} lines still flagged</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Monthly spend by category</h2>
+  <div class="legend">
+    {% for g in groups %}<span class="legend-item"><span class="swatch s{{ loop.index0 }}"></span>{{ g }}</span>{% endfor %}
+  </div>
+  <svg viewBox="0 0 {{ monthly.width }} {{ monthly.height }}" class="chart" role="img"
+       aria-label="Stacked monthly spend by category">
+    {% for t in monthly.ticks %}
+    <line x1="{{ monthly.pad_l }}" x2="{{ monthly.width - monthly.pad_r }}"
+          y1="{{ t.y }}" y2="{{ t.y }}" class="grid"/>
+    <text x="{{ monthly.pad_l - 6 }}" y="{{ t.y + 3 }}" class="tick" text-anchor="end">{{ t.label }}</text>
+    {% endfor %}
+    <line x1="{{ monthly.pad_l }}" x2="{{ monthly.width - monthly.pad_r }}"
+          y1="{{ monthly.baseline_y }}" y2="{{ monthly.baseline_y }}" class="baseline"/>
+    {% for col in monthly.columns %}
+      {% for seg in col.segments %}
+      <rect x="{{ seg.x }}" y="{{ seg.y }}" width="{{ seg.w }}" height="{{ seg.h }}"
+            class="seg s{{ seg.slot }}" rx="2">
+        <title>{{ col.month }} · {{ seg.group }}: ${{ '{:,.0f}'.format(seg.value) }}</title>
+      </rect>
+      {% endfor %}
+      <text x="{{ col.cx }}" y="{{ monthly.baseline_y + 14 }}" class="tick" text-anchor="middle">{{ col.label }}</text>
+    {% endfor %}
+  </svg>
+</div>
+
+<div class="panel-grid">
+  <div class="panel">
+    <h2>Top projects by spend</h2>
+    {% if projects_chart.rows %}
+    <svg viewBox="0 0 {{ projects_chart.width }} {{ projects_chart.height }}" class="chart" role="img"
+         aria-label="Top projects by spend">
+      {% for r in projects_chart.rows %}
+      <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(24, True) }}</text>
+      <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s0" rx="2">
+        <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+      </rect>
+      <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+      {% endfor %}
+    </svg>
+    {% else %}<p class="subtle">No project-coded spend yet — assign projects on the review screen.</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Top travelers</h2>
+    {% if people_chart.rows %}
+    <svg viewBox="0 0 {{ people_chart.width }} {{ people_chart.height }}" class="chart" role="img"
+         aria-label="Top travelers by spend">
+      {% for r in people_chart.rows %}
+      <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(24, True) }}</text>
+      <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s0" rx="2">
+        <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+      </rect>
+      <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+      {% endfor %}
+    </svg>
+    {% else %}<p class="subtle">No traveler-coded spend yet.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>All travelers</h2>
+  <table class="runs">
+    <thead><tr><th>Traveler</th><th class="amt">Spend</th><th class="amt">Lines</th></tr></thead>
+    <tbody>
+      {% for name, amount, lines in people_rows %}
+      <tr><td>{{ name }}</td><td class="amt">${{ '{:,.2f}'.format(amount) }}</td><td class="amt">{{ lines }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}

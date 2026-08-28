@@ -25,7 +25,7 @@ from dotenv import find_dotenv, load_dotenv
 from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .. import config, destinations, pipeline, validate
+from .. import config, destinations, insights, pipeline, validate
 from .. import review as proposal_review
 from . import store
 from .admin import admin_bp
@@ -343,6 +343,32 @@ def create_app() -> Flask:
             RUNS.setdefault(rid, saved)
         recent = sorted(RUNS.items(), key=lambda kv: kv[1]["created"], reverse=True)
         return render_template("index.html", sources=config.sources(), recent=recent)
+
+    @app.get("/insights")
+    def insights_page():
+        for rid, saved in store.load_all_runs().items():
+            RUNS.setdefault(rid, saved)
+        data = insights.build(RUNS.values())
+
+        # Project labels: "4804 — Echo Church" where the registry knows the client.
+        registry = _load_json_data("project_registry.json").get("registry", {})
+
+        def plabel(code):
+            client = (registry.get(code) or {}).get("client")
+            return f"{code} — {client}" if client else code
+
+        top_projects = [(plabel(c), v) for c, v in data["projects"][:10]]
+        top_people = data["people"][:10]
+        monthly = insights.monthly_chart(data["months"], data["by_month_group"], insights.GROUPS)
+        return render_template(
+            "insights.html",
+            d=data,
+            groups=insights.GROUPS,
+            monthly=monthly,
+            projects_chart=insights.hbar_chart(top_projects),
+            people_chart=insights.hbar_chart([(n, a) for n, a, _ in top_people]),
+            people_rows=data["people"][:25],
+        )
 
     @app.post("/upload")
     def upload():
