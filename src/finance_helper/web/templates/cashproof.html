@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Cash Proof — Finance Helper{% endblock %}
+{% block content %}
+<h1>Cash Proof</h1>
+<p class="subtle" style="max-width:60ch">Ties every bank movement to a recorded ledger entry and
+puts everything that doesn't tie in front of you. Upload the bank activity export; add a Sage
+GL-detail export (cash account) to run the full tie-out — bank alone gives the cash-activity view.</p>
+
+<form method="post" action="{{ url_for('cashproof.run') }}" enctype="multipart/form-data" class="upload-form">
+  <label>Bank statement CSV <input type="file" name="bank_file" accept=".csv" required></label>
+  <label>Sage GL detail CSV (optional) <input type="file" name="sage_file" accept=".csv"></label>
+  <button type="submit">Run Cash Proof</button>
+</form>
+
+{% if runs %}
+<h2>Past runs</h2>
+<table class="runs">
+  <thead><tr><th>Period</th><th>Bank file</th><th>Ledger</th><th>Open exceptions</th><th>Run</th><th></th></tr></thead>
+  <tbody>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.period_start or '—' }} → {{ r.period_end or '—' }}</td>
+      <td>{{ r.meta.get('bank_filename', '') }}</td>
+      <td>{{ r.meta.get('sage_filename') or '— (activity only)' }}</td>
+      <td>
+        {% if r.open_exceptions %}<span class="status-pill status-unknown">{{ r.open_exceptions }} open</span>
+        {% else %}<span class="status-pill status-auto">clear</span>{% endif %}
+      </td>
+      <td class="subtle">{{ r.meta.get('created', '')[:16].replace('T', ' ') }}</td>
+      <td><a href="{{ url_for('cashproof.run_page', run_id=r.run_id) }}">Open →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

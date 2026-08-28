@@ -29,6 +29,7 @@ from .. import config, destinations, insights, pipeline, validate
 from .. import review as proposal_review
 from . import store
 from .admin import admin_bp
+from .cashproof import cashproof_bp
 
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -334,6 +335,7 @@ def create_app() -> Flask:
         return redirect(url_for("login"))
 
     app.register_blueprint(admin_bp)
+    app.register_blueprint(cashproof_bp)
 
     @app.get("/")
     def index():

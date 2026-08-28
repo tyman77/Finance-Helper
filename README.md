@@ -281,10 +281,40 @@ Once that file exists:
 Without `data/sage_projects.json` (not fetched yet), nothing is filtered —
 same "no data, don't block on it" convention as the rest of this tool.
 
+## Cash Proof (fraud detection / reconciliation)
+
+The **Cash Proof** page ties every bank movement to a recorded ledger entry and
+queues everything that doesn't tie. Upload the bank activity export (the
+`"Date","Ref/Check","Description","Amount","Balance",...` format); add a Sage
+GL-detail export for the cash account to run the full tie-out — bank alone
+gives a cash-activity view (monthly flows, category buckets, largest outflow
+counterparties).
+
+- **Matching ladder**: exact (auto-tied) → fuzzy (confirm) → split, 2–3 ledger
+  items summing to one debit (confirm). Residuals near the period boundary are
+  *timing* items, carried visibly; everything else is an exception, ranked
+  critical (bank money out, no ledger tie) / high (ledger entry, no bank
+  movement) / review.
+- **Export integrity**: per-day net movement is checked against the change in
+  day-end balance, so a doctored or truncated bank export is itself a finding.
+  Offsetting one-day gaps are recognized as posting-date skew, not breaks.
+- **Sweep-aware**: `TRANSFERRED TO/FROM DEPOSIT ACCT` lines on the
+  target-balance account are internal cash movement, classified separately and
+  never counted as exceptions.
+- **Dispositions & audit**: every exception takes Accept (note required) /
+  Investigating / Confirmed issue; every action records who/when/why in the
+  run and appends to an append-only `out/recon/audit.jsonl`.
+
+Configuration lives in `config/recon.yml`: the Sage GL column mapping, which
+GL accounts are cash, matching windows, and bank-specific noise words. See the
+Cash Proof design doc for the full phasing (Ramp depth, Bill.com duplicates,
+vendor integrity, payroll).
+
 ## Configuration
 
 - `config/sources.yml` — per-source CSV column mapping + destination.
 - `config/categories.yml` — categorization rules (keyword → GL account / category).
+- `config/recon.yml` — Cash Proof: Sage GL mapping, cash accounts, matching windows.
 - `.env` — API credentials (copy from `.env.example`). Never commit this.
 
 ## Status

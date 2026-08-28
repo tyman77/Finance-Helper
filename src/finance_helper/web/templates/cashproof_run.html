@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Cash Proof run — Finance Helper{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('cashproof.landing') }}">← Cash Proof</a></p>
+<h1>{{ result.period_start }} → {{ result.period_end }}</h1>
+<p class="subtle">{{ meta.get('bank_filename', '') }}
+  {% if meta.get('sage_filename') %} + {{ meta['sage_filename'] }}{% endif %}
+  · run by {{ meta.get('created_by') or 'local' }} · {{ meta.get('created', '')[:16].replace('T', ' ') }}</p>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Cash in</div>
+    <div class="kpi-value">{{ activity.total_in | money }}</div></div>
+  <div class="kpi"><div class="kpi-label">Cash out</div>
+    <div class="kpi-value">{{ activity.total_out | money }}</div></div>
+  {% if has_ledger %}
+  <div class="kpi"><div class="kpi-label">Outflow tied</div>
+    <div class="kpi-value">{{ stats.tied_pct }}%</div>
+    <div class="kpi-sub">{{ stats.out_tied | money }} of {{ stats.out_total | money }}</div></div>
+  <div class="kpi"><div class="kpi-label">Open exceptions</div>
+    <div class="kpi-value">{{ open_count }}</div>
+    <div class="kpi-sub">{{ exceptions | length }} total, {{ timing | length }} timing</div></div>
+  {% endif %}
+  <div class="kpi"><div class="kpi-label">Export integrity</div>
+    <div class="kpi-value">{% if result.integrity.get('ok') %}✓{% else %}✗{% endif %}</div>
+    <div class="kpi-sub">{{ result.integrity.get('days', 0) }} days checked{% if result.integrity.get('skews') %},
+      {{ result.integrity['skews'] | length }} date-skew{% endif %}{% if result.integrity.get('breaks') %},
+      <strong>{{ result.integrity['breaks'] | length }} balance breaks</strong>{% endif %}</div></div>
+</div>
+
+{% if result.integrity.get('breaks') %}
+<div class="flash"><p><strong>Balance continuity broken</strong> — the export's day-end balances
+don't reconcile to its own transactions on:
+{% for b in result.integrity['breaks'] %}{{ b.date }} (gap {{ b.gap | money }}){% if not loop.last %}, {% endif %}{% endfor %}.
+Rows may be missing from the export — re-download it; if the break persists, treat it as a finding.</p></div>
+{% endif %}
+
+{% if not has_ledger %}
+<p class="subtle">No ledger file on this run — cash activity only. Re-run with a Sage GL-detail
+export to get the tie-out and exceptions queue.</p>
+{% endif %}
+
+{% if exceptions %}
+<h2>Exceptions</h2>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Severity</th><th>Side</th><th>Date</th><th class="amt">Amount</th><th>Counterparty / memo</th><th>Why</th><th>Disposition</th></tr></thead>
+  <tbody>
+  {% for t in exceptions %}
+    {% set sev = severity_of(t) %}
+    <tr>
+      <td><span class="status-pill {{ 'status-unknown' if sev == 'critical' else 'status-pick' if sev == 'high' else 'status-review' }}">{{ sev }}</span></td>
+      <td>{{ 'Bank' if t.source == 'bank' else 'Ledger' }}</td>
+      <td>{{ t.posted_date }}</td>
+      <td class="amt">{{ t.amount | money }}</td>
+      <td>{{ t.counterparty_raw[:60] }}</td>
+      <td class="subtle">{{ t.reason }}</td>
+      <td>
+        {% set d = dispositions.get(t.source_id) %}
+        {% if d %}
+          <span class="status-pill {{ 'status-auto' if d.action == 'accept' else 'status-unknown' if d.action == 'confirmed_issue' else 'status-review' }}">{{ d.action.replace('_', ' ') }}</span>
+          <div class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+        {% else %}
+        <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo">
+          <input type="hidden" name="source_id" value="{{ t.source_id }}">
+          <select name="action">
+            <option value="accept">Accept (fine)</option>
+            <option value="investigate">Investigating</option>
+            <option value="confirmed_issue">Confirmed issue</option>
+          </select>
+          <input type="text" name="note" placeholder="why / what was found" size="18">
+          <button type="submit">Save</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% elif has_ledger %}
+<h2>Exceptions</h2>
+<p class="subtle">None — everything tied or is a timing item. 🎉</p>
+{% endif %}
+
+{% if confirms %}
+<h2>Needs confirmation ({{ confirms | length }})</h2>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Pass</th><th>What matched</th><th>Confirm?</th></tr></thead>
+  <tbody>
+  {% for m in confirms %}
+    <tr>
+      <td class="subtle">{{ 'fuzzy' if m.match_pass == 3 else 'split' }}</td>
+      <td>{{ m.reason }}
+        {% for sid in m.bank_ids + m.ledger_ids %}
+          {% set t = txn_by_id.get(sid) %}
+          {% if t %}<div class="subtle">{{ t.source }} · {{ t.posted_date }} · {{ t.amount | money }} · {{ t.counterparty_raw[:50] }}</div>{% endif %}
+        {% endfor %}
+      </td>
+      <td>
+        {% set d = dispositions.get('match:' + m.match_id) %}
+        {% if d %}
+          <span class="status-pill {{ 'status-auto' if d.action == 'confirm' else 'status-unknown' }}">{{ d.action }}</span>
+          <div class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}</div>
+        {% else %}
+        <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo">
+          <input type="hidden" name="source_id" value="match:{{ m.match_id }}">
+          <select name="action">
+            <option value="confirm">Confirm</option>
+            <option value="reject">Reject</option>
+          </select>
+          <input type="text" name="note" placeholder="note (optional)" size="14">
+          <button type="submit">Save</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
+{% if timing %}
+<h2>Timing ({{ timing | length }})</h2>
+<p class="subtle">Near the period boundary — normal recon stragglers, carried forward. They escalate if they never tie.</p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Side</th><th>Date</th><th class="amt">Amount</th><th>Counterparty</th></tr></thead>
+  <tbody>
+  {% for t in timing %}
+    <tr><td>{{ 'Bank' if t.source == 'bank' else 'Ledger' }}</td><td>{{ t.posted_date }}</td>
+        <td class="amt">{{ t.amount | money }}</td><td>{{ t.counterparty_raw[:60] }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
+<h2>Cash activity</h2>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Month</th><th class="amt">In</th><th class="amt">Out</th></tr></thead>
+  <tbody>
+  {% for m in activity.months %}
+    <tr><td>{{ m.month }}</td><td class="amt">{{ m['in'] | money }}</td><td class="amt">{{ m.out | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Category</th><th class="amt">Count</th><th class="amt">Net</th></tr></thead>
+  <tbody>
+  {% for b in activity.buckets %}
+    <tr><td>{{ b.label }}</td><td class="amt">{{ b.count }}</td><td class="amt">{{ b.total | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<h3>Largest outflow counterparties</h3>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Counterparty</th><th class="amt">Payments</th><th class="amt">Total</th></tr></thead>
+  <tbody>
+  {% for o in activity.top_outflows %}
+    <tr><td>{{ o.label }}</td><td class="amt">{{ o.count }}</td><td class="amt">{{ o.total | money }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

@@ -1,0 +1,31 @@
+# Cash Proof (reconciliation) configuration — safe to commit: no data, just
+# format mappings and matching parameters.
+
+bank:
+  # Deployment-specific words to strip from bank descriptions when deriving
+  # the counterparty (the bank's own name shows up inside ACH descriptors).
+  noise_words: [flatirons]
+
+sage:
+  # Column mapping for the Sage Intacct GL-detail export. Either a signed
+  # `amount` column, or a `debit`/`credit` pair (debits to a cash account are
+  # cash IN, credits are cash OUT — the loader signs them accordingly).
+  columns:
+    date: "Entry Date"
+    description: "Memo/Description"
+    amount: null
+    debit: "Debit"
+    credit: "Credit"
+    account: "Account No"
+    journal: "Journal"
+    doc: "Document Number"
+  # GL accounts that represent this bank account. Only rows hitting these
+  # accounts participate in the tie-out.
+  cash_accounts: ["10000"]
+
+matching:
+  exact_window_days: 3        # pass 1: same amount, name overlap
+  fuzzy_window_days: 7        # pass 3: same amount, weak/no name signal
+  split_window_days: 5        # pass 4: 2-3 same-name items summing to one debit
+  timing_window_days: 5       # residuals this close to the period edge = timing
+  aged_timing_days: 30        # untied and older than this = escalated exception
