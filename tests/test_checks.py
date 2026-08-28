@@ -153,3 +153,27 @@ def test_billdotcom_index_from_csv_export_rows():
     idx = billdotcom_api.build_index(rows)
     assert idx == [{"id": "P123", "vendor": "Acme AV Supply", "amount": "4600.00",
                     "date": "2026-07-05", "status": ""}]
+
+
+def test_billdotcom_falls_back_to_v2_when_v3_login_rejects_key(monkeypatch):
+    from finance_helper import billdotcom_api as api
+    for k in api._REQUIRED:
+        monkeypatch.setenv(k, "x")
+
+    def v3_boom():
+        raise RuntimeError('Bill.com login failed: HTTP 400 [{"code":"BDC_1102"...}]')
+
+    monkeypatch.setattr(api, "fetch_payments", v3_boom)
+    monkeypatch.setattr(api, "fetch_payments_v2", lambda: [
+        {"id": "sp1", "vendorName": "Acme", "amount": 100.0,
+         "processDate": "2026-07-01", "status": "1"}])
+    idx = api.fetch_index()
+    assert idx == [{"id": "sp1", "vendor": "Acme", "amount": "100.00",
+                    "date": "2026-07-01", "status": "1"}]
+
+    # Both failing -> combined, actionable error.
+    monkeypatch.setattr(api, "fetch_payments_v2",
+                        lambda: (_ for _ in ()).throw(RuntimeError("Bill.com v2 error: Invalid API Developer Key")))
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError, match="PRODUCTION API access"):
+        api.fetch_index()

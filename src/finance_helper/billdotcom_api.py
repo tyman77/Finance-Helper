@@ -152,8 +152,86 @@ def build_index(records: list[dict]) -> list[dict]:
     return out
 
 
+# --- v2 API fallback --------------------------------------------------------
+# Dev keys are often provisioned for the older v2 API (api.bill.com/api/v2)
+# but rejected by the v3 Connect gateway (BDC_1102). Same data, older door:
+# form-encoded requests, sessionId from Login.json, List/SentPay.json pages.
+
+def _v2_base() -> str:
+    return (os.environ.get("BILLDOTCOM_V2_URL") or "https://api.bill.com/api/v2").rstrip("/")
+
+
+def _v2_call(path: str, data: dict) -> dict:
+    import requests
+
+    try:
+        resp = requests.post(f"{_v2_base()}/{path}", data=data, timeout=60)
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(f"Bill.com v2 request failed: {type(exc).__name__}: {exc}") from exc
+    try:
+        js = resp.json()
+    except ValueError:
+        raise RuntimeError(f"Bill.com v2 returned non-JSON: HTTP {resp.status_code}\n{resp.text[:400]}")
+    if js.get("response_status") != 0:
+        detail = js.get("response_data") or {}
+        raise RuntimeError("Bill.com v2 error: "
+                           + str(detail.get("error_message") or detail)[:400])
+    return js.get("response_data")
+
+
+def fetch_payments_v2() -> list[dict]:
+    import json as _json
+
+    dev_key = os.environ["BILLDOTCOM_DEV_KEY"].strip()
+    session = _v2_call("Login.json", {
+        "devKey": dev_key,
+        "userName": os.environ["BILLDOTCOM_USERNAME"].strip(),
+        "password": os.environ["BILLDOTCOM_PASSWORD"].strip(),
+        "orgId": os.environ["BILLDOTCOM_ORG_ID"].strip(),
+    })["sessionId"]
+
+    def pages(entity):
+        out, start = [], 0
+        for _ in range(100):
+            batch = _v2_call(f"List/{entity}.json", {
+                "devKey": dev_key, "sessionId": session,
+                "data": _json.dumps({"start": start, "max": 999}),
+            }) or []
+            out.extend(batch)
+            if len(batch) < 999:
+                break
+            start += 999
+        return out
+
+    vendors = {v.get("id"): v.get("name", "") for v in pages("Vendor")}
+    records = []
+    for p in pages("SentPay"):
+        records.append({
+            "id": p.get("id"),
+            "vendorName": vendors.get(p.get("vendorId"), ""),
+            "amount": p.get("amount"),
+            "processDate": p.get("processDate"),
+            "status": str(p.get("status") or ""),
+        })
+    return records
+
+
 def fetch_index() -> list[dict]:
     if not credentials_present():
         raise RuntimeError("Bill.com credentials missing: set "
                            + ", ".join(_REQUIRED) + " (see .env.example).")
-    return build_index(fetch_payments())
+    try:
+        return build_index(fetch_payments())
+    except RuntimeError as v3_err:
+        if "login failed" not in str(v3_err):
+            raise                       # v3 authed fine; the problem is elsewhere
+        try:
+            return build_index(fetch_payments_v2())
+        except RuntimeError as v2_err:
+            raise RuntimeError(
+                "Both Bill.com APIs rejected the credentials.\n"
+                f"v3 (Connect): {v3_err}\n"
+                f"v2 (classic): {v2_err}\n\n"
+                "If both say the developer key is invalid, the key is sandbox-only: "
+                "request PRODUCTION API access for your org at developer.bill.com "
+                "(or via Bill.com support), then update BILLDOTCOM_DEV_KEY.") from v2_err
