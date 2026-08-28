@@ -135,6 +135,13 @@
 <form method="post" action="{{ url_for('admin.refresh_billdotcom') }}" class="upload-form">
   <button type="submit">Fetch Bill.com payments</button>
 </form>
+<p class="subtle">No production API key yet? Export the payments list from Bill.com
+(Payments &rarr; export CSV) and upload it — uploads accumulate by month.</p>
+<form method="post" action="{{ url_for('admin.upload_billdotcom_csv') }}"
+      enctype="multipart/form-data" class="upload-form">
+  <label>Payments CSV <input type="file" name="file" accept=".csv" required></label>
+  <button type="submit">Load payments CSV</button>
+</form>
 
 <h2>10. Chart of accounts</h2>
 <p class="subtle">

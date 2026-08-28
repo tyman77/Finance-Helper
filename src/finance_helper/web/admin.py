@@ -274,6 +274,31 @@ def refresh_billdotcom():
     return redirect(url_for("admin.admin_page"))
 
 
+@admin_bp.post("/billdotcom-csv")
+def upload_billdotcom_csv():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Choose the Bill.com payments CSV first.")
+        return redirect(url_for("admin.admin_page"))
+    import io as _io
+
+    from .. import billdotcom_api
+    try:
+        rows = list(csv.DictReader(_io.StringIO(file.read().decode("utf-8-sig"))))
+        index = billdotcom_api.build_index(rows)
+        existing = _load_json_file("billdotcom_payments.json") or []
+        seen = {(r.get("id"), r.get("date"), r.get("amount")) for r in existing}
+        merged = existing + [r for r in index
+                             if (r.get("id"), r.get("date"), r.get("amount")) not in seen]
+        os.makedirs(_data_dir(), exist_ok=True)
+        with open(_data_path("billdotcom_payments.json"), "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=2)
+        flash(f"Loaded {len(index)} Bill.com payments from the CSV ({len(merged)} total).")
+    except Exception as exc:
+        flash(f"Could not read that Bill.com CSV: {exc}")
+    return redirect(url_for("admin.admin_page"))
+
+
 @admin_bp.post("/roster")
 def refresh_roster():
     tmap_path = _data_path("united_travelers.yml")

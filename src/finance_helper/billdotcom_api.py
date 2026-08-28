@@ -24,10 +24,15 @@ _DEFAULT_BASE = "https://gateway.prod.bill.com/connect/v3"
 _REQUIRED = ["BILLDOTCOM_DEV_KEY", "BILLDOTCOM_USERNAME",
              "BILLDOTCOM_PASSWORD", "BILLDOTCOM_ORG_ID"]
 
-_VENDOR_KEYS = ("vendorName", "vendor_name", "name", "payee")
-_DATE_KEYS = ("processDate", "paymentDate", "sentDate", "createdTime", "date")
-_AMOUNT_KEYS = ("amount", "paymentAmount", "totalAmount")
-_ID_KEYS = ("id", "paymentId")
+# Candidates cover both API records and the payments CSV export's headers.
+_VENDOR_KEYS = ("vendorName", "vendor_name", "name", "payee",
+                "Vendor", "Vendor Name", "Payee", "Pay To")
+_DATE_KEYS = ("processDate", "paymentDate", "sentDate", "createdTime", "date",
+              "Process Date", "Payment Date", "Date")
+_AMOUNT_KEYS = ("amount", "paymentAmount", "totalAmount",
+                "Amount", "Payment Amount")
+_ID_KEYS = ("id", "paymentId", "Payment Confirmation Number",
+            "Confirmation Number", "Payment #", "Check #")
 
 
 def credentials_present() -> bool:
@@ -104,15 +109,26 @@ def _get(rec: dict, keys: tuple) -> str:
     return ""
 
 
+def _parse_any_date(text: str):
+    from datetime import datetime
+    text = (text or "").strip()[:10]
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def build_index(records: list[dict]) -> list[dict]:
     out = []
     for i, rec in enumerate(records):
-        raw_date = _get(rec, _DATE_KEYS)[:10]
-        try:
-            when = date.fromisoformat(raw_date)
-        except ValueError:
+        when = _parse_any_date(_get(rec, _DATE_KEYS))
+        if when is None:
             continue
-        amount = _get(rec, _AMOUNT_KEYS)
+        amount = _get(rec, _AMOUNT_KEYS).replace(",", "").replace("$", "")
+        if amount.startswith("(") and amount.endswith(")"):
+            amount = "-" + amount[1:-1]
         try:
             amt = float(amount)
         except (TypeError, ValueError):

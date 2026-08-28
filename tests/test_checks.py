@@ -144,3 +144,12 @@ def test_cross_system_duplicate_same_vendor_same_amount():
     bills2 = [{"id": "p9", "vendor": "Totally Different Name", "amount": "4600.00",
                "date": "2026-07-05"}]
     assert checks.cross_system_duplicates(bank, bills2)["findings"] == []
+
+
+def test_billdotcom_index_from_csv_export_rows():
+    from finance_helper import billdotcom_api
+    rows = [{"Vendor": "Acme AV Supply", "Payment Date": "07/05/2026",
+             "Amount": "$4,600.00", "Payment Confirmation Number": "P123"}]
+    idx = billdotcom_api.build_index(rows)
+    assert idx == [{"id": "P123", "vendor": "Acme AV Supply", "amount": "4600.00",
+                    "date": "2026-07-05", "status": ""}]
