@@ -72,3 +72,28 @@ def test_flow_chart_geometry_scales_both_series():
     jun_out = next(b for b in jun["bars"] if b["series"] == "out")
     assert jul_out["h"] > jun_out["h"] > 0       # heights scale with magnitude
     assert jul_out["value"] == 2000.0            # positive magnitude for display
+
+
+def test_hotels_detail_groups_components_into_bookings():
+    from finance_helper import pipeline
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    detail = insights.hotels_detail([doc])
+    assert detail["booking_count"] == 3
+    assert detail["total_nights"] == 7            # 1 + 5 + 1
+    b2 = next(b for b in detail["bookings"] if b["invoice"] == "260615000002")
+    assert b2["nights"] == 5
+    assert b2["total"] == Decimal("356.86")       # components net to the row total
+    labels = dict(detail["components"])
+    assert "Taxes & fees" in labels and "Credits redeemed" in labels
+    assert any(d[0] == "Install" for d in detail["departments"])
+
+
+def test_hotels_page_renders_booking_report(client):
+    _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    body = client.get("/d/hotels").data
+    assert b"Avg nightly rate" in body
+    assert b"What each stay is made of" in body
+    assert b"Bookings (3)" in body
+    assert b"Fairfield Inn Example" in body
+    # Flights page must not grow hotel sections.
+    assert b"Avg nightly rate" not in client.get("/d/flights").data

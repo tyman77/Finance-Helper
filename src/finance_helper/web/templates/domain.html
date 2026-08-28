@@ -18,6 +18,14 @@
   <div class="kpi"><div class="kpi-label">Total spend</div>
     <div class="kpi-value">${{ '{:,.0f}'.format(d.total) }}</div>
     <div class="kpi-sub">{{ d.line_count }} lines</div></div>
+  {% if detail %}
+  <div class="kpi"><div class="kpi-label">Bookings</div>
+    <div class="kpi-value">{{ detail.booking_count }}</div>
+    <div class="kpi-sub">{{ detail.total_nights }} nights</div></div>
+  <div class="kpi"><div class="kpi-label">Avg nightly rate</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(detail.avg_rate) }}</div>
+    <div class="kpi-sub">room only, before taxes</div></div>
+  {% endif %}
   <div class="kpi"><div class="kpi-label">Statements</div>
     <div class="kpi-value">{{ d.statements | length }}</div>
     <div class="kpi-sub">{{ d.statements | selectattr('posted') | list | length }} posted</div></div>
@@ -88,6 +96,72 @@
     {% else %}<p class="subtle">No traveler-level detail for this vendor.</p>{% endif %}
   </div>
 </div>
+
+{% if detail %}
+{% macro hbars(chart, aria) %}
+<svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" class="chart" role="img" aria-label="{{ aria }}">
+  {% for r in chart.rows %}
+  <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(26, True) }}</text>
+  <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s{{ d.slot }}" rx="2">
+    <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+  </rect>
+  <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+  {% endfor %}
+</svg>
+{% endmacro %}
+
+<div class="panel-grid">
+  <div class="panel">
+    <h2>What each stay is made of</h2>
+    {% if dc.components.rows %}{{ hbars(dc.components, "Hotel cost composition") }}
+    {% else %}<p class="subtle">No component detail yet.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>By department</h2>
+    {% if dc.departments.rows %}{{ hbars(dc.departments, "Hotel spend by department") }}
+    {% else %}<p class="subtle">No department detail yet.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel-grid">
+  <div class="panel">
+    <h2>Top hotels</h2>
+    {% if dc.hotels.rows %}{{ hbars(dc.hotels, "Top hotels by spend") }}
+    {% else %}<p class="subtle">No hotel names yet.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>Top cities</h2>
+    {% if dc.cities.rows %}{{ hbars(dc.cities, "Top cities by spend") }}
+    {% else %}<p class="subtle">No cities yet.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Bookings ({{ detail.booking_count }})</h2>
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Dates</th><th>Hotel</th><th>City</th><th class="amt">Nights</th>
+      <th class="amt">Rate</th><th class="amt">Total</th><th>Department</th><th>Project</th><th></th></tr></thead>
+    <tbody>
+      {% for b in detail.bookings[:40] %}
+      <tr>
+        <td class="nowrap">{{ b.start }} → {{ b.end }}</td>
+        <td>{{ b.hotel or b.type }}</td>
+        <td>{{ b.city }}</td>
+        <td class="amt">{{ b.nights or '' }}</td>
+        <td class="amt">{% if b.rate %}${{ '{:,.0f}'.format(b.rate) }}{% endif %}</td>
+        <td class="amt">${{ '{:,.2f}'.format(b.total) }}</td>
+        <td class="subtle">{{ b.department }}</td>
+        <td class="subtle">{{ b.project }}</td>
+        <td>{% if b.flagged %}<span class="status-pill status-review">review</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if detail.booking_count > 40 %}
+  <p class="subtle">Showing the 40 most recent of {{ detail.booking_count }} bookings.</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="panel">
   <h2>Statements</h2>

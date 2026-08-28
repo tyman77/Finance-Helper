@@ -116,6 +116,108 @@ def build(runs: Iterable[dict]) -> dict:
     }
 
 
+# Cost-component labels for the Hotels report, in display order.
+_HOTEL_COMPONENTS = [
+    ("travel_lodging", "Room"),
+    ("travel_lodging_taxes", "Taxes & fees"),
+    ("travel_lodging_incidentals", "Incidentals"),
+    ("travel_lodging_flex", "Flex"),
+    ("travel_booking_fee", "Booking fees"),
+    ("travel_credits", "Credits redeemed"),
+    ("travel_airfare", "Flights (via HE)"),
+    ("travel_airfare_fees", "Flight fees (via HE)"),
+    ("travel_car_rental", "Cars (via HE)"),
+]
+
+
+def _num(value) -> Decimal:
+    text = str(value or "").replace(",", "").replace("$", "").strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = "-" + text[1:-1]
+    try:
+        return Decimal(text or "0")
+    except Exception:
+        return Decimal("0")
+
+
+def hotels_detail(docs: list) -> dict:
+    """The booking-level Hotels report: nights, rates, hotels, cities,
+    departments, cost composition, and one row per booking.
+
+    Hotel Engine's wide layout splits each booking (CSV row) into several
+    categorized line items that share the raw row; Invoice Number stitches
+    them back into bookings.
+    """
+    by_component: dict[str, Decimal] = defaultdict(Decimal)
+    bookings: dict[str, dict] = {}
+    by_dept: dict[str, Decimal] = defaultdict(Decimal)
+    by_hotel: dict[str, dict] = defaultdict(lambda: {"spend": Decimal("0"), "stays": set()})
+    by_city: dict[str, dict] = defaultdict(lambda: {"spend": Decimal("0"), "nights": 0,
+                                                    "stays": set()})
+
+    for doc in docs:
+        for li in doc.line_items:
+            raw = li.raw
+            inv = str(raw.get("Invoice Number") or "").strip()
+            if not inv:
+                continue
+            by_component[li.category or "other"] += li.amount
+            dept = (raw.get("Department Name") or "").strip() or "(none)"
+            by_dept[dept] += li.amount
+
+            b = bookings.get(inv)
+            if b is None:
+                nights = int(_num(raw.get("Nights")))
+                b = bookings[inv] = {
+                    "invoice": inv,
+                    "type": (raw.get("Invoice Type") or "").strip() or "Hotel",
+                    "hotel": (raw.get("Hotel Name") or "").strip(),
+                    "city": (raw.get("Hotel City") or "").strip(),
+                    "start": (raw.get("Start Date") or "").strip(),
+                    "end": (raw.get("End Date") or "").strip(),
+                    "nights": nights,
+                    "rate": _num(raw.get("Average Nightly Rate w/out Taxes and Fees")),
+                    "department": dept,
+                    "project": li.project or (raw.get("Project Name") or "").strip(),
+                    "total": Decimal("0"),
+                    "flagged": False,
+                }
+            b["total"] += li.amount
+            b["flagged"] = b["flagged"] or li.needs_review
+            if li.project and not b["project"]:
+                b["project"] = li.project
+
+    for b in bookings.values():
+        if b["hotel"]:
+            h = by_hotel[b["hotel"]]
+            h["spend"] += b["total"]
+            h["stays"].add(b["invoice"])
+        if b["city"]:
+            c = by_city[b["city"]]
+            c["spend"] += b["total"]
+            c["nights"] += b["nights"]
+            c["stays"].add(b["invoice"])
+
+    hotel_stays = [b for b in bookings.values() if b["type"].lower() == "hotel"]
+    total_nights = sum(b["nights"] for b in hotel_stays)
+    room_spend = by_component.get("travel_lodging", Decimal("0"))
+    ordered = sorted(bookings.values(), key=lambda b: b["start"], reverse=True)
+
+    return {
+        "bookings": ordered,
+        "booking_count": len(bookings),
+        "total_nights": total_nights,
+        "avg_rate": (room_spend / total_nights) if total_nights else Decimal("0"),
+        "components": [(label, by_component[cat]) for cat, label in _HOTEL_COMPONENTS
+                       if by_component.get(cat)],
+        "departments": sorted(by_dept.items(), key=lambda kv: -abs(kv[1])),
+        "hotels": sorted(((name, v["spend"], len(v["stays"])) for name, v in by_hotel.items()),
+                         key=lambda t: -abs(t[1])),
+        "cities": sorted(((name, v["spend"], v["nights"]) for name, v in by_city.items()),
+                         key=lambda t: -abs(t[1])),
+    }
+
+
 def build_domain(run_items: list[tuple], domain_key: str) -> dict:
     """Everything one domain page (Flights / Hotels / Rental Cars) shows.
 
@@ -176,6 +278,8 @@ def build_domain(run_items: list[tuple], domain_key: str) -> dict:
     from datetime import datetime as _dt
     statements.sort(key=lambda s: s["created"] or _dt.min, reverse=True)
     months = sorted(by_month)
+    dom_docs = [run["doc"] for _, run in run_items
+                if id(run) in kept and run["doc"].source in sources]
     return {
         "title": dom["title"], "vendor": dom["vendor"], "slot": dom["slot"],
         "group": group, "sources": dom["sources"],
@@ -186,6 +290,7 @@ def build_domain(run_items: list[tuple], domain_key: str) -> dict:
         "people": sorted(((n, v["amount"], v["lines"]) for n, v in by_person.items()),
                          key=lambda t: -abs(t[1])),
         "statements": statements,
+        "detail": hotels_detail(dom_docs) if domain_key == "hotels" and dom_docs else None,
     }
 
 
