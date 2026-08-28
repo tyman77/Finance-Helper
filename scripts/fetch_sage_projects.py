@@ -64,8 +64,9 @@ def _get(record: dict, candidates: tuple) -> str | None:
 def get_token() -> str:
     import requests
 
-    client_id = os.environ["INTACCT_CLIENT_ID"]
-    client_secret = os.environ["INTACCT_CLIENT_SECRET"]
+    from finance_helper.intacct_auth import env as _ienv
+    client_id = _ienv("INTACCT_CLIENT_ID")
+    client_secret = _ienv("INTACCT_CLIENT_SECRET")
 
     # Confirmed live (2026-07-01, via destinations/sage_intacct.py): despite
     # being a "client_credentials" grant, Sage's token endpoint also requires
@@ -77,7 +78,7 @@ def get_token() -> str:
         from finance_helper.intacct_auth import web_services_username
         data["username"] = web_services_username()  # "user@company" format required
     if os.environ.get("INTACCT_USER_PASSWORD"):
-        data["password"] = os.environ["INTACCT_USER_PASSWORD"]
+        data["password"] = _ienv("INTACCT_USER_PASSWORD")
 
     resp = requests.post(
         _TOKEN_URL,
@@ -104,7 +105,7 @@ def fetch_projects(token: str) -> list[dict]:
         "Content-Type": "application/json",
         # Multi-entity Sage companies may need the entity/company identified
         # explicitly; harmless to send even for single-entity companies.
-        "company-id": os.environ.get("INTACCT_COMPANY_ID", ""),
+        "company-id": os.environ.get("INTACCT_COMPANY_ID", "").strip(),
     }
     records: list[dict] = []
     offset = 0

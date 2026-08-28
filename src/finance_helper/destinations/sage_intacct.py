@@ -124,16 +124,17 @@ def _get_token() -> str:
     # itself in the request body — a 400 "Either username or session_id is
     # required" comes back without it. client_id/secret identify the app;
     # username/password identify the authorized Web Services User within it.
+    from ..intacct_auth import env as _ienv
+    from ..intacct_auth import web_services_username
     data = {"grant_type": "client_credentials"}
     if os.environ.get("INTACCT_USER_ID"):
-        from ..intacct_auth import web_services_username
         data["username"] = web_services_username()  # "user@company" format required
     if os.environ.get("INTACCT_USER_PASSWORD"):
-        data["password"] = os.environ["INTACCT_USER_PASSWORD"]
+        data["password"] = _ienv("INTACCT_USER_PASSWORD")
     try:
         resp = requests.post(
             _TOKEN_URL,
-            auth=(os.environ["INTACCT_CLIENT_ID"], os.environ["INTACCT_CLIENT_SECRET"]),
+            auth=(_ienv("INTACCT_CLIENT_ID"), _ienv("INTACCT_CLIENT_SECRET")),
             data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
@@ -172,7 +173,7 @@ def post_journal_entry(payload: dict) -> dict:
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                "company-id": os.environ.get("INTACCT_COMPANY_ID", ""),
+                "company-id": os.environ.get("INTACCT_COMPANY_ID", "").strip(),
             },
             timeout=30,
         )

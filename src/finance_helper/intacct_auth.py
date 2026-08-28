@@ -13,9 +13,16 @@ from __future__ import annotations
 import os
 
 
+def env(name: str, default: str = "") -> str:
+    """INTACCT_* env values, stripped — values pasted into hosting dashboards
+    routinely pick up a trailing newline/space, which the token endpoint then
+    rejects as invalid_client."""
+    return (os.environ.get(name) or default).strip()
+
+
 def web_services_username() -> str:
-    user = os.environ["INTACCT_USER_ID"]
-    company = os.environ.get("INTACCT_COMPANY_ID", "")
+    user = env("INTACCT_USER_ID")
+    company = env("INTACCT_COMPANY_ID")
     if "@" not in user and company:
         return f"{user}@{company}"
     return user

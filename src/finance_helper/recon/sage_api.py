@@ -56,14 +56,14 @@ def credentials_present() -> bool:
 def _get_token() -> str:
     import requests
 
-    from ..intacct_auth import web_services_username
+    from ..intacct_auth import env, web_services_username
     data = {"grant_type": "client_credentials",
             "username": web_services_username(),
-            "password": os.environ["INTACCT_USER_PASSWORD"]}
+            "password": env("INTACCT_USER_PASSWORD")}
     try:
         resp = requests.post(
             "https://api.intacct.com/ia/api/v1/oauth2/token",
-            auth=(os.environ["INTACCT_CLIENT_ID"], os.environ["INTACCT_CLIENT_SECRET"]),
+            auth=(env("INTACCT_CLIENT_ID"), env("INTACCT_CLIENT_SECRET")),
             data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
@@ -83,7 +83,7 @@ def fetch_gl_records(start: date, end: date) -> list[dict]:
 
     token = _get_token()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-               "company-id": os.environ.get("INTACCT_COMPANY_ID", "")}
+               "company-id": os.environ.get("INTACCT_COMPANY_ID", "").strip()}
     body = {
         "object": _GL_OBJECT,
         "filters": [
