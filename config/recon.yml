@@ -34,6 +34,8 @@ entities:
 
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
+  batch_window_days: 45       # pass 2: GL batch posting can precede the bank
+                              # debit by weeks (Bill.com posts on entry, funds later)
   fuzzy_window_days: 7        # pass 3: same amount, weak/no name signal
   split_window_days: 5        # pass 4: 2-3 same-name items summing to one debit
   timing_window_days: 5       # residuals this close to the period edge = timing

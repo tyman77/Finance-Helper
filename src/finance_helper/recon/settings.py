@@ -24,6 +24,7 @@ _DEFAULTS = {
     "entities": {"external": []},
     "matching": {
         "exact_window_days": 3,
+        "batch_window_days": 45,
         "fuzzy_window_days": 7,
         "split_window_days": 5,
         "timing_window_days": 5,

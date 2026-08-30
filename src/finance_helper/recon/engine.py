@@ -123,35 +123,69 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
     note(f"pass 1 (exact): {sum(1 for m in matches if m.match_pass == 1)} tied")
 
     # --- Pass 2: batch (one bank movement = many ledger lines) -------------
-    # Group untied ledger lines three ways, finest first: by document number,
-    # by (day, description) — Bill.com "Batch Summary" rows share one string
-    # per batch — and by (day, journal). A group of 2+ lines summing exactly
-    # to an untied bank amount, all inside the window, ties n-way.
-    doc_groups: dict[str, list[Txn]] = {}
+    # Batch identity, strongest first: document number; the EXACT raw
+    # description (each Bill.com batch stamps one unique "Payments(...):
+    # <timestamp> Batch Summary" string on all its lines — the normalized
+    # name would merge same-day batches); then (day, description) and
+    # (day, journal). The GL posts batches weeks before the cash moves, so
+    # the bank-vs-ledger gap uses batch_window_days, not the fuzzy window.
+    bw = cfg.get("batch_window_days", 45)
+
+    def _identity_groups(rows: list[Txn]) -> dict[tuple, list[Txn]]:
+        groups: dict[tuple, list[Txn]] = {}
+        for lt in rows:
+            if lt.doc_ref:
+                groups.setdefault(("doc", lt.doc_ref), []).append(lt)
+            if len(lt.counterparty_raw) >= 20:
+                groups.setdefault(("stmt", lt.counterparty_raw), []).append(lt)
+        return groups
+
+    # 2a — wash: an identity group holding both directions that nets to
+    # exactly zero is an entry+reversal pair (voided payment, resync). No
+    # bank movement will ever exist for it; clear it as internal.
+    washed = 0
+    for (_kind, _key), rows in _identity_groups(
+            [lt for lt in ledger if lt.status == "untied"]).items():
+        if (len(rows) >= 2 and any(t.amount > 0 for t in rows)
+                and any(t.amount < 0 for t in rows)
+                and sum(t.amount for t in rows) == 0
+                and all(t.status == "untied" for t in rows)):
+            for t in rows:
+                t.status = "internal"
+                t.reason = ("offsetting ledger batch — entry and reversal net "
+                            "to zero; no bank movement expected")
+            washed += len(rows)
+    if washed:
+        note(f"pass 2a (wash): {washed} offsetting ledger lines cleared")
+
+    # 2b — sum-match what's left against untied bank amounts.
+    pool = [lt for lt in ledger if lt.status == "untied"]
+    all_groups: list[tuple[str, list[Txn]]] = []
+    for (kind, key), rows in _identity_groups(pool).items():
+        label = f"doc {key}" if kind == "doc" else f"batch “{str(key)[:40]}”"
+        all_groups.append((label, rows))
     day_name_groups: dict[tuple, list[Txn]] = {}
     day_jrnl_groups: dict[tuple, list[Txn]] = {}
-    for lt in ledger:
-        if lt.status != "untied":
-            continue
-        if lt.doc_ref:
-            doc_groups.setdefault(lt.doc_ref, []).append(lt)
+    for lt in pool:
         if lt.counterparty_norm:
             day_name_groups.setdefault(
                 (lt.posted_date, lt.counterparty_norm), []).append(lt)
         if lt.memo:
             day_jrnl_groups.setdefault((lt.posted_date, lt.memo), []).append(lt)
+    for key, rows in day_name_groups.items():
+        all_groups.append((f"day-batch of {key[0]}", rows))
+    for key, rows in day_jrnl_groups.items():
+        all_groups.append((f"{key[1]} journal on {key[0]}", rows))
 
     by_sum: dict[Decimal, list[tuple[str, list[Txn]]]] = {}
-    for kind, groups in (("doc", doc_groups), ("batch", day_name_groups),
-                         ("journal", day_jrnl_groups)):
-        for key, rows in groups.items():
-            if len(rows) < 2:
-                continue
-            total = sum(t.amount for t in rows)
-            if total:
-                label = f"doc {key}" if kind == "doc" else \
-                        f"{kind} of {key[0]}"
-                by_sum.setdefault(total, []).append((label, rows))
+    for label, rows in all_groups:
+        if len(rows) < 2 and not (
+                # a one-bill batch still deserves the wide batch window
+                len(rows) == 1 and "batch" in rows[0].counterparty_raw.lower()):
+            continue
+        total = sum(t.amount for t in rows)
+        if total:
+            by_sum.setdefault(total, []).append((label, rows))
 
     for bt in matchable_bank:
         if bt.status != "untied":
@@ -159,7 +193,7 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
         for label, rows in by_sum.get(bt.amount, []):
             if any(t.status != "untied" for t in rows):
                 continue                     # partially consumed elsewhere
-            if not all(_within(bt, t, cfg["fuzzy_window_days"]) for t in rows):
+            if not all(_within(bt, t, bw) for t in rows):
                 continue
             tie(2, [bt], rows,
                 f"batch: {len(rows)} ledger lines ({label}) sum to {bt.amount}")

@@ -97,6 +97,39 @@ def test_batch_pass_ties_doc_group_spanning_days():
     assert "doc BATCH-77" in m.reason
 
 
+def test_batch_pass_keeps_same_day_batches_separate_and_bridges_weeks():
+    # Two Bill.com batches posted the SAME day: identical normalized name,
+    # unique raw strings. Funding debits hit the bank ~4 weeks later.
+    from datetime import date as _d
+    raw_a = "Payments(Bank-BNK1): 2026/02/15 15:27:54:1111 Batch Summary"
+    raw_b = "Payments(Bank-BNK1): 2026/02/15 16:02:11:2222 Batch Summary"
+    ledger = []
+    for i, (raw, amts) in enumerate([(raw_a, ["-300", "-200"]),
+                                     (raw_b, ["-450", "-50", "-100"])]):
+        for j, a in enumerate(amts):
+            t = _txn("sage", i * 10 + j, 1, a, "payments bank bnk1 batch summary",
+                     memo="CD")
+            t.counterparty_raw = raw
+            ledger.append(t)
+    bank_txns = [_txn("bank", 1, 28, "-500", "billcom payables"),
+                 _txn("bank", 2, 28, "-600", "billcom payables")]
+    res = engine.reconcile(bank_txns, ledger)
+    assert len([m for m in res.matches if m.match_pass == 2]) == 2
+    assert all(t.status == "tied" for t in ledger)
+
+
+def test_wash_pass_clears_entry_plus_reversal():
+    # A voided payment: entry and reversal share the doc, net zero, and no
+    # bank movement will ever exist for them.
+    ledger = [_txn("sage", 1, 5, "-800", "voided vendor payment", doc="V-9"),
+              _txn("sage", 2, 6, "800", "voided vendor payment", doc="V-9")]
+    bank_txns = [_txn("bank", 1, 10, "-123", "unrelated debit")]
+    res = engine.reconcile(bank_txns, ledger)
+    assert all(t.status == "internal" for t in ledger)
+    assert "reversal" in ledger[0].reason
+    assert not any(t.status == "exception" for t in ledger)
+
+
 def test_split_pass_ties_same_name_items_across_docs():
     # No shared doc/day group, but 2 same-name items sum to the debit -> pass 4.
     bank_txns = [_txn("bank", 1, 10, "-700", "acme av supply")]
