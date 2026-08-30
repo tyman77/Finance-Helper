@@ -256,12 +256,41 @@ def fetch_pos(start: date, end: date) -> list[dict]:
     return out
 
 
+def list_cash_candidate_accounts() -> list[tuple]:
+    """(ACCOUNTNO, TITLE) for chart accounts that look like cash/checking —
+    so a wrong cash_accounts config produces a self-service error."""
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLACCOUNT")
+        _el(rbq, "fields", "ACCOUNTNO,TITLE")
+        _el(rbq, "query", "TITLE like '%ash%' OR TITLE like '%hecking%' OR TITLE like '%ank%'")
+        _el(rbq, "pagesize", 100)
+    try:
+        root = _post(_request_xml(q))
+        data = root.find(".//result/data")
+        return [(row.findtext("ACCOUNTNO", ""), row.findtext("TITLE", ""))
+                for row in (data if data is not None else [])]
+    except Exception:
+        return []
+
+
 def fetch_ledger(start: date, end: date) -> list[Txn]:
     missing = [k for k in _REQUIRED if not env(k)]
     if missing:
         raise RuntimeError("Sage XML credentials missing: " + ", ".join(missing)
                            + ". Add them to the environment (see .env.example).")
     records = fetch_gl_records(start, end)
+    if not records:
+        configured = sorted(recon_config()["sage"].get("cash_accounts") or [])
+        candidates = list_cash_candidate_accounts()
+        hint = ("; cash-like accounts in your chart: "
+                + "; ".join(f"{no} ({title})" for no, title in candidates[:12])
+                ) if candidates else ""
+        raise RuntimeError(
+            f"Sage returned NO GL rows for cash account(s) {configured} between "
+            f"{start} and {end} — the configured account number is almost "
+            f"certainly wrong{hint}. Set SAGE_CASH_ACCOUNTS=<your checking "
+            "account's GL number> in Railway (comma-separate several) and re-run.")
     txns = to_txns(records, start, end)
     if records and not txns:
         import json

@@ -62,9 +62,9 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
               if t.kind == "ramp_reimbursement" and not t.pending and t.amount < 0]
     findings: list[dict] = []
     if not debits:
-        return {"findings": [], "checked": 0, "matched": 0, "coverage": True}
+        return {"findings": [], "checked": 0, "matched": 0, "coverage": True, "index": len(ramp_index)}
     if not ramp_index:
-        return {"findings": [], "checked": len(debits), "matched": 0, "coverage": False}
+        return {"findings": [], "checked": len(debits), "matched": 0, "coverage": False, "index": 0}
 
     used: set[int] = set()
     matched = 0
@@ -119,7 +119,8 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
                         f"{b.posted_date}, but Ramp shows {ramp_count} matching "
                         "reimbursement record(s). Verify one isn't a re-send.",
                         person, str(amount), str(b.posted_date)))
-    return {"findings": findings, "checked": len(debits), "matched": matched, "coverage": True}
+    return {"findings": findings, "checked": len(debits), "matched": matched,
+            "coverage": True, "index": len(ramp_index)}
 
 
 # ---------------------------------------------------------------------------

@@ -91,6 +91,7 @@ export to get the tie-out and exceptions queue.</p>
 <h2>Fraud checks</h2>
 <p class="subtle">
   Reimbursements: {{ fraud.reimb.matched }}/{{ fraud.reimb.checked }} bank payouts tied to Ramp
+  (index: {{ fraud.reimb.index }} Ramp records)
   {%- if not fraud.reimb.coverage %} — <strong>no Ramp data for this period; fetch it in Admin → step 7</strong>{% endif %}.
   Per-diem scanned: {{ fraud.perdiem.checked }}.
   Payees analyzed: {{ fraud.vendors.vendors }}.

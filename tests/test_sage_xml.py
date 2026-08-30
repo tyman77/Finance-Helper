@@ -118,3 +118,23 @@ def test_dispatcher_prefers_xml_gateway(monkeypatch):
     monkeypatch.delenv("INTACCT_SENDER_ID")
     fetch2, label2 = cashproof._sage_fetcher()
     assert label2 == "Sage API"
+
+
+def test_empty_ledger_raises_with_cash_account_candidates(creds, monkeypatch):
+    monkeypatch.setattr(sage_xml, "fetch_gl_records", lambda s, e: [])
+    monkeypatch.setattr(sage_xml, "list_cash_candidate_accounts",
+                        lambda: [("1000", "Checking - Flatirons"), ("1010", "Savings")])
+    with pytest.raises(RuntimeError) as err:
+        sage_xml.fetch_ledger(START, END)
+    msg = str(err.value)
+    assert "NO GL rows" in msg
+    assert "1000 (Checking - Flatirons)" in msg
+    assert "SAGE_CASH_ACCOUNTS" in msg
+
+
+def test_cash_accounts_env_override(monkeypatch):
+    from finance_helper.recon.settings import recon_config
+    monkeypatch.setenv("SAGE_CASH_ACCOUNTS", "1000, 1005")
+    assert recon_config()["sage"]["cash_accounts"] == ["1000", "1005"]
+    monkeypatch.delenv("SAGE_CASH_ACCOUNTS")
+    assert recon_config()["sage"]["cash_accounts"] == ["10000"]

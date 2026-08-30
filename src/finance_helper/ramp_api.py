@@ -72,7 +72,8 @@ def fetch_reimbursements(start: date, end: date) -> list[dict]:
         data = resp.json()
         batch = data.get("data") or []
         records.extend(batch)
-        next_url = (data.get("page") or {}).get("next")
+        next_url = ((data.get("page") or {}).get("next")
+                    or data.get("next") or (data.get("meta") or {}).get("next_page"))
         if not next_url:
             break
         url, params = next_url, None            # cursor URL carries everything

@@ -65,4 +65,10 @@ def recon_config() -> dict:
                         merged[section][k] = v
             else:
                 merged[section] = values
+    # The deployed image bakes recon.yml in, so the one value that's truly
+    # per-deployment — which GL accounts are cash — is env-overridable.
+    env_accounts = os.environ.get("SAGE_CASH_ACCOUNTS", "").strip()
+    if env_accounts:
+        merged["sage"]["cash_accounts"] = [a.strip() for a in env_accounts.split(",")
+                                           if a.strip()]
     return merged
