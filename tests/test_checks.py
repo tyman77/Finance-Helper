@@ -257,3 +257,38 @@ def test_rmpr_person_strips_trailing_bank_token():
     ramp = [{"person": "Chris Spreng", "date": "2026-08-25", "amount": "1690", "memo": "pd"}]
     out = checks.reimbursement_tieout([t], ramp)
     assert out["matched"] == 1 and out["findings"] == []
+
+
+def test_reimbursement_payout_matches_bundle_of_approvals():
+    # One $525 payout = three approved items dated 6-18 days earlier.
+    bank = [_t("ramp_reimbursement", "-525", date(2026, 7, 20),
+               "RMPR J CODY", "rmpr j cody")]
+    ramp = [
+        {"person": "Jake Cody", "date": "2026-07-02", "amount": "250", "memo": "pd"},
+        {"person": "Jake Cody", "date": "2026-07-10", "amount": "200", "memo": "pd"},
+        {"person": "Jake Cody", "date": "2026-07-14", "amount": "75", "memo": "gas"},
+        {"person": "Someone Else", "date": "2026-07-14", "amount": "525", "memo": "x"},
+    ]
+    out = checks.reimbursement_tieout(bank, ramp)
+    assert out["matched"] == 1 and out["findings"] == []
+
+
+def test_billcom_debit_matches_batch_spanning_days():
+    bank = [_t("billcom", "-900", date(2026, 5, 1), "BILL.COM PAYABLES", "billcom")]
+    bills = [
+        {"date": "2026-04-28", "amount": "400", "vendor": "A"},
+        {"date": "2026-04-30", "amount": "500", "vendor": "B"},
+    ]
+    out = checks.billcom_tieout(bank, bills)
+    assert out["matched"] == 1 and out["findings"] == []
+
+
+def test_billcom_two_same_day_debits_drawn_from_one_batch():
+    bank = [_t("billcom", "-600", date(2026, 5, 1), "BILL.COM PAYABLES 1", "billcom"),
+            _t("billcom", "-400", date(2026, 5, 1), "BILL.COM PAYABLES 2", "billcom")]
+    bills = [
+        {"date": "2026-04-29", "amount": "700", "vendor": "A"},
+        {"date": "2026-04-30", "amount": "300", "vendor": "B"},
+    ]
+    out = checks.billcom_tieout(bank, bills)
+    assert out["matched"] == 2 and out["findings"] == []

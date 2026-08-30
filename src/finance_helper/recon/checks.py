@@ -14,6 +14,7 @@ import hashlib
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from itertools import combinations
 
 from ..project_resolver import same_person
 from .models import Txn
@@ -89,14 +90,48 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
         if hit is not None:
             used.add(hit)
             matched += 1
+            continue
+        # One payout usually bundles a person's several approved expenses,
+        # and Ramp dates the records at approval — days-to-weeks before the
+        # money moves. Try the person's unused records in a wider window:
+        # the whole set, then small subsets.
+        wide = cfg.get("reimb_batch_window_days", 21)
+        cands = []
+        for i, r in enumerate(ramp_index):
+            if i in used or not same_person(person, r.get("person", "")):
+                continue
+            amt = _dec(r.get("amount"))
+            if amt is None:
+                continue
+            try:
+                when = date.fromisoformat(r["date"])
+            except (KeyError, ValueError):
+                continue
+            if abs((when - t.posted_date).days) <= wide:
+                cands.append((i, amt))
+        combo: list[int] | None = None
+        if cands and sum(a for _i, a in cands) == amount:
+            combo = [i for i, _a in cands]
+        else:
+            for n in (1, 2, 3, 4):
+                for c in combinations(cands, n):
+                    if sum(a for _i, a in c) == amount:
+                        combo = [i for i, _a in c]
+                        break
+                if combo:
+                    break
+        if combo:
+            used.update(combo)
+            matched += 1
         else:
             findings.append(_finding(
                 "reimb_unmatched", "critical",
                 f"Bank paid a reimbursement Ramp doesn't show: {t.counterparty_raw[:40]}",
                 f"${amount:,.2f} left the bank on {t.posted_date} as a Ramp-style "
-                f"reimbursement to '{person}', but no Ramp reimbursement record matches "
-                f"that person + amount within {window} days. Redirected or fabricated "
-                "payouts look exactly like this — verify in Ramp.",
+                f"reimbursement to '{person}', but no Ramp record matches that "
+                f"person + amount within {window} days, and no bundle of their "
+                f"approved items within {wide} days sums to it either. Redirected "
+                "or fabricated payouts look exactly like this — verify in Ramp.",
                 t.source_id))
 
     # Duplicates: two bank payouts, same person+amount, close together, but
@@ -290,32 +325,59 @@ def billcom_tieout(bank: list[Txn], bill_index: list) -> dict:
             continue
     used: set[int] = set()
     matched = 0
+    unmatched: list[Txn] = []
     for t in debits:
         amount = -t.amount
         hit = next((i for i, (d, a, _p) in enumerate(pays)
                     if i not in used and a == amount
-                    and abs((d - t.posted_date).days) <= 3), None)
-        if hit is None:
-            # A funding debit can cover several same-day payments.
-            for offset in (0, -1, 1, -2, 2, -3, 3):
-                day = t.posted_date + timedelta(days=offset)
-                day_ix = [i for i, (d, _a, _p) in enumerate(pays)
-                          if i not in used and d == day]
-                if day_ix and sum(pays[i][1] for i in day_ix) == amount:
-                    used.update(day_ix)
-                    matched += 1
-                    break
-            else:
-                findings.append(_finding(
-                    "billcom_unmatched", "critical",
-                    f"Bill.com funding debit with no matching payments",
-                    f"${amount:,.2f} left the bank on {t.posted_date} as a Bill.com "
-                    "debit, but no Bill.com payment (or same-day payment batch) "
-                    "matches it. Verify in Bill.com what this funded.",
-                    t.source_id))
+                    and abs((d - t.posted_date).days) <= 5), None)
+        if hit is not None:
+            used.add(hit)
+            matched += 1
             continue
-        used.add(hit)
-        matched += 1
+        # A funding debit covers a batch of payments; the payments' process
+        # dates spread over a few days around the debit. Tightest first:
+        # one day's payments, then the whole ±5d window.
+        window_ix = [i for i, (d, _a, _p) in enumerate(pays)
+                     if i not in used and abs((d - t.posted_date).days) <= 5]
+        for offset in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5):
+            day = t.posted_date + timedelta(days=offset)
+            day_ix = [i for i in window_ix if pays[i][0] == day]
+            if day_ix and sum(pays[i][1] for i in day_ix) == amount:
+                used.update(day_ix)
+                matched += 1
+                break
+        else:
+            if window_ix and sum(pays[i][1] for i in window_ix) == amount:
+                used.update(window_ix)
+                matched += 1
+            else:
+                unmatched.append(t)
+
+    # Two funding debits on one day often draw a single payment batch
+    # between them — match the day's debits combined against the window.
+    still: list[Txn] = []
+    by_day: dict[date, list[Txn]] = defaultdict(list)
+    for t in unmatched:
+        by_day[t.posted_date].append(t)
+    for day, txns in by_day.items():
+        if len(txns) >= 2:
+            total = sum(-t.amount for t in txns)
+            win_ix = [i for i, (d, _a, _p) in enumerate(pays)
+                      if i not in used and abs((d - day).days) <= 5]
+            if win_ix and sum(pays[i][1] for i in win_ix) == total:
+                used.update(win_ix)
+                matched += len(txns)
+                continue
+        still.extend(txns)
+    for t in still:
+        findings.append(_finding(
+            "billcom_unmatched", "critical",
+            f"Bill.com funding debit with no matching payments",
+            f"${-t.amount:,.2f} left the bank on {t.posted_date} as a Bill.com "
+            "debit, but no Bill.com payment, payment batch (±5d), or combined "
+            "same-day funding matches it. Verify in Bill.com what this funded.",
+            t.source_id))
     return {"findings": findings, "checked": len(debits), "matched": matched, "coverage": True}
 
 

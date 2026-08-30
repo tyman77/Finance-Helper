@@ -33,6 +33,7 @@ _DEFAULTS = {
     },
     "checks": {
         "reimb_window_days": 5,        # bank RMPR debit vs Ramp record date slack
+        "reimb_batch_window_days": 21, # a payout bundles approvals dated weeks earlier
         "perdiem_evidence_days": 10,   # trip evidence window around a per-diem
         "new_vendor_days": 30,         # "first-ever payment" recency to flag
         "approval_thresholds": [5000, 10000],
