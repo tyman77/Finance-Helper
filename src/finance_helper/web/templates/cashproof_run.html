@@ -17,7 +17,8 @@
     <div class="kpi-value">{{ stats.tied_pct }}%</div>
     <div class="progress" role="img" aria-label="{{ stats.tied_pct }}% of outflow tied">
       <span style="width: {{ [stats.tied_pct, 100] | min }}%"></span></div>
-    <div class="kpi-sub">{{ stats.out_tied | money }} of {{ stats.out_total | money }}</div></div>
+    <div class="kpi-sub">{{ stats.out_tied | money }} of {{ stats.out_total | money }}{% if stats.out_intercompany %}
+      · {{ stats.out_intercompany | money }} intercompany (outside Sage){% endif %}</div></div>
   <div class="kpi"><div class="kpi-label">Open exceptions</div>
     <div class="kpi-value">{{ open_count }}</div>
     <div class="kpi-sub">{{ exceptions | length }} total, {{ timing | length }} timing</div></div>
@@ -162,6 +163,23 @@ open a series to work lines individually.</p>
 </table></div>
 {% else %}
 <p class="subtle">No findings — reimbursements tie, per-diems have trip evidence, no payee patterns flagged.</p>
+{% endif %}
+
+{% if intercompany %}
+<h2>Intercompany — books outside Sage ({{ intercompany | length }})</h2>
+<p class="subtle" style="max-width:70ch">Movements naming a related entity whose books aren't in
+Sage (config: entities.external). They can't auto-tie here — verify them against that entity's
+own records. They are excluded from the tied % and the exception queue.</p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Side</th><th>Date</th><th class="amt">Amount</th><th>Counterparty / memo</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for t in intercompany %}
+    <tr><td>{{ 'Bank' if t.source == 'bank' else 'Ledger' }}</td><td>{{ t.posted_date }}</td>
+        <td class="amt">{{ t.amount | money }}</td><td>{{ t.counterparty_raw[:60] }}</td>
+        <td class="subtle">{{ t.reason }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
 {% endif %}
 
 {% if confirms %}

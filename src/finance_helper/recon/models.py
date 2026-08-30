@@ -27,7 +27,7 @@ class Txn:
     entity: str = ""            # which company entity the line names, if any
     pending: bool = False
     # Matching state, filled by the engine:
-    status: str = "untied"      # untied | tied | exception | timing | internal
+    status: str = "untied"      # untied | tied | exception | timing | internal | intercompany
     match_id: str | None = None
     match_pass: int | None = None
     reason: str = ""            # human explanation of the tie / exception
@@ -60,3 +60,7 @@ class ReconResult:
     @property
     def timing(self) -> list[Txn]:
         return [t for t in self.bank + self.ledger if t.status == "timing"]
+
+    @property
+    def intercompany(self) -> list[Txn]:
+        return [t for t in self.bank + self.ledger if t.status == "intercompany"]

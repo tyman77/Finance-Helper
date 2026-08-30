@@ -25,6 +25,13 @@ sage:
   # when their exports join the proof. SAGE_CASH_ACCOUNTS env overrides.)
   cash_accounts: ["10700"]
 
+entities:
+  # Related companies whose books are NOT in Sage. Their movements through
+  # this account can never auto-tie, so they're carved out as 'intercompany'
+  # (own section + own dollar total) instead of flooding the critical queue.
+  # Verify them against that entity's own records.
+  external: ["TJW"]
+
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
   fuzzy_window_days: 7        # pass 3: same amount, weak/no name signal

@@ -107,6 +107,29 @@ def test_split_pass_ties_same_name_items_across_docs():
     assert m.match_pass == 4 and not m.confirmed and len(m.ledger_ids) == 2
 
 
+def test_external_entity_carved_out_on_both_sides():
+    # TJW's books are outside Sage (config entities.external): its lines get
+    # status 'intercompany' on both sides — never exceptions, never tied %.
+    bank_txns = [_txn("bank", 1, 10, "-1000", "xit cpa tjw"),
+                 _txn("bank", 2, 10, "-500", "acme av supply")]
+    bank_txns[0].counterparty_raw = "XIT CPA TJW Inc ACH DEBIT ANC-01800"
+    bank_txns[1].counterparty_raw = "ACME AV SUPPLY"
+    ledger = [_txn("sage", 1, 4, "-37224.88", "record monthly transfer to tjw"),
+              _txn("sage", 2, 10, "-500", "acme av supply")]
+    ledger[0].counterparty_raw = "Record monthly transfer to TJW"
+    res = engine.reconcile(bank_txns, ledger)
+    assert bank_txns[0].status == "intercompany"
+    assert ledger[0].status == "intercompany"
+    assert "TJW" in bank_txns[0].reason
+    assert engine.severity_of(bank_txns[0]) == "intercompany"
+    assert res.intercompany and len(res.intercompany) == 2
+    # The unrelated pair still ties normally.
+    assert bank_txns[1].status == "tied"
+    stats = summary.tie_stats(bank_txns)
+    assert stats["out_intercompany"] == Decimal("1000")
+    assert stats["out_total"] == Decimal("500")     # TJW excluded from the base
+
+
 def test_split_pass_ignores_unrelated_name_groups():
     # Coincidental sum under a different vendor name must NOT tie.
     bank_txns = [_txn("bank", 1, 10, "-700", "acme av supply")]

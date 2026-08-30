@@ -277,6 +277,7 @@ def run_page(run_id):
         sev_counts=sev_counts,
         exceptions=exceptions,
         exception_groups=exception_groups,
+        intercompany=result.intercompany,
         timing=result.timing,
         confirms=confirms,
         txn_by_id=txn_by_id,

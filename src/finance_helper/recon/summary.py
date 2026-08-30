@@ -102,14 +102,25 @@ def flow_chart(months: list[dict], width: int = 720, height: int = 230) -> dict:
 
 
 def tie_stats(bank: list[Txn]) -> dict:
-    """Share of posted outflow dollars that tie (or are internal/pending)."""
+    """Share of posted outflow dollars that tie (or are internal/pending).
+
+    Intercompany outflow (external-entity carve-outs) is reported on its own:
+    it can't tie because those books aren't in Sage, so counting it either
+    way would distort the percentage that IS provable.
+    """
     out_total = Decimal("0")
     out_tied = Decimal("0")
+    out_intercompany = Decimal("0")
     for t in bank:
         if t.pending or t.amount >= 0:
+            continue
+        if t.status == "intercompany":
+            out_intercompany += -t.amount
             continue
         out_total += -t.amount
         if t.status in ("tied", "internal"):
             out_tied += -t.amount
     pct = (out_tied / out_total * 100) if out_total else Decimal("0")
-    return {"out_total": out_total, "out_tied": out_tied, "tied_pct": pct.quantize(Decimal('0.1'))}
+    return {"out_total": out_total, "out_tied": out_tied,
+            "out_intercompany": out_intercompany,
+            "tied_pct": pct.quantize(Decimal('0.1'))}

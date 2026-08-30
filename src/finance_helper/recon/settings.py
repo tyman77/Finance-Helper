@@ -21,6 +21,7 @@ _DEFAULTS = {
         },
         "cash_accounts": [],
     },
+    "entities": {"external": []},
     "matching": {
         "exact_window_days": 3,
         "fuzzy_window_days": 7,

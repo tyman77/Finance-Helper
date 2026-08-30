@@ -18,6 +18,7 @@ escalated when aged. Sweep transfers and pending rows never enter matching.
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 from itertools import combinations
@@ -60,6 +61,19 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
             reason=reason, confirmed=confirmed,
         ))
 
+    # Related entities whose books live OUTSIDE Sage (config: entities.external)
+    # can never auto-tie — carve them out up front, on both sides, so they
+    # don't flood the exception queue run after run. They keep their own
+    # status ('intercompany') and are NOT counted as tied dollars.
+    ext_pats = [(name, re.compile(rf"\b{re.escape(str(name))}\b", re.I))
+                for name in recon_config().get("entities", {}).get("external", [])]
+
+    def _external_entity(t: Txn) -> str | None:
+        for name, pat in ext_pats:
+            if pat.search(t.counterparty_raw):
+                return str(name)
+        return None
+
     posted = [t for t in bank if not t.pending]
     for t in bank:
         if t.pending:
@@ -68,6 +82,18 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
         elif t.kind in _EXCLUDED_KINDS:
             t.status = "internal"
             t.reason = "sweep transfer — internal cash movement (companion account proves it)"
+        else:
+            ext = _external_entity(t)
+            if ext:
+                t.status = "intercompany"
+                t.reason = (f"names {ext}, whose books are outside Sage — "
+                            "verify against that entity's own records")
+    for t in ledger:
+        ext = _external_entity(t)
+        if ext:
+            t.status = "intercompany"
+            t.reason = (f"names {ext}, whose books are outside Sage — "
+                        "verify against that entity's own records")
 
     matchable_bank = [t for t in posted if t.status == "untied"]
     period_start = min((t.posted_date for t in matchable_bank), default=None)
@@ -226,6 +252,8 @@ def severity_of(txn: Txn) -> str:
     """critical / high / review / timing / internal — for ranking the queue."""
     if txn.status == "internal":
         return "internal"
+    if txn.status == "intercompany":
+        return "intercompany"
     if txn.status == "timing":
         return "timing"
     if txn.status == "tied":
