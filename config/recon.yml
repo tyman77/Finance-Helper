@@ -20,8 +20,10 @@ sage:
     journal: "Journal"
     doc: "Document Number"
   # GL accounts that represent this bank account. Only rows hitting these
-  # accounts participate in the tie-out.
-  cash_accounts: ["10000"]
+  # accounts participate in the tie-out. (From the real chart: 10700 is
+  # Flatirons Bank checking; 10706 savings, 10707 sweep, 10709 CD exist for
+  # when their exports join the proof. SAGE_CASH_ACCOUNTS env overrides.)
+  cash_accounts: ["10700"]
 
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap

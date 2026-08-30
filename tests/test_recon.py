@@ -56,7 +56,7 @@ def test_bank_integrity_pairs_offsetting_skew(tmp_path):
 
 def test_sage_loader_filters_to_cash_account_and_signs():
     txns = sage.load_sage_csv(SAGE)
-    assert all(t.account_ref == "10000" for t in txns)   # 52200 row excluded
+    assert all(t.account_ref == "10700" for t in txns)   # 52200 row excluded
     dep = next(t for t in txns if "Northview" in t.counterparty_raw)
     assert dep.amount == Decimal("3000.00")              # debit to cash = in
     chk = next(t for t in txns if "2041" in t.counterparty_raw)

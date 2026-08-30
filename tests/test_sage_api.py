@@ -18,22 +18,22 @@ START, END = date(2026, 6, 1), date(2026, 6, 30)
 def test_to_txns_maps_nested_account_and_debit_credit_pair():
     recs = [{
         "key": "1201", "entryDate": "2026-06-21",
-        "glAccount": {"id": "10000", "name": "Checking"},
+        "glAccount": {"id": "10700", "name": "Checking"},
         "creditAmount": "1234.56", "memo": "ACME AV Supply invoice 4471",
     }]
     txns = sage_api.to_txns(recs, START, END)
     assert len(txns) == 1
     t = txns[0]
     assert t.amount == Decimal("-1234.56")       # credit to cash = out
-    assert t.account_ref == "10000"
+    assert t.account_ref == "10700"
     assert "acme" in t.counterparty_norm
 
 
 def test_to_txns_maps_txn_type_style_amounts():
     recs = [
-        {"id": "9", "entryDate": "2026-06-02", "accountNo": "10000",
+        {"id": "9", "entryDate": "2026-06-02", "accountNo": "10700",
          "txnAmount": "3000", "txnType": "debit", "memo": "Customer deposit"},
-        {"id": "10", "entryDate": "2026-06-03", "accountNo": "10000",
+        {"id": "10", "entryDate": "2026-06-03", "accountNo": "10700",
          "txnAmount": "450", "txnType": "credit", "memo": "Check 2041"},
     ]
     txns = sage_api.to_txns(recs, START, END)
@@ -44,7 +44,7 @@ def test_to_txns_filters_non_cash_accounts_and_out_of_range_dates():
     recs = [
         {"id": "1", "entryDate": "2026-06-10", "accountNo": "52200",
          "debitAmount": "100", "memo": "expense side"},
-        {"id": "2", "entryDate": "2026-09-01", "accountNo": "10000",
+        {"id": "2", "entryDate": "2026-09-01", "accountNo": "10700",
          "debitAmount": "100", "memo": "later period"},
     ]
     assert sage_api.to_txns(recs, START, END) == []

@@ -41,7 +41,7 @@ def _response(rows_xml: str, numremaining: int = 0, result_id: str = "") -> str:
 
 _ROW = """<gldetail>
   <RECORDNO>991</RECORDNO><ENTRY_DATE>06/21/2026</ENTRY_DATE>
-  <ACCOUNTNO>10000</ACCOUNTNO><TR_TYPE>-1</TR_TYPE><TRX_AMOUNT>1234.56</TRX_AMOUNT>
+  <ACCOUNTNO>10700</ACCOUNTNO><TR_TYPE>-1</TR_TYPE><TRX_AMOUNT>1234.56</TRX_AMOUNT>
   <DESCRIPTION>ACME AV Supply invoice 4471</DESCRIPTION><JOURNAL>CD</JOURNAL>
 </gldetail>"""
 
@@ -54,7 +54,7 @@ def test_request_envelope_has_sender_login_and_query(creds):
     assert root.findtext(".//login/userid") == "shopifySIS"       # bare id, no @company
     assert root.findtext(".//login/companyid") == "SummitIntegrated"
     q = root.findtext(".//readByQuery/query")
-    assert "ACCOUNTNO = '10000'" in q and "06/01/2026" in q
+    assert "ACCOUNTNO = '10700'" in q and "06/01/2026" in q
 
 
 def test_fetch_and_map_signs_credits_negative(creds, monkeypatch):
@@ -137,4 +137,4 @@ def test_cash_accounts_env_override(monkeypatch):
     monkeypatch.setenv("SAGE_CASH_ACCOUNTS", "1000, 1005")
     assert recon_config()["sage"]["cash_accounts"] == ["1000", "1005"]
     monkeypatch.delenv("SAGE_CASH_ACCOUNTS")
-    assert recon_config()["sage"]["cash_accounts"] == ["10000"]
+    assert recon_config()["sage"]["cash_accounts"] == ["10700"]
