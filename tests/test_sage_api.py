@@ -108,9 +108,10 @@ def test_web_api_pull_error_flashes_cleanly(client, monkeypatch):
     monkeypatch.setattr(cashproof, "_sage_fetcher", lambda: (boom, "Sage API"))
     data = {"bank_file": (io.BytesIO(open("samples/bank_sample.csv", "rb").read()), "bank.csv"),
             "sage_api": "on"}
-    resp = client.post("/cashproof/run", data=data, content_type="multipart/form-data")
-    assert resp.status_code == 302
-    assert b"Sage token request failed" in client.get("/cashproof/").data
+    # Following redirects: POST -> run page (sees the errored job) -> landing.
+    resp = client.post("/cashproof/run", data=data,
+                       content_type="multipart/form-data", follow_redirects=True)
+    assert b"Sage token request failed" in resp.data
 
 
 def test_username_gets_company_suffix(monkeypatch):

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import (Blueprint, current_app, flash, redirect, render_template,
+                   request, session, url_for)
 
 import json
 
@@ -92,6 +94,77 @@ def landing():
                            sage_api_ready=_sage_fetcher()[0] is not None)
 
 
+# Run execution happens on a background thread: a full run pulls Ramp,
+# Bill.com and a year of Sage GL over the network, which takes minutes —
+# no browser/proxy timeout survives that as a single request ("upstream
+# error"). The POST returns immediately and the run page shows live progress.
+# One gunicorn worker process (see gunicorn.conf.py), so this dict is shared
+# between the job thread and the polling requests.
+JOBS: dict[str, dict] = {}
+
+
+def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
+             use_api, email):
+    log = job["stages"].append
+    try:
+        # One click = full coverage: pull every API-backed index first
+        # (staleness-guarded), and say per source what happened — a silent
+        # coverage gap is exactly what a fraud sweep must not have.
+        from .refresh import auto_refresh
+        log("Refreshing API data (Ramp, Bill.com, Sage POs, timecards)…")
+        refresh_msgs = auto_refresh()
+        for msg in refresh_msgs:
+            log("· " + msg)
+        if refresh_msgs:
+            job["notices"].append("Data refresh: " + " · ".join(refresh_msgs))
+
+        log("Reading the bank statement…")
+        bank_txns = bank_mod.load_bank_csv(bank_path)
+        if not bank_txns:
+            raise RuntimeError("No transactions found in that file — is it "
+                               "the bank's CSV export?")
+        if sage_path:
+            log("Reading the Sage GL export…")
+            ledger_txns = sage_mod.load_sage_csv(sage_path)
+            ledger_label = sage_name
+        elif use_api:
+            fetch, label = _sage_fetcher()
+            if fetch is None:
+                raise RuntimeError("No Sage credentials configured — set the "
+                                   "INTACCT_SENDER_* (XML) or INTACCT_CLIENT_* (REST) variables.")
+            posted = [t for t in bank_txns if not t.pending]
+            start = min(t.posted_date for t in posted)
+            end = max(t.posted_date for t in posted)
+            log(f"Pulling the Sage cash ledger for {start} → {end} "
+                "(a full year takes a few minutes)…")
+            ledger_txns = fetch(start, end)
+            log(f"· {len(ledger_txns)} cash ledger rows")
+            ledger_label = f"{label} ({start} → {end})"
+        else:
+            ledger_txns, ledger_label = [], None
+            job["notices"].append(
+                "Bank statement analyzed. Upload a Sage GL-detail export with "
+                "it to run the full tie-out — this run shows cash activity only.")
+        log(f"Matching {len(bank_txns)} bank transactions against the ledger…")
+        result = engine.reconcile(bank_txns, ledger_txns)
+        log("Checking day-end balance integrity…")
+        result.integrity = bank_mod.integrity_check(bank_path)
+        recon_store.save_run(run_id, result, {
+            "bank_filename": bank_name,
+            "sage_filename": ledger_label,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "created_by": email,
+        })
+        job["status"] = "done"
+    except Exception as exc:
+        job["status"] = "error"
+        job["error"] = str(exc)
+    finally:
+        for path in (bank_path, sage_path):
+            if path and os.path.exists(path):
+                os.unlink(path)
+
+
 @cashproof_bp.post("/run")
 def run():
     bank_file = request.files.get("bank_file")
@@ -102,61 +175,39 @@ def run():
     use_api = request.form.get("sage_api") == "on"
     has_sage = bool(sage_file and sage_file.filename)
 
-    # One click = full coverage: pull every API-backed index first (staleness-
-    # guarded), and say per source what happened — a silent coverage gap is
-    # exactly what a fraud sweep must not have.
-    from .refresh import auto_refresh
-    refresh_msgs = auto_refresh()
-    if refresh_msgs:
-        flash("Data refresh: " + " · ".join(refresh_msgs))
-
     bank_path = _save_upload(bank_file)
     sage_path = _save_upload(sage_file) if has_sage else None
-    try:
-        bank_txns = bank_mod.load_bank_csv(bank_path)
-        if not bank_txns:
-            flash("No transactions found in that file — is it the bank's CSV export?")
-            return redirect(url_for("cashproof.landing"))
-        if has_sage:
-            ledger_txns = sage_mod.load_sage_csv(sage_path)
-            ledger_label = sage_file.filename
-        elif use_api:
-            fetch, label = _sage_fetcher()
-            if fetch is None:
-                raise RuntimeError("No Sage credentials configured — set the "
-                                   "INTACCT_SENDER_* (XML) or INTACCT_CLIENT_* (REST) variables.")
-            posted = [t for t in bank_txns if not t.pending]
-            start = min(t.posted_date for t in posted)
-            end = max(t.posted_date for t in posted)
-            ledger_txns = fetch(start, end)
-            ledger_label = f"{label} ({start} → {end})"
-        else:
-            ledger_txns, ledger_label = [], None
-        result = engine.reconcile(bank_txns, ledger_txns)
-        result.integrity = bank_mod.integrity_check(bank_path)
-    except Exception as exc:
-        flash(f"Could not process: {exc}")
-        return redirect(url_for("cashproof.landing"))
-    finally:
-        os.unlink(bank_path)
-        if sage_path:
-            os.unlink(sage_path)
 
     run_id = uuid.uuid4().hex[:12]
-    recon_store.save_run(run_id, result, {
-        "bank_filename": bank_file.filename,
-        "sage_filename": ledger_label,
-        "created": datetime.now().isoformat(timespec="seconds"),
-        "created_by": session.get("email", ""),
-    })
-    if not has_sage and not use_api:
-        flash("Bank statement analyzed. Upload a Sage GL-detail export with it "
-              "to run the full tie-out — this run shows cash activity only.")
+    job = {"status": "running", "stages": [], "notices": [], "error": None,
+           "started": datetime.now().isoformat(timespec="seconds")}
+    JOBS[run_id] = job
+    args = (run_id, job, bank_path, bank_file.filename, sage_path,
+            sage_file.filename if has_sage else None, use_api,
+            session.get("email", ""))
+    if current_app.config.get("TESTING"):
+        _execute(*args)                      # deterministic in the test suite
+    else:
+        threading.Thread(target=_execute, args=args, daemon=True).start()
     return redirect(url_for("cashproof.run_page", run_id=run_id))
 
 
 @cashproof_bp.get("/<run_id>")
 def run_page(run_id):
+    job = JOBS.get(run_id)
+    if job is not None:
+        if job["status"] == "running":
+            return render_template("cashproof_progress.html",
+                                   run_id=run_id, job=job)
+        JOBS.pop(run_id, None)
+        if job["status"] == "error":
+            for note in job["notices"]:
+                flash(note)
+            flash(f"Could not process: {job['error']}")
+            return redirect(url_for("cashproof.landing"))
+        for note in job["notices"]:
+            flash(note)
+
     payload = recon_store.load_run(run_id)
     if not payload:
         flash("That Cash Proof run isn't available.")

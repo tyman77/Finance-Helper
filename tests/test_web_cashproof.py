@@ -90,6 +90,29 @@ def test_runs_listed_on_landing(client):
     assert run_id.encode() in body or b"open" in body
 
 
+def test_progress_page_renders_while_job_running(client):
+    from finance_helper.web import cashproof
+    cashproof.JOBS["abc123def456"] = {
+        "status": "running", "stages": ["Reading the bank statement…"],
+        "notices": [], "error": None, "started": "2026-08-30T10:00:00"}
+    try:
+        body = client.get("/cashproof/abc123def456").data
+        assert b"running" in body
+        assert "Reading the bank statement".encode() in body
+    finally:
+        cashproof.JOBS.clear()
+
+
+def test_errored_job_flashes_and_redirects_to_landing(client):
+    from finance_helper.web import cashproof
+    cashproof.JOBS["bad1bad1bad1"] = {
+        "status": "error", "stages": [], "notices": [],
+        "error": "Sage exploded", "started": "2026-08-30T10:00:00"}
+    resp = client.get("/cashproof/bad1bad1bad1", follow_redirects=True)
+    assert b"Sage exploded" in resp.data
+    assert "bad1bad1bad1" not in cashproof.JOBS   # consumed, not re-flashed
+
+
 def test_fraud_checks_render_on_run_page(client, monkeypatch, tmp_path):
     monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path / "data"))
     import json as _json
