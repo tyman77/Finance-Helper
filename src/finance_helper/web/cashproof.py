@@ -150,6 +150,15 @@ def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
                                   progress=lambda msg: log("· " + msg))
         log("Checking day-end balance integrity…")
         result.integrity = bank_mod.integrity_check(bank_path)
+        # For the biggest residuals, ask Sage where (anywhere in the chart)
+        # each amount actually posted — 'wrong account' vs 'unrecorded'.
+        if use_api and sage_xml.credentials_present():
+            try:
+                log("Asking Sage where the biggest unmatched debits were recorded…")
+                n = sage_xml.annotate_unmatched(result.bank)
+                log(f"· {n} exceptions annotated")
+            except Exception as exc:
+                log(f"· probe skipped: {exc}")
         recon_store.save_run(run_id, result, {
             "bank_filename": bank_name,
             "sage_filename": ledger_label,

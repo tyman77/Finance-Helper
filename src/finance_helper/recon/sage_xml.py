@@ -275,6 +275,75 @@ def list_cash_candidate_accounts() -> list[tuple]:
         return []
 
 
+def _account_titles() -> dict[str, str]:
+    """ACCOUNTNO -> TITLE for the whole chart (one page covers real charts)."""
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLACCOUNT")
+        _el(rbq, "fields", "ACCOUNTNO,TITLE")
+        _el(rbq, "query", "ACCOUNTNO > '0'")
+        _el(rbq, "pagesize", 1000)
+    try:
+        root = _post(_request_xml(q))
+        data = root.find(".//result/data")
+        return {row.findtext("ACCOUNTNO", ""): row.findtext("TITLE", "")
+                for row in (data if data is not None else [])}
+    except Exception:
+        return {}
+
+
+def _amount_probe(amount: Decimal, around: date, window_days: int) -> list[dict]:
+    """GLDETAIL rows anywhere in the chart with this exact absolute amount
+    near the date — answers 'where DID Sage record this bank movement?'."""
+    from datetime import timedelta
+    lo = (around - timedelta(days=window_days)).strftime("%m/%d/%Y")
+    hi = (around + timedelta(days=window_days)).strftime("%m/%d/%Y")
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLDETAIL")
+        _el(rbq, "fields", "ACCOUNTNO,ENTRY_DATE,DESCRIPTION,JOURNAL,TR_TYPE")
+        _el(rbq, "query", f"TRX_AMOUNT = '{abs(amount):.2f}' AND "
+                          f"ENTRY_DATE >= '{lo}' AND ENTRY_DATE <= '{hi}'")
+        _el(rbq, "pagesize", 20)
+    root = _post(_request_xml(q))
+    data = root.find(".//result/data")
+    return [{child.tag: (child.text or "") for child in row}
+            for row in (data if data is not None else [])]
+
+
+def annotate_unmatched(bank_txns: list[Txn], limit: int = 20,
+                       window_days: int = 10) -> int:
+    """For the biggest untied bank debits, ask Sage where (if anywhere) each
+    amount was recorded, and append the answer to the exception's reason.
+    Turns 'no ledger tie found' into either 'posted to account X' (a
+    misposting to chase) or 'nowhere in Sage' (an unrecorded movement —
+    the finding that matters most)."""
+    targets = sorted((t for t in bank_txns
+                      if t.status == "exception" and t.amount < 0),
+                     key=lambda t: t.amount)[:limit]
+    if not targets:
+        return 0
+    cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
+    titles = _account_titles()
+    for t in targets:
+        rows = _amount_probe(t.amount, t.posted_date, window_days)
+        if rows:
+            seen: dict[str, dict] = {}
+            for r in rows:
+                seen.setdefault((r.get("ACCOUNTNO") or "?").strip(), r)
+            frag = "; ".join(
+                f"{no} ({titles.get(no) or '?'}) on {r.get('ENTRY_DATE', '?')}"
+                + (" — the cash account itself, outside the match window"
+                   if no in cash_accounts else "")
+                for no, r in list(seen.items())[:3])
+            t.reason += f" · Sage HAS this amount: {frag}"
+        else:
+            t.reason += (f" · amount appears NOWHERE in Sage GL ±{window_days}d "
+                         "— unrecorded movement")
+    return len(targets)
+
+
 def fetch_ledger(start: date, end: date) -> list[Txn]:
     missing = [k for k in _REQUIRED if not env(k)]
     if missing:

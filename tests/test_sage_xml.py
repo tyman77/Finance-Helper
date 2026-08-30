@@ -138,3 +138,37 @@ def test_cash_accounts_env_override(monkeypatch):
     assert recon_config()["sage"]["cash_accounts"] == ["1000", "1005"]
     monkeypatch.delenv("SAGE_CASH_ACCOUNTS")
     assert recon_config()["sage"]["cash_accounts"] == ["10700"]
+
+
+def test_annotate_unmatched_says_where_or_nowhere(monkeypatch):
+    from datetime import date as _d
+    from decimal import Decimal as _D
+
+    from finance_helper.recon.models import Txn
+
+    def txn(i, amount, status="exception"):
+        t = Txn(source="bank", source_id=f"bank:{i}", posted_date=_d(2026, 3, 19),
+                amount=_D(amount), counterparty_raw="PAYCHEX", counterparty_norm="paychex")
+        t.status = status
+        t.reason = "no ledger tie found"
+        return t
+
+    found = txn(1, "-175023.08")
+    nowhere = txn(2, "-53558.54")
+    tied = txn(3, "-10", status="tied")
+
+    monkeypatch.setattr(sage_xml, "_account_titles",
+                        lambda: {"60100": "Payroll Expense"})
+
+    def fake_probe(amount, around, window_days):
+        if amount == _D("-175023.08"):
+            return [{"ACCOUNTNO": "60100", "ENTRY_DATE": "03/19/2026",
+                     "JOURNAL": "PYR", "TR_TYPE": "-1"}]
+        return []
+
+    monkeypatch.setattr(sage_xml, "_amount_probe", fake_probe)
+    n = sage_xml.annotate_unmatched([found, nowhere, tied])
+    assert n == 2
+    assert "60100 (Payroll Expense)" in found.reason
+    assert "NOWHERE" in nowhere.reason
+    assert tied.reason == "no ledger tie found"        # non-exceptions untouched
