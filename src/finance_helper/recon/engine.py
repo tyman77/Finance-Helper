@@ -31,10 +31,12 @@ def _within(a: Txn, b: Txn, days: int) -> bool:
     return abs((a.posted_date - b.posted_date).days) <= days
 
 
-def reconcile(bank: list[Txn], ledger: list[Txn]) -> ReconResult:
+def reconcile(bank: list[Txn], ledger: list[Txn],
+              progress=None) -> ReconResult:
     cfg = recon_config()["matching"]
     matches: list[MatchGroup] = []
     counter = 0
+    note = progress or (lambda msg: None)
 
     def tie(pass_no: int, bank_txns: list[Txn], ledger_txns: list[Txn], reason: str):
         nonlocal counter
@@ -87,6 +89,7 @@ def reconcile(bank: list[Txn], ledger: list[Txn]) -> ReconResult:
         overlap = ", ".join(sorted(_tokens(bt) & _tokens(best))[:4])
         tie(1, [bt], [best],
             f"exact: {bt.amount} within {cfg['exact_window_days']}d, name overlap [{overlap}]")
+    note(f"pass 1 (exact): {sum(1 for m in matches if m.match_pass == 1)} tied")
 
     # --- Pass 3: fuzzy (amount-only) ---------------------------------------
     for bt in matchable_bank:
@@ -100,20 +103,36 @@ def reconcile(bank: list[Txn], ledger: list[Txn]) -> ReconResult:
         gap = abs((bt.posted_date - best.posted_date).days)
         tie(3, [bt], [best],
             f"fuzzy: amount {bt.amount} matches, {gap}d apart, no name overlap — confirm")
+    note(f"pass 3 (fuzzy): {sum(1 for m in matches if m.match_pass == 3)} tied")
 
     # --- Pass 4: split (2-3 ledger items sum to one bank amount) -----------
+    # A split's legs share the payee with the bank debit, so only same-name
+    # groups are candidates — scanning every vendor's combinations against
+    # every debit is both wrong (coincidental sums) and quadratic-cubic slow
+    # on a full-year ledger.
+    _SPLIT_GROUP_CAP = 20            # closest-by-date legs considered per group
+
     ledger_by_name: dict[str, list[Txn]] = {}
+    name_tokens: dict[str, set[str]] = {}
     for lt in ledger:
         if lt.status == "untied" and lt.counterparty_norm:
             ledger_by_name.setdefault(lt.counterparty_norm, []).append(lt)
+    for name in ledger_by_name:
+        name_tokens[name] = {t for t in name.split() if len(t) >= 3}
 
     for bt in matchable_bank:
         if bt.status != "untied":
             continue
+        bt_tokens = _tokens(bt)
         found = None
-        for group in ledger_by_name.values():
+        for name, group in ledger_by_name.items():
+            if not (bt_tokens & name_tokens[name]):
+                continue
             live = [lt for lt in group
                     if lt.status == "untied" and _within(bt, lt, cfg["split_window_days"])]
+            if len(live) > _SPLIT_GROUP_CAP:
+                live = sorted(live, key=lambda lt: abs(
+                    (bt.posted_date - lt.posted_date).days))[:_SPLIT_GROUP_CAP]
             for n in (2, 3):
                 for combo in combinations(live, n):
                     if sum(t.amount for t in combo) == bt.amount:
@@ -126,6 +145,7 @@ def reconcile(bank: list[Txn], ledger: list[Txn]) -> ReconResult:
         if found:
             parts = " + ".join(str(t.amount) for t in found)
             tie(4, [bt], found, f"split: {parts} = {bt.amount} ({found[0].counterparty_raw[:30]}) — confirm")
+    note(f"pass 4 (splits): {sum(1 for m in matches if m.match_pass == 4)} tied")
 
     # --- Residuals: timing vs exception ------------------------------------
     for t in posted + ledger:

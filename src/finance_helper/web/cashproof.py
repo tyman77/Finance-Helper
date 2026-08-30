@@ -146,7 +146,8 @@ def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
                 "Bank statement analyzed. Upload a Sage GL-detail export with "
                 "it to run the full tie-out — this run shows cash activity only.")
         log(f"Matching {len(bank_txns)} bank transactions against the ledger…")
-        result = engine.reconcile(bank_txns, ledger_txns)
+        result = engine.reconcile(bank_txns, ledger_txns,
+                                  progress=lambda msg: log("· " + msg))
         log("Checking day-end balance integrity…")
         result.integrity = bank_mod.integrity_check(bank_path)
         recon_store.save_run(run_id, result, {
