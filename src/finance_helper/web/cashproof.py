@@ -220,6 +220,27 @@ def run_page(run_id):
         (t for t in result.bank + result.ledger if t.status == "exception"),
         key=lambda t: (SEVERITY_ORDER.get(engine.severity_of(t), 9), t.posted_date),
     )
+
+    # Group into recurring series (same payee/pattern) so the monthly rent,
+    # the biweekly payroll pull, etc. get ONE review decision, not twelve.
+    def _series_label(t):
+        if t.kind == "check":
+            return "manual checks (CHECK #…)"
+        return t.counterparty_norm or (t.counterparty_raw or "(no memo)").lower()[:40]
+
+    grouped: dict[tuple, list] = {}
+    for t in exceptions:
+        grouped.setdefault(
+            (engine.severity_of(t), t.source, _series_label(t)), []).append(t)
+    exception_groups = [{
+        "severity": sev, "side": side, "label": label, "rows": rows,
+        "total": sum(t.amount for t in rows),
+        "first": min(t.posted_date for t in rows),
+        "last": max(t.posted_date for t in rows),
+        "open_ids": [t.source_id for t in rows if t.source_id not in dispositions],
+    } for (sev, side, label), rows in grouped.items()]
+    exception_groups.sort(key=lambda g: (SEVERITY_ORDER.get(g["severity"], 9),
+                                         -abs(g["total"])))
     confirms = [m for m in result.matches if not m.confirmed]
     txn_by_id = {t.source_id: t for t in result.bank + result.ledger}
     activity = summary.build(result.bank)
@@ -255,6 +276,7 @@ def run_page(run_id):
         buckets_chart=buckets_chart,
         sev_counts=sev_counts,
         exceptions=exceptions,
+        exception_groups=exception_groups,
         timing=result.timing,
         confirms=confirms,
         txn_by_id=txn_by_id,
@@ -266,17 +288,22 @@ def run_page(run_id):
 
 @cashproof_bp.post("/<run_id>/disposition")
 def disposition(run_id):
-    source_id = (request.form.get("source_id") or "").strip()
+    # One id (per-line form) or a comma-joined list (a series' bulk form).
+    raw = (request.form.get("source_ids") or request.form.get("source_id") or "")
+    source_ids = [s.strip() for s in raw.split(",") if s.strip()]
     action = (request.form.get("action") or "").strip()
     note = (request.form.get("note") or "").strip()
     valid = DISPOSITION_ACTIONS + MATCH_ACTIONS
-    if not source_id or action not in valid:
+    if not source_ids or action not in valid:
         flash("Pick an action for that line.")
         return redirect(url_for("cashproof.run_page", run_id=run_id))
     if action in ("accept", "confirmed_issue") and not note:
         flash("A note is required — say why it's fine (or what was found).")
         return redirect(url_for("cashproof.run_page", run_id=run_id))
-    ok = recon_store.record_disposition(
-        run_id, source_id, action, note, session.get("email", "local"))
-    flash("Recorded." if ok else "That run isn't available.")
+    done = sum(1 for sid in source_ids if recon_store.record_disposition(
+        run_id, sid, action, note, session.get("email", "local")))
+    if not done:
+        flash("That run isn't available.")
+    else:
+        flash("Recorded." if done == 1 else f"Recorded for {done} lines.")
     return redirect(url_for("cashproof.run_page", run_id=run_id))

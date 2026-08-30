@@ -49,40 +49,65 @@ export to get the tie-out and exceptions queue.</p>
   {% if sev_counts.get('review') %}<span class="status-pill status-review">{{ sev_counts['review'] }} review</span>{% endif %}
   <span class="status-pill neutral">{{ open_count }} still open</span>
 </div>
-<div class="tablewrap"><table class="runs">
-  <thead><tr><th>Severity</th><th>Side</th><th>Date</th><th class="amt">Amount</th><th>Counterparty / memo</th><th>Why</th><th>Disposition</th></tr></thead>
-  <tbody>
-  {% for t in exceptions %}
-    {% set sev = severity_of(t) %}
-    <tr>
-      <td><span class="status-pill {{ 'status-unknown' if sev == 'critical' else 'status-pick' if sev == 'high' else 'status-review' }}">{{ sev }}</span></td>
-      <td>{{ 'Bank' if t.source == 'bank' else 'Ledger' }}</td>
-      <td>{{ t.posted_date }}</td>
-      <td class="amt">{{ t.amount | money }}</td>
-      <td>{{ t.counterparty_raw[:60] }}</td>
-      <td class="subtle">{{ t.reason }}</td>
-      <td>
-        {% set d = dispositions.get(t.source_id) %}
-        {% if d %}
-          <span class="status-pill {{ 'status-auto' if d.action == 'accept' else 'status-unknown' if d.action == 'confirmed_issue' else 'status-review' }}">{{ d.action.replace('_', ' ') }}</span>
-          <div class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}{% if d.note %} — {{ d.note }}{% endif %}</div>
-        {% else %}
-        <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo">
-          <input type="hidden" name="source_id" value="{{ t.source_id }}">
-          <select name="action">
-            <option value="accept">Accept (fine)</option>
-            <option value="investigate">Investigating</option>
-            <option value="confirmed_issue">Confirmed issue</option>
-          </select>
-          <input type="text" name="note" placeholder="why / what was found" size="18">
-          <button type="submit">Save</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table></div>
+<p class="subtle" style="max-width:70ch">Grouped into recurring series — the same payee/pattern
+gets one decision. "Apply to all" records the disposition on every open line in the series;
+open a series to work lines individually.</p>
+{% for g in exception_groups %}
+<details class="panel exc-group" {% if g.rows | length == 1 %}open{% endif %}>
+  <summary style="cursor:pointer;display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap">
+    <span class="status-pill {{ 'status-unknown' if g.severity == 'critical' else 'status-pick' if g.severity == 'high' else 'status-review' }}">{{ g.severity }}</span>
+    <strong>{{ g.label | truncate(48, True) }}</strong>
+    <span class="subtle">{{ 'Bank' if g.side == 'bank' else 'Ledger' }} ·
+      {{ g.rows | length }} line{{ 's' if g.rows | length != 1 }} ·
+      {{ g.total | money }} · {{ g.first }}{% if g.last != g.first %} → {{ g.last }}{% endif %}
+      {% if g.open_ids %} · {{ g.open_ids | length }} open{% else %} · all dispositioned{% endif %}</span>
+  </summary>
+  {% if g.open_ids | length > 1 %}
+  <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo"
+        style="margin:.5rem 0 .3rem">
+    <input type="hidden" name="source_ids" value="{{ g.open_ids | join(',') }}">
+    <select name="action">
+      <option value="accept">Accept (fine)</option>
+      <option value="investigate">Investigating</option>
+      <option value="confirmed_issue">Confirmed issue</option>
+    </select>
+    <input type="text" name="note" placeholder="why — applies to the whole series" size="28">
+    <button type="submit">Apply to all {{ g.open_ids | length }} open</button>
+  </form>
+  {% endif %}
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Date</th><th class="amt">Amount</th><th>Counterparty / memo</th><th>Why</th><th>Disposition</th></tr></thead>
+    <tbody>
+    {% for t in g.rows %}
+      <tr>
+        <td>{{ t.posted_date }}</td>
+        <td class="amt">{{ t.amount | money }}</td>
+        <td>{{ t.counterparty_raw[:60] }}</td>
+        <td class="subtle">{{ t.reason }}</td>
+        <td>
+          {% set d = dispositions.get(t.source_id) %}
+          {% if d %}
+            <span class="status-pill {{ 'status-auto' if d.action == 'accept' else 'status-unknown' if d.action == 'confirmed_issue' else 'status-review' }}">{{ d.action.replace('_', ' ') }}</span>
+            <div class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+          {% else %}
+          <form method="post" action="{{ url_for('cashproof.disposition', run_id=run_id) }}" class="dispo">
+            <input type="hidden" name="source_id" value="{{ t.source_id }}">
+            <select name="action">
+              <option value="accept">Accept (fine)</option>
+              <option value="investigate">Investigating</option>
+              <option value="confirmed_issue">Confirmed issue</option>
+            </select>
+            <input type="text" name="note" placeholder="why / what was found" size="18">
+            <button type="submit">Save</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</details>
+{% endfor %}
 {% elif has_ledger %}
 <h2>Exceptions</h2>
 <p class="subtle">None — everything tied or is a timing item. 🎉</p>

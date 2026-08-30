@@ -90,6 +90,20 @@ def test_runs_listed_on_landing(client):
     assert run_id.encode() in body or b"open" in body
 
 
+def test_bulk_disposition_applies_to_all_ids(client):
+    run_id = _post_run(client)
+    body = client.get(f"/cashproof/{run_id}").data.decode()
+    import re
+    sids = re.findall(r'name="source_id" value="((?:bank|sage):[^"]+)"', body)
+    assert len(sids) >= 2
+    resp = client.post(f"/cashproof/{run_id}/disposition",
+                       data={"source_ids": ",".join(sids[:2]),
+                             "action": "accept", "note": "known series"})
+    assert resp.status_code == 302
+    body2 = client.get(f"/cashproof/{run_id}").data
+    assert body2.count(b"known series") == 2
+
+
 def test_progress_page_renders_while_job_running(client):
     from finance_helper.web import cashproof
     cashproof.JOBS["abc123def456"] = {
