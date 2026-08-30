@@ -97,6 +97,11 @@ export to get the tie-out and exceptions queue.</p>
   Bill.com debits: {{ fraud.billcom.matched }}/{{ fraud.billcom.checked }} tied
   {%- if not fraud.billcom.coverage %} — <strong>no Bill.com data; fetch it in Admin → step 9</strong>{% endif %};
   duplicate scan over {{ fraud.dupes.checked }} payments.
+  Vendor master: {{ fraud.master.vendors }} active vendors
+  {%- if fraud.master.gaps %} ({{ fraud.master.gaps | length }} listings blocked){% endif %};
+  bills scanned: {{ fraud.bills.checked }};
+  POs: {{ fraud.po.pos }} in Sage, {{ fraud.po.bills_with_po }} bills cite one,
+  {{ fraud.po.bills_without_po }} don't.
 </p>
 {% if fraud.findings %}
 <div class="tablewrap"><table class="runs">

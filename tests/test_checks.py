@@ -177,3 +177,72 @@ def test_billdotcom_falls_back_to_v2_when_v3_login_rejects_key(monkeypatch):
     import pytest as _pytest
     with _pytest.raises(RuntimeError, match="PRODUCTION API access"):
         api.fetch_index()
+
+
+def test_vendor_master_bank_change_and_collision_and_lookalikes():
+    master = {
+        "vendors": [
+            {"id": "v1", "name": "Acme AV Supply", "active": True,
+             "created": "2024-01-01", "email": "", "payment_email": ""},
+            {"id": "v2", "name": "Acme AV Supplies LLC", "active": True,
+             "created": "2026-08-01", "email": "", "payment_email": "shady@gmail.com"},
+            {"id": "v3", "name": "Jake Cody", "active": True,
+             "created": "2026-06-01", "email": "", "payment_email": ""},
+        ],
+        "bank_accounts": [
+            {"vendor_id": "v1", "vendor": "Acme AV Supply",
+             "created": "2026-08-20", "active": True},
+        ],
+        "bills": [],
+    }
+    out = checks.vendor_master_checks(master, ["Jacob Cody"], today=date(2026, 8, 28))
+    kinds = {f["kind"] for f in out["findings"]}
+    assert "vendor_lookalike" in kinds            # Acme vs Acme LLC ("supply/supplies"? shared 'acme')
+    assert "vendor_personal_email" in kinds       # gmail payment email
+    assert "vendor_employee_collision" in kinds   # Jake Cody the vendor
+    assert "vendor_bank_change" in kinds          # new bank acct on old vendor
+    coll = next(f for f in out["findings"] if f["kind"] == "vendor_employee_collision")
+    assert coll["severity"] == "critical"
+
+
+def test_bill_checks_duplicates_and_sequences():
+    bills = [
+        {"id": "b1", "vendor": "CleanCo", "invoice": "1001", "invoice_date": "2026-06-01",
+         "amount": "500.00", "po": ""},
+        {"id": "b2", "vendor": "CleanCo", "invoice": "1001", "invoice_date": "2026-06-15",
+         "amount": "500.00", "po": ""},
+        {"id": "b3", "vendor": "CleanCo", "invoice": "1002", "invoice_date": "2026-06-20",
+         "amount": "500.00", "po": ""},
+        {"id": "b4", "vendor": "ShellCo", "invoice": "88", "invoice_date": "2026-05-01", "amount": "1", "po": ""},
+        {"id": "b5", "vendor": "ShellCo", "invoice": "89", "invoice_date": "2026-06-01", "amount": "2", "po": ""},
+        {"id": "b6", "vendor": "ShellCo", "invoice": "90", "invoice_date": "2026-07-01", "amount": "3", "po": ""},
+        {"id": "b7", "vendor": "ShellCo", "invoice": "91", "invoice_date": "2026-08-01", "amount": "4", "po": ""},
+    ]
+    out = checks.bill_checks(bills)
+    kinds = {f["kind"] for f in out["findings"]}
+    assert "bill_dup_invoice" in kinds
+    assert "bill_same_amount" in kinds            # 1001 vs 1002, same $500, 5 days apart
+    assert "bill_sequential" in kinds             # ShellCo 88-91
+
+
+def test_po_match_missing_overrun_and_retrofit():
+    bills = [
+        {"id": "b1", "vendor": "Acme", "invoice": "1", "invoice_date": "2026-06-10",
+         "amount": "5500.00", "po": "PO-100"},
+        {"id": "b2", "vendor": "Yamaha", "invoice": "2", "invoice_date": "2026-06-10",
+         "amount": "900.00", "po": "PO-404"},
+        {"id": "b3", "vendor": "CleanCo", "invoice": "3", "invoice_date": "2026-06-01",
+         "amount": "100.00", "po": "PO-200"},
+        {"id": "b4", "vendor": "NoPo", "invoice": "4", "invoice_date": "2026-06-01",
+         "amount": "10.00", "po": ""},
+    ]
+    pos = [
+        {"po": "PO-100", "vendor": "Acme", "total": "5000.00", "date": "2026-06-01"},
+        {"po": "PO-200", "vendor": "CleanCo", "total": "100.00", "date": "2026-06-15"},
+    ]
+    out = checks.po_match(bills, pos)
+    kinds = {f["kind"] for f in out["findings"]}
+    assert "po_overrun" in kinds                  # 5500 vs 5000 (+10%)
+    assert "po_missing" in kinds                  # PO-404 doesn't exist
+    assert "po_retrofit" in kinds                 # PO-200 dated after invoice
+    assert out["bills_with_po"] == 3 and out["bills_without_po"] == 1

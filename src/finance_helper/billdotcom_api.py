@@ -179,7 +179,8 @@ def _v2_call(path: str, data: dict) -> dict:
     return js.get("response_data")
 
 
-def fetch_payments_v2() -> list[dict]:
+def _v2_session():
+    """(pages, vendors_by_id) — one login shared across entity listings."""
     import json as _json
 
     dev_key = os.environ["BILLDOTCOM_DEV_KEY"].strip()
@@ -203,6 +204,11 @@ def fetch_payments_v2() -> list[dict]:
             start += 999
         return out
 
+    return pages
+
+
+def fetch_payments_v2() -> list[dict]:
+    pages = _v2_session()
     vendors = {v.get("id"): v.get("name", "") for v in pages("Vendor")}
     records = []
     for p in pages("SentPay"):
@@ -214,6 +220,64 @@ def fetch_payments_v2() -> list[dict]:
             "status": str(p.get("status") or ""),
         })
     return records
+
+
+def fetch_master_index() -> dict:
+    """Vendor master + bills + vendor bank accounts, for the integrity checks.
+
+    Each entity is fetched independently: an org that forbids one listing
+    (e.g. VendorBankAccount) still yields the others, with the failure noted
+    in "gaps" instead of sinking the whole pull.
+    """
+    if not credentials_present():
+        raise RuntimeError("Bill.com credentials missing: set "
+                           + ", ".join(_REQUIRED) + " (see .env.example).")
+    pages = _v2_session()
+    gaps: list[str] = []
+
+    def safe(entity):
+        try:
+            return pages(entity)
+        except RuntimeError as exc:
+            gaps.append(f"{entity}: {str(exc)[:100]}")
+            return []
+
+    raw_vendors = safe("Vendor")
+    raw_accounts = safe("VendorBankAccount")
+    raw_bills = safe("Bill")
+
+    vendors = []
+    for v in raw_vendors:
+        vendors.append({
+            "id": v.get("id"),
+            "name": str(v.get("name") or "").strip(),
+            "active": str(v.get("isActive") or "") == "1",
+            "created": str(v.get("createdTime") or "")[:10],
+            "email": str(v.get("email") or "").strip().lower(),
+            "payment_email": str(v.get("paymentEmail") or "").strip().lower(),
+        })
+    names = {v["id"]: v["name"] for v in vendors}
+
+    bank_accounts = [{
+        "vendor_id": a.get("vendorId"),
+        "vendor": names.get(a.get("vendorId"), ""),
+        "created": str(a.get("createdTime") or "")[:10],
+        "active": str(a.get("isActive") or "") == "1",
+    } for a in raw_accounts]
+
+    bills = []
+    for b in raw_bills:
+        bills.append({
+            "id": b.get("id"),
+            "vendor": names.get(b.get("vendorId"), ""),
+            "invoice": str(b.get("invoiceNumber") or "").strip(),
+            "invoice_date": str(b.get("invoiceDate") or "")[:10],
+            "created": str(b.get("createdTime") or "")[:10],
+            "amount": str(b.get("amount") or ""),
+            "po": str(b.get("poNumber") or "").strip(),
+        })
+    return {"vendors": vendors, "bank_accounts": bank_accounts,
+            "bills": bills, "gaps": gaps}
 
 
 def fetch_index() -> list[dict]:

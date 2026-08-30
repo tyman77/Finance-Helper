@@ -69,6 +69,32 @@ def auto_refresh() -> list[str]:
         except Exception as exc:
             msgs.append(f"Bill.com: FAILED — {str(exc)[:120]}")
 
+    if billdotcom_api.credentials_present() and not _is_fresh("billdotcom_master.json"):
+        try:
+            master = billdotcom_api.fetch_master_index()
+            _write("billdotcom_master.json", master)
+            note = f"{len(master['vendors'])} vendors, {len(master['bills'])} bills"
+            if master.get("gaps"):
+                note += f" ({len(master['gaps'])} listings blocked)"
+            msgs.append(f"Bill.com master: {note}")
+        except Exception as exc:
+            msgs.append(f"Bill.com master: FAILED — {str(exc)[:120]}")
+    elif billdotcom_api.credentials_present():
+        msgs.append("Bill.com master: fresh (skipped)")
+
+    from ..recon import sage_xml
+    if not sage_xml.credentials_present():
+        msgs.append("Sage POs: no credentials")
+    elif _is_fresh("sage_pos.json"):
+        msgs.append("Sage POs: fresh (skipped)")
+    else:
+        try:
+            pos = sage_xml.fetch_pos(today - timedelta(days=365), today)
+            _write("sage_pos.json", pos)
+            msgs.append(f"Sage POs: {len(pos)}")
+        except Exception as exc:
+            msgs.append(f"Sage POs: FAILED — {str(exc)[:120]}")
+
     if not paychex_api.credentials_present():
         msgs.append("Paychex: no credentials")
     elif _is_fresh("timecards_index.json"):

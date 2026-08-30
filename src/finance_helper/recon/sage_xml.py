@@ -191,6 +191,71 @@ def to_txns(records: list[dict], start: date, end: date) -> list[Txn]:
     return txns
 
 
+_PO_NO_KEYS = ("DOCNO", "DOCID", "PONUMBER", "RECORDNO")
+_PO_VENDOR_KEYS = ("VENDORNAME", "CUSTVENDNAME", "VENDORID", "CUSTVENDID")
+_PO_TOTAL_KEYS = ("TOTAL", "TRX_TOTALENTERED", "TOTALENTERED", "SUBTOTAL")
+_PO_DATE_KEYS = ("WHENCREATED", "WHENPOSTED", "WHENDUE")
+
+
+def fetch_pos(start: date, end: date) -> list[dict]:
+    """Purchase orders (PODOCUMENT) for the period, via the same gateway.
+
+    Field names follow the candidate convention; a query that returns rows
+    but maps nothing raises with the first raw record for inspection.
+    """
+    def first_page(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "PODOCUMENT")
+        _el(rbq, "fields", "*")
+        _el(rbq, "query",
+            f"WHENCREATED >= '{start.strftime('%m/%d/%Y')}' AND "
+            f"WHENCREATED <= '{end.strftime('%m/%d/%Y')}'")
+        _el(rbq, "pagesize", _PAGE_SIZE)
+
+    records: list[dict] = []
+    root = _post(_request_xml(first_page))
+    for _page in range(_MAX_PAGES):
+        data = root.find(".//result/data")
+        if data is None:
+            break
+        for row in data:
+            records.append({child.tag: (child.text or "") for child in row})
+        remaining = int(data.get("numremaining") or 0)
+        result_id = data.get("resultId")
+        if remaining <= 0 or not result_id:
+            break
+
+        def more(fn, rid=result_id):
+            rm = _el(fn, "readMore")
+            _el(rm, "resultId", rid)
+
+        root = _post(_request_xml(more))
+
+    def pick(rec, keys):
+        for k in keys:
+            if rec.get(k):
+                return rec[k].strip()
+        return ""
+
+    out = []
+    for rec in records:
+        when = _parse_mdy(pick(rec, _PO_DATE_KEYS))
+        total = _dec(pick(rec, _PO_TOTAL_KEYS))
+        out.append({
+            "po": pick(rec, _PO_NO_KEYS),
+            "vendor": pick(rec, _PO_VENDOR_KEYS),
+            "total": str(total) if total is not None else "",
+            "date": when.isoformat() if when else "",
+        })
+    out = [r for r in out if r["po"]]
+    if records and not out:
+        import json
+        raise RuntimeError(
+            "Sage returned PODOCUMENT records but none mapped. First raw record:\n"
+            + json.dumps(records[0], default=str)[:1200])
+    return out
+
+
 def fetch_ledger(start: date, end: date) -> list[Txn]:
     missing = [k for k in _REQUIRED if not env(k)]
     if missing:

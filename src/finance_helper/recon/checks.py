@@ -340,20 +340,242 @@ def cross_system_duplicates(bank: list[Txn], bill_index: list, window_days: int 
     return {"findings": findings, "checked": len(bill_index)}
 
 
+# ---------------------------------------------------------------------------
+# 5. Vendor master integrity (Bill.com vendors / bank accounts / bills).
+
+_PERSONAL_DOMAINS = ("gmail.", "yahoo.", "hotmail.", "outlook.", "aol.", "icloud.")
+
+
+def vendor_master_checks(master: dict, people: list[str],
+                         today: date | None = None) -> dict:
+    from ..project_resolver import same_person
+    today = today or date.today()
+    vendors = master.get("vendors") or []
+    accounts = master.get("bank_accounts") or []
+    findings: list[dict] = []
+
+    active = [v for v in vendors if v.get("active", True) and v.get("name")]
+
+    # Lookalike vendor names: a distinctive shared token between different
+    # vendors — generic business words don't count as identity.
+    generic = {"supply", "supplies", "service", "services", "group", "company",
+               "holdings", "solutions", "systems", "enterprises", "tech",
+               "north", "south", "east", "west", "audio", "video"}
+    for i, a in enumerate(active):
+        for b in active[i + 1:]:
+            ta, tb = _tokens(a["name"]), _tokens(b["name"])
+            strong = {t for t in (ta & tb) if len(t) >= 4 and t not in generic}
+            if strong and ta != tb:
+                findings.append(_finding(
+                    "vendor_lookalike", "high",
+                    f"Lookalike vendors: {a['name']} / {b['name']}",
+                    "Two active vendors share a distinctive name part "
+                    f"({', '.join(sorted(strong))}). Fake-vendor schemes hide "
+                    "behind near-duplicates of real ones — confirm both are real "
+                    "and distinct.",
+                    a["id"], b["id"]))
+
+    # Same email behind different vendor names.
+    by_email: dict[str, list] = defaultdict(list)
+    for v in active:
+        for e in (v.get("email"), v.get("payment_email")):
+            if e:
+                by_email[e].append(v["name"])
+    for email, names in by_email.items():
+        if len(set(names)) > 1:
+            findings.append(_finding(
+                "vendor_shared_email", "high",
+                f"One email, several vendors: {email}",
+                "Vendors " + ", ".join(sorted(set(names))) + " share the same "
+                "email — one operator behind multiple payees is a ghost-vendor "
+                "pattern.",
+                email))
+
+    # Personal-domain payment emails.
+    for v in active:
+        pe = v.get("payment_email") or ""
+        if any(d in pe for d in _PERSONAL_DOMAINS):
+            findings.append(_finding(
+                "vendor_personal_email", "review",
+                f"Personal payment email: {v['name']}",
+                f"Payments to {v['name']} route via {pe} — a personal mailbox, "
+                "not a company domain. Fine for sole proprietors; verify it's "
+                "expected.",
+                v["id"]))
+
+    # Vendor named like an employee.
+    for v in active:
+        for person in people:
+            if same_person(person, v["name"]):
+                findings.append(_finding(
+                    "vendor_employee_collision", "critical",
+                    f"Vendor named like an employee: {v['name']}",
+                    f"Active vendor '{v['name']}' matches employee '{person}'. "
+                    "Employees paying themselves as vendors is the textbook "
+                    "internal scheme — verify this vendor's ownership.",
+                    v["id"], person))
+                break
+
+    # Bank details added recently on an established vendor.
+    created_by_vendor = {v["id"]: v.get("created", "") for v in vendors}
+    for a in accounts:
+        acct_created = _parse_iso(a.get("created"))
+        vend_created = _parse_iso(created_by_vendor.get(a.get("vendor_id"), ""))
+        if acct_created is None:
+            continue
+        if (today - acct_created).days <= 45 and vend_created \
+                and (acct_created - vend_created).days > 90:
+            findings.append(_finding(
+                "vendor_bank_change", "critical",
+                f"Bank details changed on established vendor: {a.get('vendor') or a.get('vendor_id')}",
+                f"A bank account was added on {acct_created} to a vendor created "
+                f"{vend_created} — payment-redirection fraud starts exactly this "
+                "way. Verify by calling the vendor on a number you already had.",
+                a.get("vendor_id"), str(acct_created)))
+
+    return {"findings": findings, "vendors": len(active), "gaps": master.get("gaps") or []}
+
+
+def _parse_iso(text):
+    try:
+        return date.fromisoformat((text or "")[:10])
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 6. Bill-level checks: duplicate and fabricated invoices.
+
+def bill_checks(bills: list[dict]) -> dict:
+    findings: list[dict] = []
+    by_vendor: dict[str, list[dict]] = defaultdict(list)
+    for b in bills or []:
+        if b.get("vendor"):
+            by_vendor[b["vendor"]].append(b)
+
+    for vendor, vbills in by_vendor.items():
+        by_inv: dict[str, list[dict]] = defaultdict(list)
+        for b in vbills:
+            if b.get("invoice"):
+                by_inv[b["invoice"]].append(b)
+        for inv, dupes in by_inv.items():
+            if len(dupes) > 1:
+                amounts = ", ".join(f"${_dec(d['amount']) or 0:,.2f}" for d in dupes)
+                findings.append(_finding(
+                    "bill_dup_invoice", "high",
+                    f"Invoice {inv} entered {len(dupes)}x for {vendor}",
+                    f"The same invoice number appears on {len(dupes)} bills "
+                    f"({amounts}). If both were paid, that's a double payment.",
+                    vendor, inv))
+
+        # Same amount, different invoice numbers, close together.
+        seen_amt: dict[str, dict] = {}
+        for b in sorted(vbills, key=lambda x: x.get("invoice_date") or ""):
+            amt, inv = b.get("amount"), b.get("invoice")
+            prior = seen_amt.get(amt)
+            if prior and prior["invoice"] != inv:
+                d1, d2 = _parse_iso(prior.get("invoice_date")), _parse_iso(b.get("invoice_date"))
+                if d1 and d2 and abs((d2 - d1).days) <= 30:
+                    findings.append(_finding(
+                        "bill_same_amount", "high",
+                        f"Same amount, two invoices: {vendor} ${_dec(amt) or 0:,.2f}",
+                        f"Invoices {prior['invoice']} ({d1}) and {inv} ({d2}) bill "
+                        "the identical amount within 30 days — resubmission under a "
+                        "new number is how duplicate-payment fraud beats naive "
+                        "invoice-number checks.",
+                        vendor, amt, inv))
+            seen_amt[amt] = b
+
+        # Perfectly sequential invoice numbers -> we may be their only customer.
+        nums = sorted(int(b["invoice"]) for b in vbills
+                      if (b.get("invoice") or "").isdigit())
+        run = max_run = 1
+        for x, y in zip(nums, nums[1:]):
+            run = run + 1 if y == x + 1 else 1
+            max_run = max(max_run, run)
+        if max_run >= 4:
+            findings.append(_finding(
+                "bill_sequential", "review",
+                f"Sequential invoice numbers from {vendor}",
+                f"{max_run} perfectly consecutive invoice numbers — meaning no "
+                "other customer receives invoices between ours. Real vendors "
+                "rarely bill one client exclusively; shells always do.",
+                vendor))
+    return {"findings": findings, "checked": len(bills or [])}
+
+
+# ---------------------------------------------------------------------------
+# 7. PO match (Sage Purchasing <-> Bill.com bills).
+
+def po_match(bills: list[dict], pos: list[dict], tolerance: float = 0.05) -> dict:
+    findings: list[dict] = []
+    by_no = {p["po"]: p for p in pos or [] if p.get("po")}
+    referenced = 0
+    for b in bills or []:
+        po_no = b.get("po")
+        if not po_no:
+            continue
+        referenced += 1
+        po = by_no.get(po_no)
+        amt = _dec(b.get("amount"))
+        if po is None:
+            findings.append(_finding(
+                "po_missing", "high",
+                f"Bill cites PO {po_no} — no such PO in Sage",
+                f"{b.get('vendor')} billed ${amt or 0:,.2f} against PO {po_no}, "
+                "but Sage Purchasing has no such document in the period. A cited "
+                "PO that doesn't exist is fabricated paperwork.",
+                b.get("id"), po_no))
+            continue
+        total = _dec(po.get("total"))
+        if amt and total and float(amt) > float(total) * (1 + tolerance):
+            findings.append(_finding(
+                "po_overrun", "high",
+                f"Bill exceeds PO {po_no}: {b.get('vendor')}",
+                f"Billed ${amt:,.2f} against a PO for ${total:,.2f} "
+                f"(+{(float(amt) / float(total) - 1) * 100:.0f}%). Overruns beyond "
+                "tolerance need an approved change order.",
+                b.get("id"), po_no))
+        d_po, d_inv = _parse_iso(po.get("date")), _parse_iso(b.get("invoice_date"))
+        if d_po and d_inv and d_po > d_inv:
+            findings.append(_finding(
+                "po_retrofit", "review",
+                f"PO {po_no} created after its invoice",
+                f"The PO is dated {d_po}, but {b.get('vendor')}'s invoice is dated "
+                f"{d_inv} — paperwork created after the fact to justify a "
+                "purchase already made.",
+                b.get("id"), po_no))
+    return {"findings": findings, "pos": len(pos or []), "bills_with_po": referenced,
+            "bills_without_po": sum(1 for b in bills or [] if not b.get("po"))}
+
+
 SEVERITY_ORDER = {"critical": 0, "high": 1, "review": 2, "info": 3}
 
 
 def run_all(bank: list[Txn], ramp_index: list, hotel_index: list,
             timecard_index: dict, flight_pairs: list[tuple],
-            bill_index: list | None = None) -> dict:
+            bill_index: list | None = None,
+            bill_master: dict | None = None,
+            po_index: list | None = None) -> dict:
     bill_index = bill_index or []
+    bill_master = bill_master or {}
     reimb = reimbursement_tieout(bank, ramp_index)
     perdiem = perdiem_no_trip(ramp_index, hotel_index, timecard_index, flight_pairs)
     vendors = vendor_integrity(bank)
     billcom = billcom_tieout(bank, bill_index)
     dupes = cross_system_duplicates(bank, bill_index)
+
+    people = sorted({p for p, _d in flight_pairs}
+                    | set((timecard_index or {}).keys())
+                    | {r.get("person", "") for r in ramp_index} - {""})
+    master = vendor_master_checks(bill_master, people)
+    bills = bill_checks(bill_master.get("bills") or [])
+    pos = po_match(bill_master.get("bills") or [], po_index or [])
+
     findings = sorted(reimb["findings"] + perdiem["findings"] + vendors["findings"]
-                      + billcom["findings"] + dupes["findings"],
+                      + billcom["findings"] + dupes["findings"]
+                      + master["findings"] + bills["findings"] + pos["findings"],
                       key=lambda f: SEVERITY_ORDER.get(f["severity"], 9))
     return {"findings": findings, "reimb": reimb, "perdiem": perdiem,
-            "vendors": vendors, "billcom": billcom, "dupes": dupes}
+            "vendors": vendors, "billcom": billcom, "dupes": dupes,
+            "master": master, "bills": bills, "po": pos}

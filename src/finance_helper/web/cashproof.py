@@ -186,6 +186,8 @@ def run_page(run_id):
         _data_json("timecards_index.json", {}),
         _flight_pairs(),
         bill_index=_data_json("billdotcom_payments.json", []),
+        bill_master=_data_json("billdotcom_master.json", {}),
+        po_index=_data_json("sage_pos.json", []),
     )
 
     return render_template(

@@ -18,18 +18,28 @@ def data_dir(tmp_path, monkeypatch):
     return d
 
 
+def _no_sage(monkeypatch):
+    from finance_helper.recon import sage_xml
+    monkeypatch.setattr(sage_xml, "credentials_present", lambda: False)
+
+
 def test_refresh_reports_missing_credentials(data_dir, monkeypatch):
+    _no_sage(monkeypatch)
     for mod in (ramp_api, billdotcom_api, paychex_api):
         monkeypatch.setattr(mod, "credentials_present", lambda: False)
     msgs = refresh.auto_refresh()
     assert any("Ramp: no credentials" in m for m in msgs)
     assert any("Bill.com: no credentials" in m for m in msgs)
     assert any("Paychex: no credentials" in m for m in msgs)
+    assert any("Sage POs: no credentials" in m for m in msgs)
 
 
 def test_refresh_fetches_writes_and_reports(data_dir, monkeypatch):
+    _no_sage(monkeypatch)
     for mod in (ramp_api, billdotcom_api, paychex_api):
         monkeypatch.setattr(mod, "credentials_present", lambda: True)
+    monkeypatch.setattr(billdotcom_api, "fetch_master_index",
+                        lambda: {"vendors": [], "bills": [], "bank_accounts": [], "gaps": []})
     monkeypatch.setattr(ramp_api, "fetch_index",
                         lambda s, e: [{"person": "J", "date": "2026-07-01",
                                        "amount": "1", "memo": "pd 4499", "project": "4499"}])
@@ -49,15 +59,18 @@ def test_refresh_fetches_writes_and_reports(data_dir, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("should not fetch when fresh")
     for mod, name in ((ramp_api, "fetch_index"), (billdotcom_api, "fetch_index"),
-                      (paychex_api, "fetch_index")):
+                      (billdotcom_api, "fetch_master_index"), (paychex_api, "fetch_index")):
         monkeypatch.setattr(mod, name, boom)
     msgs2 = refresh.auto_refresh()
-    assert all("fresh (skipped)" in m for m in msgs2)
+    assert all("fresh (skipped)" in m or "no credentials" in m for m in msgs2)
 
 
 def test_refresh_failure_is_reported_not_raised(data_dir, monkeypatch):
+    _no_sage(monkeypatch)
     for mod in (ramp_api, billdotcom_api, paychex_api):
         monkeypatch.setattr(mod, "credentials_present", lambda: True)
+    monkeypatch.setattr(billdotcom_api, "fetch_master_index",
+                        lambda: (_ for _ in ()).throw(RuntimeError("nope")))
     monkeypatch.setattr(ramp_api, "fetch_index",
                         lambda s, e: (_ for _ in ()).throw(RuntimeError("token bad")))
     monkeypatch.setattr(billdotcom_api, "fetch_index",
