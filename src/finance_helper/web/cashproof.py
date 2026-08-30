@@ -102,6 +102,14 @@ def run():
     use_api = request.form.get("sage_api") == "on"
     has_sage = bool(sage_file and sage_file.filename)
 
+    # One click = full coverage: pull every API-backed index first (staleness-
+    # guarded), and say per source what happened — a silent coverage gap is
+    # exactly what a fraud sweep must not have.
+    from .refresh import auto_refresh
+    refresh_msgs = auto_refresh()
+    if refresh_msgs:
+        flash("Data refresh: " + " · ".join(refresh_msgs))
+
     bank_path = _save_upload(bank_file)
     sage_path = _save_upload(sage_file) if has_sage else None
     try:
