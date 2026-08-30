@@ -24,6 +24,13 @@ sage:
   # Flatirons Bank checking; 10706 savings, 10707 sweep, 10709 CD exist for
   # when their exports join the proof. SAGE_CASH_ACCOUNTS env overrides.)
   cash_accounts: ["10700"]
+  # Clearing/limbo accounts whose entries also represent THIS bank account's
+  # movements (Bill.com posts payments to clearing, deposits sit in
+  # Undeposited Funds before hitting 10700). Pulled alongside cash so those
+  # movements can tie; their internal clearing pairs wash to zero. Savings/
+  # sweep/CD are deliberately NOT here — their cash moves through their own
+  # statements, not this one. SAGE_AUX_ACCOUNTS env overrides.
+  aux_accounts: ["10704", "10705", "14990"]
 
 entities:
   # Related companies whose books are NOT in Sage. Their movements through

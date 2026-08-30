@@ -20,6 +20,7 @@ _DEFAULTS = {
             "doc": "Document Number",
         },
         "cash_accounts": [],
+        "aux_accounts": [],
     },
     "entities": {"external": []},
     "matching": {
@@ -73,4 +74,8 @@ def recon_config() -> dict:
     if env_accounts:
         merged["sage"]["cash_accounts"] = [a.strip() for a in env_accounts.split(",")
                                            if a.strip()]
+    env_aux = os.environ.get("SAGE_AUX_ACCOUNTS", "").strip()
+    if env_aux:
+        merged["sage"]["aux_accounts"] = [a.strip() for a in env_aux.split(",")
+                                          if a.strip()]
     return merged

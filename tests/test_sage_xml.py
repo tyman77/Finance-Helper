@@ -172,3 +172,27 @@ def test_annotate_unmatched_says_where_or_nowhere(monkeypatch):
     assert "60100 (Payroll Expense)" in found.reason
     assert "NOWHERE" in nowhere.reason
     assert tied.reason == "no ledger tie found"        # non-exceptions untouched
+
+
+def test_aux_clearing_accounts_join_the_pull(monkeypatch):
+    from datetime import date as _d
+
+    q = sage_xml._query_string(_d(2026, 6, 1), _d(2026, 6, 30))
+    for acct in ("10700", "10704", "10705", "14990"):
+        assert f"ACCOUNTNO = '{acct}'" in q
+    assert "10706" not in q                     # savings moves via its own stmt
+
+    recs = [
+        {"RECORDNO": "1", "ACCOUNTNO": "10705", "ENTRY_DATE": "06/10/2026",
+         "TRX_AMOUNT": "500.00", "TR_TYPE": "-1",
+         "DESCRIPTION": "Payments(Bank-BNK1): batch", "JOURNAL": "CD"},
+        {"RECORDNO": "2", "ACCOUNTNO": "10706", "ENTRY_DATE": "06/10/2026",
+         "TRX_AMOUNT": "100.00", "TR_TYPE": "1", "DESCRIPTION": "savings int"},
+    ]
+    txns = sage_xml.to_txns(recs, _d(2026, 6, 1), _d(2026, 6, 30))
+    assert [t.account_ref for t in txns] == ["10705"]
+
+    # SAGE_AUX_ACCOUNTS overrides without a deploy.
+    monkeypatch.setenv("SAGE_AUX_ACCOUNTS", "10704")
+    q2 = sage_xml._query_string(_d(2026, 6, 1), _d(2026, 6, 30))
+    assert "10704" in q2 and "10705" not in q2

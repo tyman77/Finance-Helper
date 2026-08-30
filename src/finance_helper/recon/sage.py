@@ -32,13 +32,14 @@ def _dec(value: str) -> Decimal | None:
 def load_sage_csv(path: str) -> list[Txn]:
     cfg = recon_config()["sage"]
     cols = cfg["columns"]
-    cash_accounts = {str(a) for a in cfg.get("cash_accounts") or []}
+    allowed = {str(a) for a in (cfg.get("cash_accounts") or [])} | \
+              {str(a) for a in (cfg.get("aux_accounts") or [])}
 
     txns: list[Txn] = []
     with open(path, newline="", encoding="utf-8-sig") as fh:
         for lineno, row in enumerate(csv.DictReader(fh), start=2):
             account = str(row.get(cols["account"], "") or "").strip()
-            if cash_accounts and account not in cash_accounts:
+            if allowed and account not in allowed:
                 continue
             posted = _parse_date(str(row.get(cols["date"], "") or ""))
             if posted is None:

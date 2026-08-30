@@ -104,13 +104,21 @@ def _post(body: bytes) -> ET.Element:
     return root
 
 
+def _pull_accounts() -> list[str]:
+    """Cash accounts plus clearing/limbo accounts (aux_accounts) whose
+    entries also represent this bank account's movements."""
+    sage_cfg = recon_config()["sage"]
+    return [str(a) for a in (sage_cfg.get("cash_accounts") or [])] + \
+           [str(a) for a in (sage_cfg.get("aux_accounts") or [])]
+
+
 def _query_string(start: date, end: date) -> str:
-    cash_accounts = [str(a) for a in recon_config()["sage"].get("cash_accounts") or []]
+    pull_accounts = _pull_accounts()
     dates = (f"ENTRY_DATE >= '{start.strftime('%m/%d/%Y')}' AND "
              f"ENTRY_DATE <= '{end.strftime('%m/%d/%Y')}'")
-    if not cash_accounts:
+    if not pull_accounts:
         return dates
-    accounts = " OR ".join(f"ACCOUNTNO = '{a}'" for a in cash_accounts)
+    accounts = " OR ".join(f"ACCOUNTNO = '{a}'" for a in pull_accounts)
     return f"({accounts}) AND {dates}"
 
 
@@ -160,11 +168,11 @@ def _parse_mdy(value: str):
 
 
 def to_txns(records: list[dict], start: date, end: date) -> list[Txn]:
-    cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
+    allowed = set(_pull_accounts())
     txns: list[Txn] = []
     for i, rec in enumerate(records):
         account = (rec.get("ACCOUNTNO") or "").strip()
-        if cash_accounts and account not in cash_accounts:
+        if allowed and account not in allowed:
             continue
         posted = _parse_mdy(rec.get("ENTRY_DATE", ""))
         if posted is None or not (start <= posted <= end):
