@@ -37,9 +37,19 @@ def _dec(value) -> Decimal | None:
 
 
 def _rmpr_person(txn: Txn) -> str:
-    """"rmpr j cody" -> "j cody" (the bank abbreviates to initial+surname)."""
-    norm = txn.counterparty_norm
-    return norm[4:].strip() if norm.startswith("rmpr") else norm
+    """"rmpr c spreng bank" -> "c spreng".
+
+    The descriptor is "RMPR <F LAST> <BANK NAME> ACH DEBIT <ids>"; noise
+    stripping removes the bank's name and the ACH plumbing but the literal
+    word "bank" survives into the norm — and a trailing "bank" token made
+    every surname look like "Bank" (0/622 tied on the first real run).
+    """
+    toks = txn.counterparty_norm.split()
+    if toks and toks[0] == "rmpr":
+        toks = toks[1:]
+    while toks and toks[-1] in ("bank", "banks", "bk"):
+        toks = toks[:-1]
+    return " ".join(toks)
 
 
 # ---------------------------------------------------------------------------

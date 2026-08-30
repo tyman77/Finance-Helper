@@ -246,3 +246,14 @@ def test_po_match_missing_overrun_and_retrofit():
     assert "po_missing" in kinds                  # PO-404 doesn't exist
     assert "po_retrofit" in kinds                 # PO-200 dated after invoice
     assert out["bills_with_po"] == 3 and out["bills_without_po"] == 1
+
+
+def test_rmpr_person_strips_trailing_bank_token():
+    """Regression for the first real run: 'FLATIRONS BANK' left a trailing
+    'bank' in the norm, corrupting every surname -> 0/622 tied."""
+    t = _t("ramp_reimbursement", "-1690", date(2026, 8, 26),
+           "RMPR C SPRENG FLATIRONS BANK ACH DEBIT J", "rmpr c spreng bank")
+    assert checks._rmpr_person(t) == "c spreng"
+    ramp = [{"person": "Chris Spreng", "date": "2026-08-25", "amount": "1690", "memo": "pd"}]
+    out = checks.reimbursement_tieout([t], ramp)
+    assert out["matched"] == 1 and out["findings"] == []
