@@ -22,6 +22,7 @@ class Txn:
     counterparty_norm: str      # lowercase tokens, bank noise stripped
     memo: str = ""
     account_ref: str = ""       # bank account label or GL account number
+    doc_ref: str = ""           # ledger document/batch number, if the source has one
     kind: str = "other"         # classification bucket (payroll, ramp_reimbursement, ...)
     entity: str = ""            # which company entity the line names, if any
     pending: bool = False
@@ -36,11 +37,11 @@ class Txn:
 class MatchGroup:
     """One tie: N bank txns <-> M ledger txns (usually 1<->1)."""
     match_id: str
-    match_pass: int             # 1 exact, 3 fuzzy, 4 split
+    match_pass: int             # 1 exact, 2 batch, 3 fuzzy, 4 split
     bank_ids: list[str]
     ledger_ids: list[str]
     reason: str
-    confirmed: bool             # pass 1 auto-ties; 3/4 need a human
+    confirmed: bool             # passes 1-2 auto-tie; 3/4 need a human
 
 
 @dataclass

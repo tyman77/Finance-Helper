@@ -2,10 +2,15 @@
 
 Passes (each only sees what earlier passes left untied):
   1 exact      same amount, close date, counterparty token overlap -> auto-tied
+  2 batch      a ledger batch (doc no / batch memo / day+journal)
+               sums exactly to one bank movement                   -> auto-tied
   3 fuzzy      same amount, wider window, weak/no name signal      -> confirm
   4 split      2-3 same-name ledger items summing to one bank amt  -> confirm
-(pass 2, settlement expansion into Ramp/Bill/payroll members, arrives with
-those sources in later phases; bank-side those debits already carry a kind.)
+
+Pass 2 is what makes a real GL usable: payroll runs, Ramp settlements and
+Bill.com funding hit the bank as ONE consolidated debit but post to the GL
+as per-item lines ("Batch Summary" rows). An exact-to-the-cent n-way sum
+within the window is strong evidence, so it auto-ties like pass 1.
 
 Residuals near the period edge are timing, not exceptions — carried visibly,
 escalated when aged. Sweep transfers and pending rows never enter matching.
@@ -42,7 +47,7 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
         nonlocal counter
         counter += 1
         mid = f"m{counter:04d}"
-        confirmed = pass_no == 1
+        confirmed = pass_no in (1, 2)
         for t in bank_txns + ledger_txns:
             t.status = "tied"
             t.match_id = mid
@@ -90,6 +95,50 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
         tie(1, [bt], [best],
             f"exact: {bt.amount} within {cfg['exact_window_days']}d, name overlap [{overlap}]")
     note(f"pass 1 (exact): {sum(1 for m in matches if m.match_pass == 1)} tied")
+
+    # --- Pass 2: batch (one bank movement = many ledger lines) -------------
+    # Group untied ledger lines three ways, finest first: by document number,
+    # by (day, description) — Bill.com "Batch Summary" rows share one string
+    # per batch — and by (day, journal). A group of 2+ lines summing exactly
+    # to an untied bank amount, all inside the window, ties n-way.
+    doc_groups: dict[str, list[Txn]] = {}
+    day_name_groups: dict[tuple, list[Txn]] = {}
+    day_jrnl_groups: dict[tuple, list[Txn]] = {}
+    for lt in ledger:
+        if lt.status != "untied":
+            continue
+        if lt.doc_ref:
+            doc_groups.setdefault(lt.doc_ref, []).append(lt)
+        if lt.counterparty_norm:
+            day_name_groups.setdefault(
+                (lt.posted_date, lt.counterparty_norm), []).append(lt)
+        if lt.memo:
+            day_jrnl_groups.setdefault((lt.posted_date, lt.memo), []).append(lt)
+
+    by_sum: dict[Decimal, list[tuple[str, list[Txn]]]] = {}
+    for kind, groups in (("doc", doc_groups), ("batch", day_name_groups),
+                         ("journal", day_jrnl_groups)):
+        for key, rows in groups.items():
+            if len(rows) < 2:
+                continue
+            total = sum(t.amount for t in rows)
+            if total:
+                label = f"doc {key}" if kind == "doc" else \
+                        f"{kind} of {key[0]}"
+                by_sum.setdefault(total, []).append((label, rows))
+
+    for bt in matchable_bank:
+        if bt.status != "untied":
+            continue
+        for label, rows in by_sum.get(bt.amount, []):
+            if any(t.status != "untied" for t in rows):
+                continue                     # partially consumed elsewhere
+            if not all(_within(bt, t, cfg["fuzzy_window_days"]) for t in rows):
+                continue
+            tie(2, [bt], rows,
+                f"batch: {len(rows)} ledger lines ({label}) sum to {bt.amount}")
+            break
+    note(f"pass 2 (batches): {sum(1 for m in matches if m.match_pass == 2)} tied")
 
     # --- Pass 3: fuzzy (amount-only) ---------------------------------------
     for bt in matchable_bank:

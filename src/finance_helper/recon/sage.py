@@ -64,5 +64,6 @@ def load_sage_csv(path: str) -> list[Txn]:
                 counterparty_norm=normalize_counterparty(desc),
                 memo=str(row.get(cols.get("journal") or "", "") or "").strip(),
                 account_ref=account,
+                doc_ref=doc,
             ))
     return txns

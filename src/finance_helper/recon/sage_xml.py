@@ -187,6 +187,7 @@ def to_txns(records: list[dict], start: date, end: date) -> list[Txn]:
             counterparty_norm=normalize_counterparty(desc),
             memo=(rec.get("JOURNAL") or rec.get("BATCH_TITLE") or "").strip(),
             account_ref=account,
+            doc_ref=(rec.get("DOCUMENT") or rec.get("BATCH_NO") or "").strip(),
         ))
     return txns
 

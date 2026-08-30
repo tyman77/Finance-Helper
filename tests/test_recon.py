@@ -63,16 +63,57 @@ def test_sage_loader_filters_to_cash_account_and_signs():
     assert chk.amount == Decimal("-450.00")              # credit to cash = out
 
 
-def test_ladder_ties_exact_fuzzy_and_split():
+def test_ladder_ties_exact_batch_and_fuzzy():
     res = _run()
     by_pass = {}
     for m in res.matches:
         by_pass.setdefault(m.match_pass, []).append(m)
     assert len(by_pass[1]) == 3                    # acme, check, deposit
     assert all(m.confirmed for m in by_pass[1])
+    # Paychex -8000: two same-day payroll lines -5000 + -3000 -> batch tie,
+    # auto-confirmed (the settlement-expansion pass).
+    assert len(by_pass[2]) == 1 and by_pass[2][0].confirmed
+    assert "sum to -8000" in by_pass[2][0].reason
     assert len(by_pass[3]) == 1 and not by_pass[3][0].confirmed
-    assert len(by_pass[4]) == 1                    # paychex -8000 = -5000 + -3000
-    assert "= -8000" in by_pass[4][0].reason
+
+
+def _txn(source, i, day, amount, name, memo="", doc=""):
+    from datetime import date as _d
+    from finance_helper.recon.models import Txn
+    return Txn(source=source, source_id=f"{source}:{i}",
+               posted_date=_d(2026, 6, day), amount=Decimal(amount),
+               counterparty_raw=name, counterparty_norm=name,
+               memo=memo, doc_ref=doc)
+
+
+def test_batch_pass_ties_doc_group_spanning_days():
+    # One bank debit = 3 ledger lines sharing a document number over 2 days.
+    bank_txns = [_txn("bank", 1, 10, "-900", "billcom payment")]
+    ledger = [_txn("sage", i, d, a, "batch summary 6284", memo="CD", doc="BATCH-77")
+              for i, (d, a) in enumerate([(9, "-300"), (9, "-350"), (10, "-250")])]
+    res = engine.reconcile(bank_txns, ledger)
+    (m,) = res.matches
+    assert m.match_pass == 2 and m.confirmed and len(m.ledger_ids) == 3
+    assert "doc BATCH-77" in m.reason
+
+
+def test_split_pass_ties_same_name_items_across_docs():
+    # No shared doc/day group, but 2 same-name items sum to the debit -> pass 4.
+    bank_txns = [_txn("bank", 1, 10, "-700", "acme av supply")]
+    ledger = [_txn("sage", 1, 10, "-300", "acme av supply", memo="CD", doc="A1"),
+              _txn("sage", 2, 11, "-400", "acme av supply", memo="CR", doc="B2")]
+    res = engine.reconcile(bank_txns, ledger)
+    (m,) = res.matches
+    assert m.match_pass == 4 and not m.confirmed and len(m.ledger_ids) == 2
+
+
+def test_split_pass_ignores_unrelated_name_groups():
+    # Coincidental sum under a different vendor name must NOT tie.
+    bank_txns = [_txn("bank", 1, 10, "-700", "acme av supply")]
+    ledger = [_txn("sage", 1, 10, "-300", "other vendor llc"),
+              _txn("sage", 2, 11, "-400", "other vendor llc")]
+    res = engine.reconcile(bank_txns, ledger)
+    assert not res.matches
 
 
 def test_residual_classification_and_severity():
