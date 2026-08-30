@@ -165,6 +165,39 @@ open a series to work lines individually.</p>
 <p class="subtle">No findings — reimbursements tie, per-diems have trip evidence, no payee patterns flagged.</p>
 {% endif %}
 
+{% if result.sweep %}
+<h2>Sweep account cross-proof</h2>
+<p class="subtle" style="max-width:70ch">{{ result.sweep.filename }} —
+<strong>{{ result.sweep.verified }}/{{ result.sweep.checked }}</strong> checking-side sweep
+transfers verified in the companion account
+{%- if result.sweep.unverified %}; <strong>{{ result.sweep.unverified }} NOT found — now in the
+exception queue above</strong>{% endif %}.
+Sweep-file integrity: {% if result.sweep.integrity.get('ok') %}✓ {{ result.sweep.integrity.get('days', 0) }} days{% else %}✗ breaks found{% endif %}.</p>
+{% if result.sweep.foreign %}
+<h3>Sweep-account activity that is NOT a transfer with checking</h3>
+<p class="subtle">Anything here bypasses the checking-based proof — make sure each line has a home.</p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Date</th><th class="amt">Amount</th><th>Description</th></tr></thead>
+  <tbody>
+  {% for r in result.sweep.foreign %}
+    <tr><td>{{ r.date }}</td><td class="amt">{{ r.amount | money }}</td><td>{{ r.desc }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% if result.sweep.orphans %}
+<h3>Sweep-side transfers with no checking counterpart</h3>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Date</th><th class="amt">Amount</th><th>Description</th></tr></thead>
+  <tbody>
+  {% for r in result.sweep.orphans %}
+    <tr><td>{{ r.date }}</td><td class="amt">{{ r.amount | money }}</td><td>{{ r.desc }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endif %}
+
 {% if intercompany %}
 <h2>Intercompany — books outside Sage ({{ intercompany | length }})</h2>
 <p class="subtle" style="max-width:70ch">Movements naming a related entity whose books aren't in

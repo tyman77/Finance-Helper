@@ -23,6 +23,7 @@ from ..recon import bank as bank_mod
 from ..recon import checks, engine, sage_api, sage_xml, summary
 from ..recon import sage as sage_mod
 from ..recon import store as recon_store
+from ..recon import sweep as sweep_mod
 
 
 def _data_json(name, default):
@@ -104,7 +105,7 @@ JOBS: dict[str, dict] = {}
 
 
 def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
-             use_api, email):
+             use_api, email, sweep_path=None, sweep_name=None):
     log = job["stages"].append
     try:
         # One click = full coverage: pull every API-backed index first
@@ -150,6 +151,16 @@ def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
                                   progress=lambda msg: log("· " + msg))
         log("Checking day-end balance integrity…")
         result.integrity = bank_mod.integrity_check(bank_path)
+        if sweep_path:
+            log("Cross-proving the sweep account…")
+            sweep_txns = bank_mod.load_bank_csv(sweep_path)
+            sw = sweep_mod.cross_proof(result.bank, sweep_txns)
+            sw["integrity"] = bank_mod.integrity_check(sweep_path)
+            sw["filename"] = sweep_name
+            result.sweep = sw
+            log(f"· {sw['verified']}/{sw['checked']} checking-side sweeps verified"
+                + (f", {sw['unverified']} NOT found in the sweep account"
+                   if sw["unverified"] else ""))
         # For the biggest residuals, ask Sage where (anywhere in the chart)
         # each amount actually posted — 'wrong account' vs 'unrecorded'.
         if use_api and sage_xml.credentials_present():
@@ -170,7 +181,7 @@ def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
         job["status"] = "error"
         job["error"] = str(exc)
     finally:
-        for path in (bank_path, sage_path):
+        for path in (bank_path, sage_path, sweep_path):
             if path and os.path.exists(path):
                 os.unlink(path)
 
@@ -182,11 +193,14 @@ def run():
         flash("Choose a bank statement CSV first.")
         return redirect(url_for("cashproof.landing"))
     sage_file = request.files.get("sage_file")
+    sweep_file = request.files.get("sweep_file")
     use_api = request.form.get("sage_api") == "on"
     has_sage = bool(sage_file and sage_file.filename)
+    has_sweep = bool(sweep_file and sweep_file.filename)
 
     bank_path = _save_upload(bank_file)
     sage_path = _save_upload(sage_file) if has_sage else None
+    sweep_path = _save_upload(sweep_file) if has_sweep else None
 
     run_id = uuid.uuid4().hex[:12]
     job = {"status": "running", "stages": [], "notices": [], "error": None,
@@ -194,7 +208,8 @@ def run():
     JOBS[run_id] = job
     args = (run_id, job, bank_path, bank_file.filename, sage_path,
             sage_file.filename if has_sage else None, use_api,
-            session.get("email", ""))
+            session.get("email", ""), sweep_path,
+            sweep_file.filename if has_sweep else None)
     if current_app.config.get("TESTING"):
         _execute(*args)                      # deterministic in the test suite
     else:

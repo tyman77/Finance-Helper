@@ -52,6 +52,7 @@ class ReconResult:
     ledger: list[Txn]
     matches: list[MatchGroup]
     integrity: dict = field(default_factory=dict)   # bank-file continuity check
+    sweep: dict = field(default_factory=dict)       # sweep-account cross-proof
 
     @property
     def exceptions(self) -> list[Txn]:

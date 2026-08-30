@@ -43,6 +43,7 @@ def save_run(run_id: str, result: ReconResult, meta: dict) -> None:
         "period_start": result.period_start.isoformat() if result.period_start else None,
         "period_end": result.period_end.isoformat() if result.period_end else None,
         "integrity": result.integrity,
+        "sweep": result.sweep,
         "bank": [_txn_to_dict(t) for t in result.bank],
         "ledger": [_txn_to_dict(t) for t in result.ledger],
         "matches": [asdict(m) for m in result.matches],
@@ -71,6 +72,7 @@ def load_run(run_id: str) -> dict | None:
         ledger=[_txn_from_dict(t) for t in payload["ledger"]],
         matches=[MatchGroup(**m) for m in payload["matches"]],
         integrity=payload.get("integrity") or {},
+        sweep=payload.get("sweep") or {},
     )
     return payload
 
