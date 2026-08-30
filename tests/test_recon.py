@@ -118,6 +118,20 @@ def test_batch_pass_keeps_same_day_batches_separate_and_bridges_weeks():
     assert all(t.status == "tied" for t in ledger)
 
 
+def test_untied_aux_clearing_rows_go_internal_not_exception():
+    # A Money-In Clearing receipt with no bank movement is clearing churn,
+    # not a cash exception; an untied CASH-account row still is one.
+    clearing = _txn("sage", 1, 5, "250", "customer receipt via billcom")
+    clearing.account_ref = "10704"
+    cash = _txn("sage", 2, 5, "-900", "mystery vendor payment")
+    cash.account_ref = "10700"
+    bank_txns = [_txn("bank", 1, 20, "-123", "unrelated debit")]
+    engine.reconcile(bank_txns, [clearing, cash])
+    assert clearing.status == "internal"
+    assert "clearing" in clearing.reason
+    assert cash.status == "exception"
+
+
 def test_wash_pass_clears_entry_plus_reversal():
     # A voided payment: entry and reversal share the doc, net zero, and no
     # bank movement will ever exist for them.

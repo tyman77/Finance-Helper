@@ -257,8 +257,18 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
     note(f"pass 4 (splits): {sum(1 for m in matches if m.match_pass == 4)} tied")
 
     # --- Residuals: timing vs exception ------------------------------------
+    # Aux (clearing/limbo) rows exist to EXPLAIN bank movements: tied ones
+    # helped; untied ones net out within their own account over time and are
+    # not cash exceptions. Only the real cash account earns "ledger cash
+    # entry with no bank movement".
+    aux_accounts = {str(a) for a in recon_config()["sage"].get("aux_accounts") or []}
     for t in posted + ledger:
         if t.status != "untied":
+            continue
+        if t.source != "bank" and t.account_ref in aux_accounts:
+            t.status = "internal"
+            t.reason = (f"clearing-account activity ({t.account_ref}) with no "
+                        "direct bank movement — nets within the clearing account")
             continue
         near_edge = (
             period_start is not None
