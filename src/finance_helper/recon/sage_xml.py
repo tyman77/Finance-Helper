@@ -428,16 +428,12 @@ def annotate_unmatched(bank_txns: list[Txn], limit: int = 60,
     matters most). Targets the biggest debits PLUS every reimbursement-style
     payout — those are small but fraud-relevant (per-diems may post to COGS
     Travel: Meals / OH Per Diem, and the probe proves it per line)."""
-    exceptions = [t for t in bank_txns
-                  if t.status == "exception" and t.amount < 0]
-    big = sorted(exceptions, key=lambda t: t.amount)[:25]
-    rmpr = [t for t in exceptions if t.kind == "ramp_reimbursement"]
-    targets, seen = [], set()
-    for t in big + rmpr:
-        if t.source_id not in seen:
-            seen.add(t.source_id)
-            targets.append(t)
-    targets = targets[:limit]
+    # The queue is short enough now to probe EVERY untied debit (biggest
+    # first, capped) — Yamaha buys land in 51300 COGS Product, per-diems in
+    # COGS/OH Meals, and each line gets its verdict.
+    targets = sorted((t for t in bank_txns
+                      if t.status == "exception" and t.amount < 0),
+                     key=lambda t: t.amount)[:limit]
     if not targets:
         return 0
     cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
