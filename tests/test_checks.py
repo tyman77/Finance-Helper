@@ -318,3 +318,27 @@ def test_card_tieout_without_data_reports_coverage_gap():
                "CHASE CREDIT CRD WIENS TYSON ACH DEBIT")]
     out = checks.card_tieout(bank, [])
     assert out["coverage"] is False and out["findings"] == []
+
+
+def test_reimbursement_matches_bank_truncated_surname():
+    # ACH descriptors cut surnames (~10 chars): "D WILLIAMSO" is Williamson.
+    bank = [_t("ramp_reimbursement", "-325", date(2026, 7, 14),
+               "RMPR D WILLIAMSO FLATIRONS BANK ACH DEBIT", "rmpr d williamso"),
+            _t("ramp_reimbursement", "-211.25", date(2026, 7, 8),
+               "RMPR T LEATHERMA FLATIRONS BANK ACH DEBIT", "rmpr t leatherma")]
+    ramp = [{"person": "Dave Williamson", "date": "2026-07-12", "amount": "325", "memo": "pd"},
+            {"person": "Tom Leatherman", "date": "2026-07-07", "amount": "211.25", "memo": "pd"}]
+    out = checks.reimbursement_tieout(bank, ramp)
+    assert out["matched"] == 2 and out["findings"] == []
+
+
+def test_truncated_surname_needs_five_chars_and_initial():
+    # "D WILL" (4-char surname) must NOT match Williamson; wrong initial fails.
+    bank = [_t("ramp_reimbursement", "-100", date(2026, 7, 14),
+               "RMPR D WILL", "rmpr d will"),
+            _t("ramp_reimbursement", "-200", date(2026, 7, 14),
+               "RMPR X WILLIAMSO", "rmpr x williamso")]
+    ramp = [{"person": "Dave Williamson", "date": "2026-07-13", "amount": "100", "memo": "pd"},
+            {"person": "Dave Williamson", "date": "2026-07-13", "amount": "200", "memo": "pd"}]
+    out = checks.reimbursement_tieout(bank, ramp)
+    assert out["matched"] == 0 and len(out["findings"]) == 2

@@ -53,6 +53,23 @@ def _rmpr_person(txn: Txn) -> str:
     return " ".join(toks)
 
 
+def _names_match(bank_person: str, ramp_person: str) -> bool:
+    """same_person, plus tolerance for the bank's truncated surnames:
+    ACH descriptors cut names around 10 chars ("D WILLIAMSO" is Dave
+    Williamson), so first-initial + surname-prefix (>=5 chars) counts."""
+    if same_person(bank_person, ramp_person):
+        return True
+    bt = bank_person.split()
+    rt = ramp_person.replace(",", " ").split()
+    if len(bt) >= 2 and len(rt) >= 2:
+        bfirst, blast = bt[0].lower(), bt[-1].lower()
+        rfirst, rlast = rt[0].lower(), rt[-1].lower()
+        if len(blast) >= 5 and rlast.startswith(blast) and \
+                rfirst.startswith(bfirst[:1]):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 1. Reimbursement tie-out: every bank RMPR debit must exist in Ramp.
 
@@ -78,7 +95,7 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
                 continue
             if _dec(r.get("amount")) != amount:
                 continue
-            if not same_person(person, r.get("person", "")):
+            if not _names_match(person, r.get("person", "")):
                 continue
             try:
                 when = date.fromisoformat(r["date"])
@@ -98,7 +115,7 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
         wide = cfg.get("reimb_batch_window_days", 21)
         cands = []
         for i, r in enumerate(ramp_index):
-            if i in used or not same_person(person, r.get("person", "")):
+            if i in used or not _names_match(person, r.get("person", "")):
                 continue
             amt = _dec(r.get("amount"))
             if amt is None:
@@ -145,7 +162,7 @@ def reimbursement_tieout(bank: list[Txn], ramp_index: list) -> dict:
             if (b.posted_date - a.posted_date).days <= 7:
                 ramp_count = sum(
                     1 for r in ramp_index
-                    if _dec(r.get("amount")) == -amount and same_person(person, r.get("person", "")))
+                    if _dec(r.get("amount")) == -amount and _names_match(person, r.get("person", "")))
                 if ramp_count < 2:
                     findings.append(_finding(
                         "reimb_duplicate", "high",
