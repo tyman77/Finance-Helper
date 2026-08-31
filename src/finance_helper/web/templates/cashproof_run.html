@@ -52,7 +52,8 @@ export to get the tie-out and exceptions queue.</p>
 </div>
 <p class="subtle" style="max-width:70ch">Grouped into recurring series — the same payee/pattern
 gets one decision. "Apply to all" records the disposition on every open line in the series;
-open a series to work lines individually.</p>
+open a series to work lines individually.
+<a href="{{ url_for('cashproof.exceptions_csv', run_id=run_id) }}">Download the full queue as CSV ↓</a></p>
 {% for g in exception_groups %}
 <details class="panel exc-group" {% if g.rows | length == 1 %}open{% endif %}>
   <summary style="cursor:pointer;display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap">

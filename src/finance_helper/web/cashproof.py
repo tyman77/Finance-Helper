@@ -311,6 +311,32 @@ def run_page(run_id):
     )
 
 
+@cashproof_bp.get("/<run_id>/exceptions.csv")
+def exceptions_csv(run_id):
+    payload = recon_store.load_run(run_id)
+    if not payload:
+        flash("That Cash Proof run isn't available.")
+        return redirect(url_for("cashproof.landing"))
+    result = payload["result"]
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["severity", "side", "status", "date", "amount", "account",
+                "journal", "doc", "counterparty", "reason"])
+    rows = [t for t in result.bank + result.ledger
+            if t.status in ("exception", "timing")]
+    rows.sort(key=lambda t: (SEVERITY_ORDER.get(engine.severity_of(t), 9),
+                             t.posted_date))
+    for t in rows:
+        w.writerow([engine.severity_of(t), t.source, t.status, t.posted_date,
+                    t.amount, t.account_ref, t.memo, t.doc_ref,
+                    t.counterparty_raw, t.reason])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=exceptions-{run_id}.csv"})
+
+
 @cashproof_bp.post("/<run_id>/disposition")
 def disposition(run_id):
     # One id (per-line form) or a comma-joined list (a series' bulk form).

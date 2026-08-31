@@ -147,3 +147,13 @@ def test_fraud_checks_render_on_run_page(client, monkeypatch, tmp_path):
                 data={"source_id": fid, "action": "investigate", "note": "who is this"})
     body2 = client.get(f"/cashproof/{run_id}").data
     assert b"investigate" in body2 and b"who is this" in body2
+
+
+def test_exceptions_csv_download(client):
+    run_id = _post_run(client)
+    resp = client.get(f"/cashproof/{run_id}/exceptions.csv")
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/csv"
+    body = resp.data.decode()
+    assert body.splitlines()[0].startswith("severity,side,status")
+    assert "GHOST" in body
