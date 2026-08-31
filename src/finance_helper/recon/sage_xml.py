@@ -419,16 +419,25 @@ def fetch_account_entries(accounts: list[str], start: date, end: date) -> list[d
     return out
 
 
-def annotate_unmatched(bank_txns: list[Txn], limit: int = 40,
+def annotate_unmatched(bank_txns: list[Txn], limit: int = 60,
                        window_days: int = 10) -> int:
-    """For the biggest untied bank debits, ask Sage where (if anywhere) each
-    amount was recorded, and append the answer to the exception's reason.
-    Turns 'no ledger tie found' into either 'posted to account X' (a
-    misposting to chase) or 'nowhere in Sage' (an unrecorded movement —
-    the finding that matters most)."""
-    targets = sorted((t for t in bank_txns
-                      if t.status == "exception" and t.amount < 0),
-                     key=lambda t: t.amount)[:limit]
+    """For untied bank debits, ask Sage where (if anywhere) each amount was
+    recorded, and append the answer to the exception's reason. Turns 'no
+    ledger tie found' into either 'posted to account X' (a misposting to
+    chase) or 'nowhere in Sage' (an unrecorded movement — the finding that
+    matters most). Targets the biggest debits PLUS every reimbursement-style
+    payout — those are small but fraud-relevant (per-diems may post to COGS
+    Travel: Meals / OH Per Diem, and the probe proves it per line)."""
+    exceptions = [t for t in bank_txns
+                  if t.status == "exception" and t.amount < 0]
+    big = sorted(exceptions, key=lambda t: t.amount)[:25]
+    rmpr = [t for t in exceptions if t.kind == "ramp_reimbursement"]
+    targets, seen = [], set()
+    for t in big + rmpr:
+        if t.source_id not in seen:
+            seen.add(t.source_id)
+            targets.append(t)
+    targets = targets[:limit]
     if not targets:
         return 0
     cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
