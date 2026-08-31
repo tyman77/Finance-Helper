@@ -233,6 +233,39 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
                 f"batch: {len(rows)} ledger lines ({label}) sum to {bt.amount}")
             break
 
+    # 2d — processor-fee deposits: the books record a deposit/receipt batch
+    # GROSS; the bank receives NET after the processor (Shopify, card
+    # settlement) withholds its fee. A batch grossing slightly MORE than a
+    # bank credit (≤5% short, inside the window) is that payout — tie as a
+    # confirmable naming the withheld amount.
+    _FEE_MAX = Decimal("0.05")
+    dep_groups = [(label, rows, sum(t.amount for t in rows))
+                  for label, rows in all_groups
+                  if rows and all(t.amount > 0 for t in rows)]
+    for bt in matchable_bank:
+        if bt.status != "untied" or bt.amount <= 0:
+            continue
+        best = None
+        for label, rows, total in dep_groups:
+            if total <= bt.amount:
+                continue
+            shortfall = total - bt.amount
+            pct = shortfall / total
+            if pct > _FEE_MAX:
+                continue
+            if any(t.status != "untied" for t in rows):
+                continue
+            if not all(_within(bt, t, bw) for t in rows):
+                continue
+            if best is None or pct < best[3]:
+                best = (label, rows, total, pct)
+        if best is not None:
+            label, rows, total, pct = best
+            tie(3, [bt], rows,
+                f"deposit batch ({label}) grosses {total}; bank received "
+                f"{bt.amount} — {total - bt.amount} ({pct * 100:.1f}%) "
+                "withheld as processor fees — confirm")
+
     # 2b' — near-miss batches: a group summing within $1 of a bank movement
     # is almost always the same money with a rounding/true-up error in the
     # JE (two owner-distribution entries of 37,224.88 vs a 74,449.36 bank

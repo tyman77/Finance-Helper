@@ -305,3 +305,34 @@ def test_near_miss_batch_surfaces_delta_as_confirmable_tie():
     assert m.match_pass == 3 and not m.confirmed
     assert "off by -0.40" in m.reason
     assert all(t.status == "tied" for t in ledger)
+
+
+def test_fee_tolerant_deposit_matching_names_the_withheld_amount():
+    # Books record the Shopify batch gross (1000); bank receives net (971).
+    raw = "Receipts(Bank-BNK1): 2026/06/09 10:00:00:1 Batch Summary Entry"
+    ledger = []
+    for i, a in enumerate(["400", "350", "250"]):
+        t = _txn("sage", i, 9, a, "receipts bank bnk1 batch summary entry")
+        t.counterparty_raw = raw
+        t.account_ref = "10700"
+        ledger.append(t)
+    bank_txns = [_txn("bank", 1, 11, "971", "shopify")]
+    res = engine.reconcile(bank_txns, ledger)
+    (m,) = res.matches
+    assert m.match_pass == 3 and not m.confirmed
+    assert "withheld as processor fees" in m.reason and "2.9%" in m.reason
+    assert all(t.status == "tied" for t in ledger)
+
+
+def test_fee_tolerance_rejects_large_shortfalls():
+    raw = "Receipts(Bank-BNK1): 2026/06/09 10:00:00:2 Batch Summary Entry"
+    ledger = []
+    for i, a in enumerate(["600", "400"]):
+        t = _txn("sage", i, 9, a, "receipts bank bnk1 batch summary entry")
+        t.counterparty_raw = raw
+        t.account_ref = "10700"
+        ledger.append(t)
+    bank_txns = [_txn("bank", 1, 11, "900", "shopify")]   # 10% short: not fees
+    res = engine.reconcile(bank_txns, ledger)
+    assert not res.matches
+    assert not any(t.status == "tied" for t in ledger)
