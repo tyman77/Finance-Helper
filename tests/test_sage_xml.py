@@ -178,9 +178,10 @@ def test_aux_clearing_accounts_join_the_pull(monkeypatch):
     from datetime import date as _d
 
     q = sage_xml._query_string(_d(2026, 6, 1), _d(2026, 6, 30))
-    for acct in ("10700", "10704", "10705", "14990"):
+    # Cash + clearing + every sibling bank-side account joins the pull.
+    for acct in ("10700", "10704", "10705", "14990",
+                 "10706", "10707", "10708", "10709"):
         assert f"ACCOUNTNO = '{acct}'" in q
-    assert "10706" not in q                     # savings moves via its own stmt
 
     recs = [
         {"RECORDNO": "1", "ACCOUNTNO": "10705", "ENTRY_DATE": "06/10/2026",

@@ -24,13 +24,14 @@ sage:
   # Flatirons Bank checking; 10706 savings, 10707 sweep, 10709 CD exist for
   # when their exports join the proof. SAGE_CASH_ACCOUNTS env overrides.)
   cash_accounts: ["10700"]
-  # Clearing/limbo accounts whose entries also represent THIS bank account's
-  # movements (Bill.com posts payments to clearing, deposits sit in
-  # Undeposited Funds before hitting 10700). Pulled alongside cash so those
-  # movements can tie; their internal clearing pairs wash to zero. Savings/
-  # sweep/CD are deliberately NOT here — their cash moves through their own
-  # statements, not this one. SAGE_AUX_ACCOUNTS env overrides.
-  aux_accounts: ["10704", "10705", "14990"]
+  # Sibling and clearing accounts pulled alongside cash: Bill.com clearing
+  # (10704/10705), Undeposited Funds (14990), and the other bank-side
+  # accounts (10706 savings, 10707 sweep, 10708 Raymond James, 10709 CD).
+  # A checking movement mis-booked to a sibling account can then still tie
+  # (and the match says which account it hit); a sibling row that doesn't
+  # tie goes internal — its own statement/clearing cycle covers it, so it
+  # is never a cash exception here. SAGE_AUX_ACCOUNTS env overrides.
+  aux_accounts: ["10704", "10705", "14990", "10706", "10707", "10708", "10709"]
 
 entities:
   # Related companies whose books are NOT in Sage. Their movements through
@@ -47,6 +48,7 @@ cards:
   liability_accounts:
     "WIENS TYSON": "20012"       # Credit Card Liability - Tyson Chase
     "KOFAHL NICHOLAS": "20013"   # Credit Liability - Nick Chase
+    "RAMP STATEMENT": "20011"    # Ramp CC Payable — statement settlements
 
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap

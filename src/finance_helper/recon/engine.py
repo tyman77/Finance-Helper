@@ -275,6 +275,22 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
         gap = abs((bt.posted_date - best.posted_date).days)
         tie(3, [bt], [best],
             f"fuzzy: amount {bt.amount} matches, {gap}d apart, no name overlap — confirm")
+    # 3b — monthly summary JEs ("Record monthly rent") post weeks away from
+    # the standing bank transfer they mirror: exact amount + a shared name
+    # token earns the wide batch window (still needs a human confirm).
+    for bt in matchable_bank:
+        if bt.status != "untied":
+            continue
+        cands = [lt for lt in by_amount.get(bt.amount, [])
+                 if lt.status == "untied" and _within(bt, lt, bw)
+                 and _tokens(bt) & _tokens(lt)]
+        if not cands:
+            continue
+        best = min(cands, key=lambda lt: abs((bt.posted_date - lt.posted_date).days))
+        gap = abs((bt.posted_date - best.posted_date).days)
+        overlap = ", ".join(sorted(_tokens(bt) & _tokens(best))[:4])
+        tie(3, [bt], [best],
+            f"amount {bt.amount} + name [{overlap}], {gap}d apart (wide window) — confirm")
     note(f"pass 3 (fuzzy): {sum(1 for m in matches if m.match_pass == 3)} tied")
 
     # --- Pass 4: split (2-3 ledger items sum to one bank amount) -----------
@@ -330,8 +346,9 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
             continue
         if t.source != "bank" and t.account_ref in aux_accounts:
             t.status = "internal"
-            t.reason = (f"clearing-account activity ({t.account_ref}) with no "
-                        "direct bank movement — nets within the clearing account")
+            t.reason = (f"sibling/clearing-account activity ({t.account_ref}) "
+                        "with no movement in THIS statement — its own "
+                        "statement/clearing cycle covers it")
             continue
         near_edge = (
             period_start is not None

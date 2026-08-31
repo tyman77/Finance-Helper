@@ -273,3 +273,16 @@ def test_book_vs_bank_drift_flags_missing_cash_entries():
     assert d["bank_net"] == Decimal("-175500")
     assert d["ledger_net"] == Decimal("-500")
     assert d["drift"] == Decimal("175000")         # books look 175k richer
+
+
+def test_wide_window_ties_monthly_je_to_standing_transfer():
+    # "Record monthly rent" JE posts weeks from the bank's standing transfer;
+    # exact amount + shared name token earns the wide window (confirmable).
+    bank_txns = [_txn("bank", 2, 28, "-53558.54", "rent")]
+    bank_txns[0].counterparty_raw = "RENT SUMMIT ASSEMBLY LLC DEBIT ONLINE TRF"
+    je = _txn("sage", 1, 8, "-53558.54", "record monthly rent")
+    je.account_ref = "10700"
+    res = engine.reconcile(bank_txns, [je])
+    (m,) = res.matches
+    assert m.match_pass == 3 and not m.confirmed
+    assert "wide window" in m.reason
