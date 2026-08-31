@@ -292,3 +292,29 @@ def test_billcom_two_same_day_debits_drawn_from_one_batch():
     ]
     out = checks.billcom_tieout(bank, bills)
     assert out["matched"] == 2 and out["findings"] == []
+
+
+def test_card_tieout_matches_recorded_payment_and_flags_unrecorded():
+    bank = [_t("other", "-37728.78", date(2026, 3, 13),
+               "CHASE CREDIT CRD WIENS TYSON ACH DEBIT AUTOPAYBUS"),
+            _t("other", "-3490.63", date(2026, 3, 13),
+               "CHASE CREDIT CRD KOFAHL NICHOLAS ACH DEBIT AUTOPAYBUS")]
+    card_index = [
+        {"account": "20012", "date": "2026-03-14", "amount": "37728.78",
+         "desc": "Chase autopay"},                       # Tyson's recorded
+        {"account": "20012", "date": "2026-03-01", "amount": "-1200.00",
+         "desc": "Statement purchases"},                 # purchases coded
+    ]
+    out = checks.card_tieout(bank, card_index)
+    assert out["checked"] == 2 and out["matched"] == 1
+    kinds = {f["kind"] for f in out["findings"]}
+    assert "card_unrecorded" in kinds                    # Nick's not booked
+    assert "card_no_purchases" in kinds                  # Nick: zero purchases
+    assert out["cards"]["wiens tyson"]["purchases"] == 1
+
+
+def test_card_tieout_without_data_reports_coverage_gap():
+    bank = [_t("other", "-100", date(2026, 3, 13),
+               "CHASE CREDIT CRD WIENS TYSON ACH DEBIT")]
+    out = checks.card_tieout(bank, [])
+    assert out["coverage"] is False and out["findings"] == []

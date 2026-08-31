@@ -23,6 +23,7 @@ _DEFAULTS = {
         "aux_accounts": [],
     },
     "entities": {"external": []},
+    "cards": {"liability_accounts": {}},
     "matching": {
         "exact_window_days": 3,
         "batch_window_days": 45,

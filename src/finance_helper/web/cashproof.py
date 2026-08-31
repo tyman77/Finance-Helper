@@ -26,11 +26,14 @@ from ..recon import store as recon_store
 from ..recon import sweep as sweep_mod
 
 
-def _data_json(name, default):
-    data_dir = os.environ.get(
+def _data_dir():
+    return os.environ.get(
         "FINANCE_HELPER_DATA",
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
-    path = os.path.join(data_dir, name)
+
+
+def _data_json(name, default):
+    path = os.path.join(_data_dir(), name)
     if not os.path.exists(path):
         return default
     try:
@@ -38,6 +41,12 @@ def _data_json(name, default):
             return json.load(fh)
     except (OSError, ValueError):
         return default
+
+
+def _write_data_json(name, obj):
+    os.makedirs(_data_dir(), exist_ok=True)
+    with open(os.path.join(_data_dir(), name), "w", encoding="utf-8") as fh:
+        json.dump(obj, fh)
 
 
 def _flight_pairs():
@@ -141,6 +150,19 @@ def _execute(run_id, job, bank_path, bank_name, sage_path, sage_name,
             ledger_txns = fetch(start, end)
             log(f"· {len(ledger_txns)} cash ledger rows")
             ledger_label = f"{label} ({start} → {end})"
+            try:
+                from ..recon.settings import recon_config
+                card_accounts = sorted({str(v) for v in (
+                    recon_config().get("cards", {}).get("liability_accounts")
+                    or {}).values()})
+                if card_accounts and sage_xml.credentials_present():
+                    log("Pulling card liability accounts from Sage…")
+                    entries = sage_xml.fetch_account_entries(card_accounts, start, end)
+                    _write_data_json("card_liability_entries.json", entries)
+                    log(f"· {len(entries)} entries across accounts "
+                        + ", ".join(card_accounts))
+            except Exception as exc:
+                log(f"· card-account pull skipped: {exc}")
         else:
             ledger_txns, ledger_label = [], None
             job["notices"].append(
@@ -285,6 +307,7 @@ def run_page(run_id):
         bill_index=_data_json("billdotcom_payments.json", []),
         bill_master=_data_json("billdotcom_master.json", {}),
         po_index=_data_json("sage_pos.json", []),
+        card_index=_data_json("card_liability_entries.json", []),
     )
 
     from ..recon.settings import recon_config

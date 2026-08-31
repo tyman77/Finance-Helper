@@ -625,14 +625,90 @@ def po_match(bills: list[dict], pos: list[dict], tolerance: float = 0.05) -> dic
 SEVERITY_ORDER = {"critical": 0, "high": 1, "review": 2, "info": 3}
 
 
+def card_tieout(bank: list[Txn], card_index: list) -> dict:
+    """Company credit-card autopays: every card-payment debit from the bank
+    must be recorded against that card's GL liability account (config:
+    cards.liability_accounts). Also reports whether purchases are being
+    coded to each account at all — an autopaid card whose account shows no
+    purchase entries is spend nobody reviews."""
+    mapping = {str(k).lower(): str(v) for k, v in
+               (recon_config().get("cards", {}).get("liability_accounts") or {}).items()}
+    if not mapping:
+        return {"findings": [], "checked": 0, "matched": 0,
+                "coverage": True, "cards": {}}
+
+    debits: list[tuple[Txn, str, str]] = []
+    for t in bank:
+        if t.pending or t.amount >= 0:
+            continue
+        raw = t.counterparty_raw.lower()
+        for pat, acct in mapping.items():
+            if pat in raw:
+                debits.append((t, pat, acct))
+                break
+
+    entries = []
+    for e in card_index or []:
+        try:
+            entries.append(((e.get("account") or "").strip(),
+                            date.fromisoformat(e["date"]),
+                            Decimal(str(e["amount"]))))
+        except (KeyError, ValueError, InvalidOperation):
+            continue
+    coverage = bool(entries)
+
+    cards: dict[str, dict] = {}
+    for pat, acct in mapping.items():
+        purchases = [amt for a, _d, amt in entries if a == acct and amt < 0]
+        cards[pat] = {"account": acct, "payments": 0,
+                      "paid": Decimal("0"), "purchases": len(purchases),
+                      "purchase_total": -sum(purchases, Decimal("0"))}
+
+    used: set[int] = set()
+    matched = 0
+    findings: list[dict] = []
+    for t, pat, acct in debits:
+        amount = -t.amount
+        cards[pat]["payments"] += 1
+        cards[pat]["paid"] += amount
+        hit = next((i for i, (a, d, amt) in enumerate(entries)
+                    if i not in used and a == acct and amt == amount
+                    and abs((d - t.posted_date).days) <= 10), None)
+        if hit is not None:
+            used.add(hit)
+            matched += 1
+        elif coverage:
+            findings.append(_finding(
+                "card_unrecorded", "critical",
+                f"Card autopay not recorded on its liability account ({pat.title()})",
+                f"${amount:,.2f} left the bank on {t.posted_date} paying the "
+                f"{pat.title()} Chase card, but account {acct} has no matching "
+                "entry within 10 days — the payment (and possibly the card's "
+                "purchases) isn't being booked.",
+                t.source_id))
+    for pat, c in cards.items():
+        if coverage and c["payments"] and not c["purchases"]:
+            findings.append(_finding(
+                "card_no_purchases", "high",
+                f"Card is autopaid but no purchases are coded ({pat.title()})",
+                f"${c['paid']:,.2f} paid to this card this period, yet account "
+                f"{c['account']} shows zero purchase entries — statement lines "
+                "aren't being entered, so this spend is unreviewed.",
+                c["account"]))
+    return {"findings": findings, "checked": len(debits), "matched": matched,
+            "coverage": coverage, "cards": cards}
+
+
 def run_all(bank: list[Txn], ramp_index: list, hotel_index: list,
             timecard_index: dict, flight_pairs: list[tuple],
             bill_index: list | None = None,
             bill_master: dict | None = None,
-            po_index: list | None = None) -> dict:
+            po_index: list | None = None,
+            card_index: list | None = None) -> dict:
     bill_index = bill_index or []
     bill_master = bill_master or {}
     reimb = reimbursement_tieout(bank, ramp_index)
+    cards = card_tieout(bank, card_index or [])
     perdiem = perdiem_no_trip(ramp_index, hotel_index, timecard_index, flight_pairs)
     vendors = vendor_integrity(bank)
     billcom = billcom_tieout(bank, bill_index)
@@ -647,8 +723,9 @@ def run_all(bank: list[Txn], ramp_index: list, hotel_index: list,
 
     findings = sorted(reimb["findings"] + perdiem["findings"] + vendors["findings"]
                       + billcom["findings"] + dupes["findings"]
-                      + master["findings"] + bills["findings"] + pos["findings"],
+                      + master["findings"] + bills["findings"] + pos["findings"]
+                      + cards["findings"],
                       key=lambda f: SEVERITY_ORDER.get(f["severity"], 9))
     return {"findings": findings, "reimb": reimb, "perdiem": perdiem,
             "vendors": vendors, "billcom": billcom, "dupes": dupes,
-            "master": master, "bills": bills, "po": pos}
+            "master": master, "bills": bills, "po": pos, "cards": cards}

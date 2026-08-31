@@ -139,6 +139,13 @@ open a series to work lines individually.
   bills scanned: {{ fraud.bills.checked }};
   POs: {{ fraud.po.pos }} in Sage, {{ fraud.po.bills_with_po }} bills cite one,
   {{ fraud.po.bills_without_po }} don't.
+  {% if fraud.cards.checked %}
+  Card autopays: {{ fraud.cards.matched }}/{{ fraud.cards.checked }} recorded on their
+  liability accounts
+  {%- if not fraud.cards.coverage %} — <strong>no card-account data yet (pulled with the Sage run)</strong>{% endif %};
+  {% for pat, c in fraud.cards.cards.items() %}{{ pat.title() }}: {{ c.paid | money }} paid,
+  {{ c.purchases }} purchase entries ({{ c.purchase_total | money }}){% if not loop.last %} · {% endif %}{% endfor %}.
+  {% endif %}
 </p>
 {% if fraud.findings %}
 <div class="tablewrap"><table class="runs">

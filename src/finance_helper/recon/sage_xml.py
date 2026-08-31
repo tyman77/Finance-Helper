@@ -386,6 +386,39 @@ def _amount_probe(amount: Decimal, around: date, window_days: int) -> list[dict]
             for row in (data if data is not None else [])]
 
 
+def fetch_account_entries(accounts: list[str], start: date, end: date) -> list[dict]:
+    """Signed GLDETAIL entries for arbitrary accounts (e.g. card liability
+    accounts): debit positive, credit negative — a payment against a card
+    liability is a positive entry, a coded purchase a negative one."""
+    if not accounts:
+        return []
+    acct_q = " OR ".join(f"ACCOUNTNO = '{a}'" for a in accounts)
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLDETAIL")
+        _el(rbq, "fields", "ACCOUNTNO,ENTRY_DATE,TRX_AMOUNT,TR_TYPE,DESCRIPTION")
+        _el(rbq, "query", f"({acct_q}) AND "
+                          f"ENTRY_DATE >= '{start.strftime('%m/%d/%Y')}' AND "
+                          f"ENTRY_DATE <= '{end.strftime('%m/%d/%Y')}'")
+        _el(rbq, "pagesize", _PAGE_SIZE)
+
+    out = []
+    for rec in _read_all(q):
+        posted = _parse_mdy(rec.get("ENTRY_DATE", ""))
+        amt = _dec(rec.get("TRX_AMOUNT") or "")
+        if posted is None or amt is None or amt == 0:
+            continue
+        if (rec.get("TR_TYPE") or "").strip() == "-1":
+            amt = -abs(amt)
+        else:
+            amt = abs(amt)
+        out.append({"account": (rec.get("ACCOUNTNO") or "").strip(),
+                    "date": posted.isoformat(), "amount": str(amt),
+                    "desc": (rec.get("DESCRIPTION") or "").strip()[:80]})
+    return out
+
+
 def annotate_unmatched(bank_txns: list[Txn], limit: int = 40,
                        window_days: int = 10) -> int:
     """For the biggest untied bank debits, ask Sage where (if anywhere) each

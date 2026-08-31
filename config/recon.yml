@@ -39,6 +39,15 @@ entities:
   # Verify them against that entity's own records.
   external: ["TJW"]
 
+cards:
+  # Company credit cards autopaid from checking: bank-descriptor pattern ->
+  # the card's GL liability account. Every autopay debit must be recorded
+  # against its account (Dr liability / Cr cash), and purchases should be
+  # accumulating there when statements are coded.
+  liability_accounts:
+    "WIENS TYSON": "20012"       # Credit Card Liability - Tyson Chase
+    "KOFAHL NICHOLAS": "20013"   # Credit Liability - Nick Chase
+
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
   batch_window_days: 45       # pass 2: GL batch posting can precede the bank
