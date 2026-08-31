@@ -287,10 +287,16 @@ def run_page(run_id):
         po_index=_data_json("sage_pos.json", []),
     )
 
+    from ..recon.settings import recon_config
+    cash_accts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
+    drift = (summary.book_vs_bank_drift(result.bank, result.ledger, cash_accts)
+             if result.ledger else None)
+
     return render_template(
         "cashproof_run.html",
         run_id=run_id,
         fraud=fraud,
+        drift=drift,
         meta=payload.get("meta", {}),
         result=result,
         has_ledger=bool(result.ledger),

@@ -259,3 +259,17 @@ def test_summary_and_tie_stats():
     # Outflows: 16334.56 total; untied only GHOST 750 -> tied 15584.56.
     assert stats["out_total"] == Decimal("16334.56")
     assert stats["out_tied"] == Decimal("15584.56")
+
+
+def test_book_vs_bank_drift_flags_missing_cash_entries():
+    # Bank paid out 175k the books' cash account never recorded.
+    bank_txns = [_txn("bank", 1, 10, "-175000", "paychex payroll"),
+                 _txn("bank", 2, 11, "-500", "acme av supply")]
+    cash = _txn("sage", 1, 11, "-500", "acme av supply")
+    cash.account_ref = "10700"
+    aux = _txn("sage", 2, 11, "250", "clearing noise")
+    aux.account_ref = "10704"                      # excluded from the drift
+    d = summary.book_vs_bank_drift(bank_txns, [cash, aux], {"10700"})
+    assert d["bank_net"] == Decimal("-175500")
+    assert d["ledger_net"] == Decimal("-500")
+    assert d["drift"] == Decimal("175000")         # books look 175k richer

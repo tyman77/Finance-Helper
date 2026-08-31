@@ -124,3 +124,19 @@ def tie_stats(bank: list[Txn]) -> dict:
     return {"out_total": out_total, "out_tied": out_tied,
             "out_intercompany": out_intercompany,
             "tied_pct": pct.quantize(Decimal('0.1'))}
+
+
+def book_vs_bank_drift(bank: list[Txn], ledger: list[Txn],
+                       cash_accounts: set[str]) -> dict:
+    """Net change per the books' cash account vs per the bank statement.
+
+    If entries are missing from the cash GL (e.g. payroll pulls whose JE
+    never credits cash), the book net change runs higher than the bank's by
+    exactly the missing amount — a one-number tell no matching can fake.
+    """
+    bank_net = sum((t.amount for t in bank if not t.pending), Decimal("0"))
+    ledger_net = sum((t.amount for t in ledger
+                      if not cash_accounts or t.account_ref in cash_accounts),
+                     Decimal("0"))
+    return {"bank_net": bank_net, "ledger_net": ledger_net,
+            "drift": ledger_net - bank_net}

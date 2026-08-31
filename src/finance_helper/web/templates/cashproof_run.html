@@ -30,6 +30,15 @@
       <strong>{{ result.integrity['breaks'] | length }} balance breaks</strong>{% endif %}</div></div>
 </div>
 
+{% if drift and (drift.drift > 1000 or drift.drift < -1000) %}
+<div class="flash"><p><strong>Book vs bank drift: {{ drift.drift | money }}.</strong>
+Over this period the books' cash account moved {{ drift.ledger_net | money }} net while the bank
+actually moved {{ drift.bank_net | money }} net. The books think there is
+{% if drift.drift > 0 %}more{% else %}less{% endif %} cash than the bank has — entries for real
+bank movements are missing from (or extra in) the cash GL by exactly this amount. The biggest
+unmatched debits' annotations below say which movements have no cash-side entry.</p></div>
+{% endif %}
+
 {% if result.integrity.get('breaks') %}
 <div class="flash"><p><strong>Balance continuity broken</strong> — the export's day-end balances
 don't reconcile to its own transactions on:

@@ -300,6 +300,72 @@ def _account_titles() -> dict[str, str]:
         return {}
 
 
+def _read_all(first_page_builder) -> list[dict]:
+    records: list[dict] = []
+    root = _post(_request_xml(first_page_builder))
+    for _page in range(_MAX_PAGES):
+        data = root.find(".//result/data")
+        if data is None:
+            break
+        for row in data:
+            records.append({child.tag: (child.text or "") for child in row})
+        remaining = int(data.get("numremaining") or 0)
+        result_id = data.get("resultId")
+        if remaining <= 0 or not result_id:
+            break
+
+        def more(fn, rid=result_id):
+            rm = _el(fn, "readMore")
+            _el(rm, "resultId", rid)
+
+        root = _post(_request_xml(more))
+    return records
+
+
+def _component_match(records: list[dict], amount: Decimal):
+    """Find a posting batch near the date whose debit (or credit) side sums
+    to the bank amount — e.g. a payroll pull recorded as one JE split across
+    COGS Labor / OH Labor. Returns (batch_title, side, [(acct, subtotal)])."""
+    from collections import defaultdict as _dd
+    target = abs(amount)
+    groups: dict[str, list[dict]] = _dd(list)
+    for r in records:
+        key = (r.get("BATCH_TITLE") or "").strip() or \
+              f"{(r.get('JOURNAL') or '?').strip()} {(r.get('ENTRY_DATE') or '').strip()}"
+        groups[key].append(r)
+    for key, rows in groups.items():
+        for side, tr in (("debit", "1"), ("credit", "-1")):
+            tot = Decimal("0")
+            accts: dict[str, Decimal] = _dd(lambda: Decimal("0"))
+            for r in rows:
+                if (r.get("TR_TYPE") or "").strip() != tr:
+                    continue
+                amt = _dec(r.get("TRX_AMOUNT") or "")
+                if amt is None:
+                    continue
+                tot += abs(amt)
+                accts[(r.get("ACCOUNTNO") or "?").strip()] += abs(amt)
+            if tot == target and accts:
+                top = sorted(accts.items(), key=lambda kv: -kv[1])[:4]
+                return key, side, top
+    return None
+
+
+def _batch_component_probe(amount: Decimal, around: date,
+                           window_days: int = 5):
+    from datetime import timedelta
+    lo = (around - timedelta(days=window_days)).strftime("%m/%d/%Y")
+    hi = (around + timedelta(days=window_days)).strftime("%m/%d/%Y")
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLDETAIL")
+        _el(rbq, "fields", "ACCOUNTNO,ENTRY_DATE,TRX_AMOUNT,TR_TYPE,BATCH_TITLE,JOURNAL")
+        _el(rbq, "query", f"ENTRY_DATE >= '{lo}' AND ENTRY_DATE <= '{hi}'")
+        _el(rbq, "pagesize", _PAGE_SIZE)
+    return _component_match(_read_all(q), amount)
+
+
 def _amount_probe(amount: Decimal, around: date, window_days: int) -> list[dict]:
     """GLDETAIL rows anywhere in the chart with this exact absolute amount
     near the date — answers 'where DID Sage record this bank movement?'."""
@@ -334,11 +400,29 @@ def annotate_unmatched(bank_txns: list[Txn], limit: int = 40,
         return 0
     cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
     titles = _account_titles()
+    deep_budget = 12                     # component probes are heavier queries
     for t in targets:
         try:
             rows = _amount_probe(t.amount, t.posted_date, window_days)
         except Exception:
             continue                     # one flaky query must not stop the rest
+        if not rows and deep_budget > 0:
+            # No single line equals it — maybe a JE splits it across accounts
+            # (payroll over COGS Labor / OH Labor). Look for a posting batch
+            # whose debit or credit side sums to the amount.
+            deep_budget -= 1
+            try:
+                hit = _batch_component_probe(t.amount, t.posted_date)
+            except Exception:
+                hit = None
+            if hit:
+                key, side, top = hit
+                frag = ", ".join(f"{no} ({titles.get(no) or '?'}) {amt}"
+                                 for no, amt in top)
+                t.reason += (f" · recorded as a split JE: batch '{key[:60]}' "
+                             f"{side}-side sums to it across {frag} — but no "
+                             "cash-side entry hits the cash account")
+                continue
         if rows:
             seen: dict[str, dict] = {}
             for r in rows:

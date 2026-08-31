@@ -196,3 +196,23 @@ def test_aux_clearing_accounts_join_the_pull(monkeypatch):
     monkeypatch.setenv("SAGE_AUX_ACCOUNTS", "10704")
     q2 = sage_xml._query_string(_d(2026, 6, 1), _d(2026, 6, 30))
     assert "10704" in q2 and "10705" not in q2
+
+
+def test_component_match_finds_split_je_side():
+    from decimal import Decimal as _D
+    recs = [
+        {"BATCH_TITLE": "Payroll JE 2026-03-19", "TR_TYPE": "1",
+         "TRX_AMOUNT": "120000.00", "ACCOUNTNO": "50100"},
+        {"BATCH_TITLE": "Payroll JE 2026-03-19", "TR_TYPE": "1",
+         "TRX_AMOUNT": "55023.08", "ACCOUNTNO": "60100"},
+        {"BATCH_TITLE": "Payroll JE 2026-03-19", "TR_TYPE": "-1",
+         "TRX_AMOUNT": "175023.08", "ACCOUNTNO": "21000"},
+        {"BATCH_TITLE": "Other JE", "TR_TYPE": "1",
+         "TRX_AMOUNT": "99.00", "ACCOUNTNO": "52200"},
+    ]
+    hit = sage_xml._component_match(recs, _D("-175023.08"))
+    assert hit is not None
+    key, side, top = hit
+    assert key == "Payroll JE 2026-03-19" and side == "debit"
+    assert {no for no, _amt in top} == {"50100", "60100"}
+    assert sage_xml._component_match(recs, _D("-999.99")) is None
