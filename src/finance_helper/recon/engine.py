@@ -412,10 +412,21 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
             and (abs((t.posted_date - period_end).days) <= cfg["timing_window_days"]
                  or abs((t.posted_date - period_start).days) <= cfg["timing_window_days"])
         )
+        # A GL batch entry posted within the batch-funding window of the
+        # statement's end CANNOT tie yet — its bank movement likely falls
+        # after the export. Timing, not an exception.
+        recent_batch = (
+            t.source != "bank" and period_end is not None
+            and (period_end - t.posted_date).days <= bw
+            and "batch summary" in t.counterparty_raw.lower()
+        )
         aged = period_end is not None and (period_end - t.posted_date).days > cfg["aged_timing_days"]
-        if near_edge and not aged:
+        if (near_edge or recent_batch) and not aged:
             t.status = "timing"
-            t.reason = "near the period boundary — carried forward; escalates if it never ties"
+            t.reason = ("posted within the batch-funding window of the statement "
+                        "end — its bank movement likely falls after this export"
+                        if recent_batch and not near_edge else
+                        "near the period boundary — carried forward; escalates if it never ties")
         else:
             t.status = "exception"
             t.reason = ("aged: untied for more than "

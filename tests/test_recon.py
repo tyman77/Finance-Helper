@@ -336,3 +336,18 @@ def test_fee_tolerance_rejects_large_shortfalls():
     res = engine.reconcile(bank_txns, ledger)
     assert not res.matches
     assert not any(t.status == "tied" for t in ledger)
+
+
+def test_recent_batch_entries_are_timing_not_exceptions():
+    # Period ends day 28. A batch entry on day 20 can't tie yet (funding lag
+    # up to 45d) -> timing; a plain JE the same day is a real exception.
+    batch = _txn("sage", 1, 20, "-500", "payments bank bnk1 batch summary entry")
+    batch.counterparty_raw = "Payments(Bank-BNK1): 2026/06/20 Batch Summary Entry"
+    batch.account_ref = "10700"
+    plain = _txn("sage", 2, 20, "-777", "mystery vendor je")
+    plain.account_ref = "10700"
+    bank_txns = [_txn("bank", 1, 1, "-1", "x"), _txn("bank", 2, 28, "-2", "y")]
+    engine.reconcile(bank_txns, [batch, plain])
+    assert batch.status == "timing"
+    assert "after this export" in batch.reason
+    assert plain.status == "exception"

@@ -57,4 +57,4 @@ matching:
   fuzzy_window_days: 7        # pass 3: same amount, weak/no name signal
   split_window_days: 5        # pass 4: 2-3 same-name items summing to one debit
   timing_window_days: 5       # residuals this close to the period edge = timing
-  aged_timing_days: 30        # untied and older than this = escalated exception
+  aged_timing_days: 60        # untied and older than this = escalated exception
