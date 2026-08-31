@@ -233,6 +233,30 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
                 f"batch: {len(rows)} ledger lines ({label}) sum to {bt.amount}")
             break
 
+    # 2b' — near-miss batches: a group summing within $1 of a bank movement
+    # is almost always the same money with a rounding/true-up error in the
+    # JE (two owner-distribution entries of 37,224.88 vs a 74,449.36 bank
+    # transfer = 40 cents apart, unexplained on both sides all year).
+    # Surface it as a confirmable tie that names the delta.
+    _TOL = Decimal("1.00")
+    sums_list = [(total, label, rows)
+                 for total, entries in by_sum.items() for label, rows in entries]
+    for bt in matchable_bank:
+        if bt.status != "untied":
+            continue
+        for total, label, rows in sums_list:
+            delta = total - bt.amount
+            if delta == 0 or abs(delta) > _TOL:
+                continue
+            if any(t.status != "untied" for t in rows):
+                continue
+            if not all(_within(bt, t, bw) for t in rows):
+                continue
+            tie(3, [bt], rows,
+                f"near-miss batch: {len(rows)} ledger lines ({label}) sum to "
+                f"{total}, off by {delta} vs {bt.amount} — confirm & true up the JE")
+            break
+
     # 2c — one GL batch = SEVERAL bank movements (a day's deposit batch in
     # the books arrives at the bank as multiple credits). Try 2-4 same-sign
     # untied bank txns near the batch summing to the group total.

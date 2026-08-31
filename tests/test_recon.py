@@ -286,3 +286,22 @@ def test_wide_window_ties_monthly_je_to_standing_transfer():
     (m,) = res.matches
     assert m.match_pass == 3 and not m.confirmed
     assert "wide window" in m.reason
+
+
+def test_near_miss_batch_surfaces_delta_as_confirmable_tie():
+    # Two owner-distribution JEs of 37,224.88 vs one 74,449.36 bank transfer:
+    # 40 cents apart -> confirmable near-miss naming the delta, not two
+    # unexplained exception piles.
+    ledger = []
+    for i in range(2):
+        t = _txn("sage", i, 4, "-37224.88", "record monthly owner pr transfer")
+        t.counterparty_raw = "Record Monthly Owner PR Transfer"
+        t.account_ref = "10700"
+        ledger.append(t)
+    bank_txns = [_txn("bank", 1, 3, "-74449.36", "payroll")]
+    bank_txns[0].counterparty_raw = "PAYROLL SUMMIT ASSEMBLY LLC DEBIT ONLINE TRF"
+    res = engine.reconcile(bank_txns, ledger)
+    (m,) = res.matches
+    assert m.match_pass == 3 and not m.confirmed
+    assert "off by -0.40" in m.reason
+    assert all(t.status == "tied" for t in ledger)
