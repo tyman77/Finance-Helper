@@ -189,9 +189,11 @@ def test_aux_clearing_accounts_join_the_pull(monkeypatch):
          "DESCRIPTION": "Payments(Bank-BNK1): batch", "JOURNAL": "CD"},
         {"RECORDNO": "2", "ACCOUNTNO": "10706", "ENTRY_DATE": "06/10/2026",
          "TRX_AMOUNT": "100.00", "TR_TYPE": "1", "DESCRIPTION": "savings int"},
+        {"RECORDNO": "3", "ACCOUNTNO": "52200", "ENTRY_DATE": "06/10/2026",
+         "TRX_AMOUNT": "5.00", "TR_TYPE": "1", "DESCRIPTION": "expense side"},
     ]
     txns = sage_xml.to_txns(recs, _d(2026, 6, 1), _d(2026, 6, 30))
-    assert [t.account_ref for t in txns] == ["10705"]
+    assert [t.account_ref for t in txns] == ["10705", "10706"]   # 52200 excluded
 
     # SAGE_AUX_ACCOUNTS overrides without a deploy.
     monkeypatch.setenv("SAGE_AUX_ACCOUNTS", "10704")
