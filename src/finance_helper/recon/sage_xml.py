@@ -320,7 +320,7 @@ def _amount_probe(amount: Decimal, around: date, window_days: int) -> list[dict]
             for row in (data if data is not None else [])]
 
 
-def annotate_unmatched(bank_txns: list[Txn], limit: int = 20,
+def annotate_unmatched(bank_txns: list[Txn], limit: int = 40,
                        window_days: int = 10) -> int:
     """For the biggest untied bank debits, ask Sage where (if anywhere) each
     amount was recorded, and append the answer to the exception's reason.
@@ -335,7 +335,10 @@ def annotate_unmatched(bank_txns: list[Txn], limit: int = 20,
     cash_accounts = {str(a) for a in recon_config()["sage"].get("cash_accounts") or []}
     titles = _account_titles()
     for t in targets:
-        rows = _amount_probe(t.amount, t.posted_date, window_days)
+        try:
+            rows = _amount_probe(t.amount, t.posted_date, window_days)
+        except Exception:
+            continue                     # one flaky query must not stop the rest
         if rows:
             seen: dict[str, dict] = {}
             for r in rows:

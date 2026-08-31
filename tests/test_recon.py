@@ -132,6 +132,50 @@ def test_untied_aux_clearing_rows_go_internal_not_exception():
     assert cash.status == "exception"
 
 
+def test_reversal_batch_lines_pair_across_batch_stamps():
+    # Bill.com posts the reversal batch under its own timestamp: raw strings
+    # differ, but each reversal line cancels an original line.
+    orig_raw = "Payments(Bank-BNK1) - E100: 2026/04/10 09:37:16:7172 Batch Summary Entry"
+    rev_raw = "Reversed Payments(Bank-BNK1) - E100: 2026/04/10 09:43:52:1027 Batch Summary Entry"
+    ledger = []
+    for i, a in enumerate(["-100", "-250.50"]):
+        t = _txn("sage", i, 10, a, "payments bank bnk1 e batch summary entry")
+        t.counterparty_raw = orig_raw
+        ledger.append(t)
+    for i, a in enumerate(["100", "250.50"]):
+        t = _txn("sage", 10 + i, 10, a, "reversed payments bank bnk1 e batch summary entry")
+        t.counterparty_raw = rev_raw
+        ledger.append(t)
+    bank_txns = [_txn("bank", 1, 20, "-999", "unrelated")]
+    engine.reconcile(bank_txns, ledger)
+    assert all(t.status == "internal" for t in ledger)
+    assert "reversal" in ledger[0].reason
+
+
+def test_funds_transfer_gl_rows_are_internal():
+    t = _txn("sage", 1, 5, "-250000", "funds transfers bank bnk4 batch summary")
+    bank_txns = [_txn("bank", 1, 20, "-1", "x")]
+    engine.reconcile(bank_txns, [t])
+    assert t.status == "internal"
+    assert "sweep" in t.reason
+
+
+def test_gl_batch_matches_several_bank_deposits():
+    # One day's deposit batch in the books = three separate bank credits.
+    raw = "Deposits(Bank-BNK1): 2026/06/10 Batch Summary Entry"
+    ledger = []
+    for i, a in enumerate(["1000", "2500", "1500"]):
+        t = _txn("sage", i, 10, a, "deposits bank bnk1 batch summary entry")
+        t.counterparty_raw = raw
+        ledger.append(t)
+    bank_txns = [_txn("bank", 1, 11, "3000", "regular deposit"),
+                 _txn("bank", 2, 12, "2000", "regular deposit")]
+    res = engine.reconcile(bank_txns, ledger)
+    m = next(m for m in res.matches if m.match_pass == 2)
+    assert len(m.bank_ids) == 2 and len(m.ledger_ids) == 3
+    assert all(t.status == "tied" for t in ledger)
+
+
 def test_wash_pass_clears_entry_plus_reversal():
     # A voided payment: entry and reversal share the doc, net zero, and no
     # bank movement will ever exist for them.

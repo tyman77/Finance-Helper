@@ -94,6 +94,13 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
             t.status = "intercompany"
             t.reason = (f"names {ext}, whose books are outside Sage — "
                         "verify against that entity's own records")
+        elif "funds transfer" in t.counterparty_norm:
+            # GL mirror of an account-to-account transfer: the bank side is a
+            # sweep (internal), and the sweep statement cross-proof is what
+            # verifies the cash — these rows are bookkeeping, not payments.
+            t.status = "internal"
+            t.reason = ("GL side of an account transfer — the bank side is a "
+                        "sweep; the sweep-statement cross-proof verifies the cash")
 
     matchable_bank = [t for t in posted if t.status == "untied"]
     period_start = min((t.posted_date for t in matchable_bank), default=None)
@@ -155,6 +162,33 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
                 t.reason = ("offsetting ledger batch — entry and reversal net "
                             "to zero; no bank movement expected")
             washed += len(rows)
+    # 2a.2 — reversal pairing: a "Reversed Payments(...)" batch posts under
+    # its OWN timestamp, so raw-string identity can't see that its lines
+    # cancel the original batch's. Pair each reversal line with the nearest
+    # equal-and-opposite original line (same description family, digits
+    # ignored) — both are bookkeeping, no bank movement.
+    pool2 = [lt for lt in ledger if lt.status == "untied"]
+    originals: dict[tuple, list[Txn]] = {}
+    for t in pool2:
+        if not t.counterparty_norm.startswith("reversed"):
+            originals.setdefault((t.counterparty_norm, t.amount), []).append(t)
+    paired = 0
+    for t in pool2:
+        if t.status != "untied" or not t.counterparty_norm.startswith("reversed"):
+            continue
+        base = t.counterparty_norm[len("reversed"):].strip()
+        cands = [o for o in originals.get((base, -t.amount), [])
+                 if o.status == "untied"
+                 and abs((o.posted_date - t.posted_date).days) <= bw]
+        if cands:
+            o = min(cands, key=lambda x: abs((x.posted_date - t.posted_date).days))
+            for x in (t, o):
+                x.status = "internal"
+                x.reason = ("payment line and its reversal — net zero; "
+                            "no bank movement expected")
+            paired += 2
+    if paired:
+        note(f"pass 2a (reversals): {paired} entry+reversal lines cleared")
     if washed:
         note(f"pass 2a (wash): {washed} offsetting ledger lines cleared")
 
@@ -198,6 +232,35 @@ def reconcile(bank: list[Txn], ledger: list[Txn],
             tie(2, [bt], rows,
                 f"batch: {len(rows)} ledger lines ({label}) sum to {bt.amount}")
             break
+
+    # 2c — one GL batch = SEVERAL bank movements (a day's deposit batch in
+    # the books arrives at the bank as multiple credits). Try 2-4 same-sign
+    # untied bank txns near the batch summing to the group total.
+    for label, rows in all_groups:
+        if len(rows) < 2 or any(t.status != "untied" for t in rows):
+            continue
+        total = sum(t.amount for t in rows)
+        if not total:
+            continue
+        lo = min(t.posted_date for t in rows)
+        hi = max(t.posted_date for t in rows)
+        bcands = sorted(
+            (bt for bt in matchable_bank
+             if bt.status == "untied" and (bt.amount > 0) == (total > 0)
+             and (lo - timedelta(days=10)) <= bt.posted_date <= (hi + timedelta(days=10))),
+            key=lambda bt: bt.posted_date)[:40]
+        found = None
+        for n in (2, 3, 4):
+            for combo in combinations(bcands, n):
+                if sum(b.amount for b in combo) == total:
+                    found = list(combo)
+                    break
+            if found:
+                break
+        if found:
+            tie(2, found, rows,
+                f"batch: {len(rows)} ledger lines ({label}) = "
+                f"{len(found)} bank movements summing to {total}")
     note(f"pass 2 (batches): {sum(1 for m in matches if m.match_pass == 2)} tied")
 
     # --- Pass 3: fuzzy (amount-only) ---------------------------------------
