@@ -36,6 +36,8 @@
       {% if 'cashproof' in perms %}
       <a href="{{ url_for('cashproof.landing') }}"
          class="navlink {{ 'active' if ep.startswith('cashproof.') }}">Cash Proof</a>
+      {% endif %}
+      {% if 'billcheck' in perms %}
       <a href="{{ url_for('billcheck.landing') }}"
          class="navlink {{ 'active' if ep.startswith('billcheck.') }}">Bill Check</a>
       {% endif %}

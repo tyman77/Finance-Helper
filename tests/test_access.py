@@ -47,6 +47,7 @@ def test_first_login_bootstraps_admin_once(store):
 
 def test_endpoint_section_mapping():
     assert access.section_for_endpoint("cashproof.run_page") == "cashproof"
+    assert access.section_for_endpoint("billcheck.landing") == "billcheck"
     assert access.section_for_endpoint("admin.users_page") == "admin"
     assert access.section_for_endpoint("domain_page") == "travel"
     assert access.section_for_endpoint("review_page") == "reviews"

@@ -25,6 +25,7 @@ SECTIONS = {
     "travel": "Travel (Flights / Hotels / Rental Cars / All spend)",
     "reviews": "Statement reviews & uploads",
     "cashproof": "Cash Proof & fraud checks",
+    "billcheck": "Bill Check (invoice verification)",
     "admin": "Admin (data connections & user access)",
 }
 
@@ -47,8 +48,10 @@ _ENDPOINT_SECTIONS = {
 def section_for_endpoint(endpoint: str | None) -> str | None:
     if not endpoint:
         return None
-    if endpoint.startswith("cashproof.") or endpoint.startswith("billcheck."):
-        return "cashproof"          # Bill Check is part of the audit toolset
+    if endpoint.startswith("cashproof."):
+        return "cashproof"
+    if endpoint.startswith("billcheck."):
+        return "billcheck"
     if endpoint.startswith("admin."):
         return "admin"
     return _ENDPOINT_SECTIONS.get(endpoint)
