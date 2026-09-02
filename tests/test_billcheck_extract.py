@@ -52,7 +52,7 @@ def test_extract_invoice_calls_parse_with_structured_output(monkeypatch):
     parsed = extract.InvoiceFields(
         is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
         due_date=None, terms="Net 30", terms_days=30, total="10.00",
-        discount_total=None, discount_date=None, discount_terms=None, currency="USD",
+        discount_total=None, discount_date=None, discount_days=None, discount_terms=None, currency="USD",
         po_number=None, confidence="high", notes="")
     client = FakeClient(FakeResp(parsed))
     out = extract.extract_invoice(PDF, client=client)
@@ -96,7 +96,7 @@ def test_grammar_timeout_is_retried(monkeypatch):
     parsed = extract.InvoiceFields(
         is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
         due_date=None, terms=None, terms_days=None, total="10.00",
-        discount_total=None, discount_date=None, discount_terms=None, currency="USD",
+        discount_total=None, discount_date=None, discount_days=None, discount_terms=None, currency="USD",
         po_number=None, confidence="high", notes="")
 
     class Flaky(FakeClient):

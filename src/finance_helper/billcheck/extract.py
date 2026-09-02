@@ -31,7 +31,7 @@ Field rules:
 - due_date: ONLY a date the document explicitly states as due / pay by / payment due. Never compute one from terms.
 - terms: the payment terms exactly as printed (e.g. "Net 30", "Due upon receipt", "2% 10 Net 30"). terms_days: the net days as an integer (0 for due on receipt); null if no terms are printed.
 - total: the full amount due on this invoice, after credits already applied on the document, BEFORE any early-payment discount. Digits with two decimals, no currency symbol or thousands separators, negative for a credit.
-- Early-payment discount (e.g. "2% 10 Net 30", "5% 25 Days", "Quick Pay total … pay by …"): discount_total is the reduced amount payable if paid early, discount_date the last day that reduced amount is accepted (YYYY-MM-DD), discount_terms the offer as printed. All null when no such offer is printed. Never put the discounted amount in total.
+- Early-payment discount (e.g. "2% 10 Net 30", "5% 25 Days", "Quick Pay total … pay by …"): discount_total is the reduced amount payable if paid early, discount_date the last day that reduced amount is accepted (YYYY-MM-DD) if printed, discount_days the number of days from the invoice date the offer allows (e.g. 10 for "2% 10 Net 30"), discount_terms the offer as printed. All null when no such offer is printed. Never put the discounted amount in total.
 - currency: the ISO code if stated or clearly implied, else null.
 - vendor: the business issuing the invoice (the "from"/remit-to party), not the customer being billed.
 - invoice_number: exactly as printed.
@@ -52,6 +52,7 @@ class InvoiceFields(BaseModel):
     total: Optional[str]
     discount_total: Optional[str]
     discount_date: Optional[str]
+    discount_days: Optional[int]
     discount_terms: Optional[str]
     currency: Optional[str]
     po_number: Optional[str]

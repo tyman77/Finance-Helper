@@ -328,12 +328,18 @@ attached invoice (PDF)     ─┘
   plus PO and currency when present. The due date is derived in order of
   trust: printed on the invoice → invoice date + printed terms → invoice date
   + the vendor's terms in Bill.com (review-level only).
+- **Early-pay discounts are always taken.** When the invoice offers one
+  ("2% 10 Net 30", a quick-pay total by a date), the expected entry is the
+  discounted amount with the discount cut-off as the due date; the full
+  amount / net date is a deviation. A cut-off that isn't printed is derived
+  from the invoice date plus the discount days.
 - **Ranking**: *critical* — total differs, entered due date **later** than the
-  invoice's (a late payment waiting to happen), or a duplicate vendor +
-  invoice number (queue and paid history both scanned); *high* — invoice
-  date, early due date, invoice number, vendor; *review* — field not on the
-  PDF, attachment isn't an invoice, PO/currency differences, low-confidence
-  read.
+  invoice's or than the discount cut-off (a late or short payment waiting to
+  happen), or a duplicate vendor + invoice number (queue and paid history
+  both scanned); *high* — invoice date, early due date, invoice number,
+  vendor, full amount entered when a discount was on offer; *review* — field
+  not on the PDF, attachment isn't an invoice, PO/currency differences,
+  low-confidence read.
 - **Cost discipline**: a bill is read once. Unchanged bills are skipped on
   every later run; an edited bill re-compares against its cached read (no
   Claude call); only new bills (or an explicit re-read) cost anything, capped

@@ -202,11 +202,6 @@ def test_discount_taken_with_due_on_cutoff_is_clean():
     assert row["entered"] == "taken" and row["state"] == "match" and "567.58 by 2026-09-19" in row["pdf"]
 
 
-def test_discount_taken_with_due_before_cutoff_is_clean_too():
-    r = compare.compare_bill(_gator_bill(due_date="2026-09-10"), _gator_pdf())
-    assert r["status"] == "match"
-
-
 def test_discount_taken_but_due_after_cutoff_is_critical():
     r = compare.compare_bill(_gator_bill(due_date="2026-09-25"), _gator_pdf())
     f = _by_field(r)["due_date"]
@@ -214,12 +209,45 @@ def test_discount_taken_but_due_after_cutoff_is_critical():
     assert "amount" not in _by_field(r)
 
 
-def test_full_amount_entered_flags_missed_discount_as_review():
+def test_full_amount_and_net_date_entered_is_a_deviation():
+    # House rule: the discount is always taken, so the full amount on the
+    # net date is wrong on both counts.
     r = compare.compare_bill(_gator_bill(amount="597.45", due_date="2026-09-20"), _gator_pdf())
-    assert r["status"] == "review"
-    f = _by_field(r)["discount"]
-    assert "saves 29.87" in f["reason"] and "2026-09-19" in f["reason"]
-    assert "amount" not in _by_field(r) and "due_date" not in _by_field(r)
+    fs = _by_field(r)
+    assert fs["discount"]["severity"] == "high" and "enter 567.58 due 2026-09-19" in fs["discount"]["reason"]
+    assert fs["due_date"]["severity"] == "critical" and "forfeits the discount (29.87)" in fs["due_date"]["reason"]
+    assert "amount" not in fs
+    assert r["expected_due"] == "2026-09-19"
+
+
+def test_due_before_cutoff_is_high():
+    r = compare.compare_bill(_gator_bill(due_date="2026-09-10"), _gator_pdf())
+    f = _by_field(r)["due_date"]
+    assert f["severity"] == "high" and "before the 2026-09-19 early-pay cut-off" in f["reason"]
+
+
+def test_cutoff_derived_from_discount_days_when_not_printed():
+    pdf = _gator_pdf(discount_date=None, discount_days=None, discount_terms="5% 25 Days")
+    r = compare.compare_bill(_gator_bill(due_date="2026-09-19"), pdf)
+    assert r["status"] == "match" and r["expected_due"] == "2026-09-19"
+    assert compare._discount_days("2% 10 Net 30") == 10
+    assert compare._discount_days("2% Discount if paid in 90 days; Net 91.") == 90
+    assert compare._discount_days("Net 30") is None
+
+
+def test_yamaha_case():
+    pdf = _pdf(vendor="Yamaha Corporation Of America", invoice_number="8345744",
+               invoice_date="2026-05-29", due_date="2026-08-28",
+               terms="2% Discount if paid in 90 days; Net 91.", terms_days=91,
+               total="21599.28", discount_total="21167.29", discount_date="2026-08-27",
+               discount_terms="2% Discount if paid in 90 days")
+    bill = _bill(vendor="Yamaha", invoice="8345744", invoice_date="2026-06-01",
+                 due_date="2026-08-30", amount="21167.29", terms="Net 90", terms_days=90)
+    r = compare.compare_bill(bill, pdf)
+    fs = _by_field(r)
+    assert fs["due_date"]["severity"] == "critical" and "short-pays the vendor by 431.99" in fs["due_date"]["reason"]
+    assert fs["invoice_date"]["severity"] == "high"
+    assert r["expected_due"] == "2026-08-27"
 
 
 def test_amount_matching_neither_total_names_both():
