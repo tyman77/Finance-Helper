@@ -49,7 +49,7 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                 documents = fetch_documents(bill["id"])
                 docs_meta = store.save_documents(bill["id"], documents, "billdotcom")
             except Exception as exc:
-                error = f"No attachment could be pulled from Bill.com: {str(exc)[:300]}"
+                error = f"No attachment could be pulled from Bill.com: {str(exc)[:2500]}"
                 outcome = "no_document"
         if documents and error is None:
             try:

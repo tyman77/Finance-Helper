@@ -184,13 +184,18 @@ def _v2_login(http=None) -> tuple[str, str]:
     `http` to keep the cookies the login sets — the image servlet that serves
     attachments authenticates by cookie, not by the sessionId header."""
     dev_key = os.environ["BILLDOTCOM_DEV_KEY"].strip()
-    session = _v2_call("Login.json", {
+    info = _v2_call("Login.json", {
         "devKey": dev_key,
         "userName": os.environ["BILLDOTCOM_USERNAME"].strip(),
         "password": os.environ["BILLDOTCOM_PASSWORD"].strip(),
         "orgId": os.environ["BILLDOTCOM_ORG_ID"].strip(),
-    }, http=http)["sessionId"]
-    return dev_key, session
+    }, http=http) or {}
+    _V2_LOGIN_INFO.clear()
+    _V2_LOGIN_INFO.update({k: v for k, v in info.items() if k != "sessionId"})
+    return dev_key, info["sessionId"]
+
+
+_V2_LOGIN_INFO: dict = {}      # apiEndPoint, orgId, usersId … from the last login
 
 
 def _v2_pages(dev_key: str, session: str, entity: str, filters=None) -> list:
@@ -452,29 +457,53 @@ def _page_snippet(r) -> str:
     return "; ".join(out)
 
 
-def _download_file(url: str, dev_key: str, session: str, http=None) -> tuple[bytes, str, str]:
-    """GET the attachment, trying each way Bill.com might want the session
-    presented — the login's own cookies first (the image servlet is a web
-    endpoint, not an API one), then headers, query string, an explicit
-    sessionId cookie, and a form POST. Only a PDF or image counts. Raises
-    with every attempt's outcome, final URL and page text when none does."""
+def _candidate_urls(url: str, dev_key: str, session: str, page: int) -> list[tuple[str, str]]:
+    """(label, url) variants of the servlet URL Bill.com handed back: the URL
+    as given, with a pageNumber, and with the session in the query — on the
+    API host, then the host the login reported, then the web-app host."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    base_q = dict(parse_qsl(parts.query, keep_blank_values=True))
+    hosts: list[str] = []
+
+    def add(host):
+        host = (host or "").strip()
+        if host and host not in hosts:
+            hosts.append(host)
+
+    add(parts.netloc)
+    add(urlsplit(str(_V2_LOGIN_INFO.get("apiEndPoint") or "")).netloc)
+    for extra in (os.environ.get("BILLDOTCOM_FILE_HOSTS") or "app.bill.com").split(","):
+        add(extra)
+    out = []
+    for host in hosts:
+        for label, params in (("as given", {}),
+                              ("pageNumber", {"pageNumber": page}),
+                              ("pageNumber+session", {"pageNumber": page, "sessionId": session,
+                                                      "devKey": dev_key})):
+            q = {**base_q, **{k: str(v) for k, v in params.items()}}
+            out.append((f"{host} {label}",
+                        urlunsplit((parts.scheme or "https", host, parts.path, urlencode(q), ""))))
+    return out
+
+
+def _download_file(url: str, dev_key: str, session: str, http=None, page: int = 1) -> tuple[bytes, str, str]:
+    """GET the attachment, trying each URL variant with the login's cookies
+    forced onto the request (whatever host it goes to) plus the session
+    headers. Only a PDF or image counts. Raises with every attempt's outcome
+    and the page's visible text when none does."""
     import requests
 
     http = http or requests.Session()
-    headers = {"devKey": dev_key, "sessionId": session}
-    creds = {"devKey": dev_key, "sessionId": session}
-    jar = {c.name for c in http.cookies}
-    attempts = (
-        ("GET with login cookies", lambda: http.get(url, timeout=60)),
-        ("GET with session headers", lambda: http.get(url, headers=headers, timeout=60)),
-        ("GET with session in query", lambda: http.get(url, params=creds, headers=headers, timeout=60)),
-        ("GET with sessionId cookie", lambda: http.get(url, cookies=creds, timeout=60)),
-        ("POST with session form", lambda: http.post(url, data=creds, headers=headers, timeout=60)),
-    )
-    tried = [f"login cookies held: {', '.join(sorted(jar)) or 'none'}"]
-    for label, call in attempts:
+    cookies = {c.name: c.value for c in http.cookies}
+    headers = {"devKey": dev_key, "sessionId": session,
+               "Accept": "application/pdf,image/*;q=0.9,*/*;q=0.1"}
+    tried = [f"login cookies held: {', '.join(sorted(cookies)) or 'none'}"
+             + (f"; apiEndPoint: {_V2_LOGIN_INFO['apiEndPoint']}" if _V2_LOGIN_INFO.get("apiEndPoint") else "")]
+    for label, candidate in _candidate_urls(url, dev_key, session, page):
         try:
-            r = call()
+            r = http.get(candidate, headers=headers, cookies=cookies, timeout=60)
         except requests.exceptions.RequestException as exc:
             tried.append(f"{label}: {type(exc).__name__}: {str(exc)[:120]}")
             continue
@@ -486,8 +515,8 @@ def _download_file(url: str, dev_key: str, session: str, http=None) -> tuple[byt
             return r.content, media, (m.group(1).strip() if m else "")
         landed = ""
         final = getattr(r, "url", "") or ""
-        if final and _redact_url(final) != _redact_url(url):
-            landed = f" (landed on {_redact_url(final)[:160]} after {len(getattr(r, 'history', []) or [])} redirects)"
+        if final and _redact_url(final) != _redact_url(candidate):
+            landed = f" (landed on {_redact_url(final)[:160]})"
         detail = _page_snippet(r) if media.startswith("text/") else f"{len(r.content)} bytes"
         tried.append(f"{label}: HTTP {r.status_code} {media}{landed} — {detail}")
     raise RuntimeError("Attachment download returned no PDF/image from "
@@ -522,7 +551,7 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
             raise RuntimeError("Bill.com returned no file URL for the attachment on "
                                f"bill {bill_id}:\n" + _json.dumps(resp, default=str)[:400])
         url = absolute_file_url(url)
-        content, media, filename = _download_file(url, dev_key, session, http)
+        content, media, filename = _download_file(url, dev_key, session, http, page)
         docs.append({"name": str(info.get("name") or info.get("fileName")
                                  or filename or f"page-{page}"),
                      "media_type": media, "data": content})

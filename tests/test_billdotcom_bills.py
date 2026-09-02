@@ -79,7 +79,7 @@ def test_fetch_bill_documents_pdf_stops_after_first_page(fake_v2, monkeypatch):
     docs = api.fetch_bill_documents("b1")
     assert len(docs) == 1 and docs[0]["media_type"] == "application/pdf"
     assert docs[0]["name"] == "invoice.pdf" and docs[0]["data"].startswith(b"%PDF")
-    assert got[0][1] is None                      # first try: login cookies alone
+    assert got[0][1]["sessionId"] == "sess" and "Accept" in got[0][1]
 
 
 def test_fetch_bill_documents_images_walk_every_page(fake_v2, monkeypatch):
@@ -151,8 +151,8 @@ def test_download_falls_back_to_query_credentials(fake_v2, monkeypatch):
     calls = []
 
     def get(self, url, **kw):
-        calls.append(("GET", url, kw.get("params")))
-        if kw.get("params"):
+        calls.append(("GET", url, kw.get("cookies")))
+        if "sessionId=sess" in url and "pageNumber=1" in url:
             return _Resp(b"%PDF-1.4 ok", "application/pdf",
                          disp='attachment; filename="invoice 36397.pdf"')
         return _Resp(b"<html><title>Sign in to Bill.com</title></html>", "text/html")
@@ -162,7 +162,11 @@ def test_download_falls_back_to_query_credentials(fake_v2, monkeypatch):
     docs = api.fetch_bill_documents("b1")
     assert docs[0]["media_type"] == "application/pdf"
     assert docs[0]["name"] == "invoice.pdf"          # GetDocumentPages name wins
-    assert calls[2][2] == {"devKey": "key", "sessionId": "sess"}   # cookies, headers, then query
+    assert [c[1] for c in calls] == [
+        "https://files.test/1",
+        "https://files.test/1?pageNumber=1",
+        "https://files.test/1?pageNumber=1&sessionId=sess&devKey=key",
+    ]
 
 
 def test_download_reports_every_attempt_when_all_return_html(fake_v2, monkeypatch):
@@ -175,11 +179,30 @@ def test_download_reports_every_attempt_when_all_return_html(fake_v2, monkeypatc
         api.fetch_bill_documents("b1")
     msg = str(exc.value)
     assert "no PDF/image from https://files.test/1" in msg
-    assert msg.count("text/html") == 5 and "Bill.com - Login" in msg
-    assert "login cookies held: none" in msg
-    assert "POST with session form" in msg
+    assert "Bill.com - Login" in msg and "login cookies held: none" in msg
+    # every host x variant is reported: given host, then app.bill.com
+    assert "files.test as given" in msg and "files.test pageNumber+session" in msg
+    assert "app.bill.com as given" in msg and msg.count("text/html") == 6
 
 
 def test_redact_url_hides_session():
     out = api._redact_url("https://api.bill.com/x?sessionId=abc123&devKey=k9&id=1")
     assert "abc123" not in out and "k9" not in out and "id=1" in out
+
+
+def test_candidate_urls_use_login_endpoint_host(monkeypatch):
+    monkeypatch.delenv("BILLDOTCOM_FILE_HOSTS", raising=False)
+    api._V2_LOGIN_INFO.clear()
+    api._V2_LOGIN_INFO["apiEndPoint"] = "https://api-app02.us.bill.com/api/v2"
+    try:
+        urls = api._candidate_urls("https://api.bill.com/is/BillImageServlet?entityId=X", "k", "s", 2)
+    finally:
+        api._V2_LOGIN_INFO.clear()
+    hosts = []
+    for label, _ in urls:
+        h = label.split()[0]
+        if h not in hosts:
+            hosts.append(h)
+    assert hosts == ["api.bill.com", "api-app02.us.bill.com", "app.bill.com"]
+    assert urls[1][1] == "https://api.bill.com/is/BillImageServlet?entityId=X&pageNumber=2"
+    assert urls[2][1].endswith("entityId=X&pageNumber=2&sessionId=s&devKey=k")
