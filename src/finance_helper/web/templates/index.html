@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Scout — Upload{% endblock %}
 {% block content %}
+{% if 'reviews' not in perms %}
+<h1>Scout</h1>
+<p class="subtle" style="max-width:60ch">Welcome{{ ' ' + session.get('email', '') }}. Use the
+navigation above to open the sections you have access to. If something you need is missing,
+ask an admin to grant it (Admin → Users).</p>
+{% else %}
 <h1>Process a vendor statement</h1>
 <p class="subtle">Upload a CSV, review the proposed coding, then approve. Nothing
 posts anywhere until you click Approve &amp; Post — and that will refuse to run
@@ -59,5 +65,6 @@ tab and come back to any of them later, even after the server restarts.</p>
     {% endfor %}
   </tbody>
 </table>
+{% endif %}
 {% endif %}
 {% endblock %}
