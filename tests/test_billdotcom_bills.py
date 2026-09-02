@@ -106,3 +106,32 @@ def test_sniff_media_type():
     assert api.sniff_media_type(b"\xff\xd8\xff\xe0") == "image/jpeg"
     assert api.sniff_media_type(b"????", "image/tiff; charset=x") == "image/tiff"
     assert api.sniff_media_type(b"????") == "application/octet-stream"
+
+
+def test_absolute_file_url_resolves_relative_paths(monkeypatch):
+    monkeypatch.delenv("BILLDOTCOM_V2_URL", raising=False)
+    monkeypatch.delenv("BILLDOTCOM_FILE_BASE_URL", raising=False)
+    assert api.absolute_file_url("https://x.test/a.pdf") == "https://x.test/a.pdf"
+    assert api.absolute_file_url("/api/v2/GetDocumentPages?id=1") == \
+        "https://api.bill.com/api/v2/GetDocumentPages?id=1"
+    assert api.absolute_file_url("//files.bill.com/a.pdf") == "https://files.bill.com/a.pdf"
+    assert api.absolute_file_url("Doc/page1.png") == "https://api.bill.com/api/v2/Doc/page1.png"
+    monkeypatch.setenv("BILLDOTCOM_FILE_BASE_URL", "https://app.bill.com")
+    assert api.absolute_file_url("/attachment/9") == "https://app.bill.com/attachment/9"
+
+
+def test_fetch_bill_documents_makes_relative_url_absolute(fake_v2, monkeypatch):
+    import requests
+
+    monkeypatch.setattr(api, "_v2_call", lambda path, data: {
+        "documentPages": {"fileUrl": "/api/v2/GetDocumentPages?x=1", "numPages": 1}})
+
+    class R:
+        status_code, text = 200, ""
+        content = b"%PDF-1.5 x"
+        headers = {"Content-Type": "application/pdf"}
+
+    seen = []
+    monkeypatch.setattr(requests, "get", lambda url, **kw: (seen.append(url) or R()))
+    api.fetch_bill_documents("b1")
+    assert seen == ["https://api.bill.com/api/v2/GetDocumentPages?x=1"]

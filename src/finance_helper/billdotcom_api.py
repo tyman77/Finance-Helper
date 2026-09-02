@@ -412,6 +412,24 @@ def sniff_media_type(data: bytes, header: str = "") -> str:
     return mime or "application/octet-stream"
 
 
+def absolute_file_url(url: str) -> str:
+    """Bill.com hands back attachment URLs relative to its API host (e.g.
+    "/api/v2/GetDocumentPages?..."); make them fetchable. Override the host
+    with BILLDOTCOM_FILE_BASE_URL if the files live elsewhere."""
+    from urllib.parse import urljoin, urlsplit
+
+    url = str(url or "").strip()
+    if urlsplit(url).scheme:
+        return url
+    base = (os.environ.get("BILLDOTCOM_FILE_BASE_URL") or _v2_base()).rstrip("/")
+    parts = urlsplit(base)
+    if url.startswith("//"):
+        return f"{parts.scheme}:{url}"
+    if url.startswith("/"):
+        return f"{parts.scheme}://{parts.netloc}{url}"
+    return urljoin(base + "/", url)
+
+
 def fetch_bill_documents(bill_id: str) -> list[dict]:
     """The attachment(s) on a bill as [{name, media_type, data}].
 
@@ -438,13 +456,16 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
         if not url:
             raise RuntimeError("Bill.com returned no file URL for the attachment on "
                                f"bill {bill_id}:\n" + _json.dumps(resp, default=str)[:400])
+        url = absolute_file_url(url)
         try:
             r = requests.get(url, headers={"devKey": dev_key, "sessionId": session},
                              timeout=60)
         except requests.exceptions.RequestException as exc:
-            raise RuntimeError(f"Attachment download failed: {type(exc).__name__}: {exc}") from exc
+            raise RuntimeError(f"Attachment download failed ({url[:160]}): "
+                               f"{type(exc).__name__}: {exc}") from exc
         if r.status_code != 200 or not r.content:
-            raise RuntimeError(f"Attachment download failed: HTTP {r.status_code}\n{r.text[:300]}")
+            raise RuntimeError(f"Attachment download failed ({url[:160]}): "
+                               f"HTTP {r.status_code}\n{r.text[:300]}")
         media = sniff_media_type(r.content, r.headers.get("Content-Type", ""))
         docs.append({"name": str(info.get("name") or info.get("fileName") or f"page-{page}"),
                      "media_type": media, "data": r.content})
