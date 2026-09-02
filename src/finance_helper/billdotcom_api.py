@@ -179,10 +179,8 @@ def _v2_call(path: str, data: dict) -> dict:
     return js.get("response_data")
 
 
-def _v2_session():
-    """(pages, vendors_by_id) — one login shared across entity listings."""
-    import json as _json
-
+def _v2_login() -> tuple[str, str]:
+    """(devKey, sessionId) for the classic API."""
     dev_key = os.environ["BILLDOTCOM_DEV_KEY"].strip()
     session = _v2_call("Login.json", {
         "devKey": dev_key,
@@ -190,19 +188,34 @@ def _v2_session():
         "password": os.environ["BILLDOTCOM_PASSWORD"].strip(),
         "orgId": os.environ["BILLDOTCOM_ORG_ID"].strip(),
     })["sessionId"]
+    return dev_key, session
 
-    def pages(entity):
-        out, start = [], 0
-        for _ in range(100):
-            batch = _v2_call(f"List/{entity}.json", {
-                "devKey": dev_key, "sessionId": session,
-                "data": _json.dumps({"start": start, "max": 999}),
-            }) or []
-            out.extend(batch)
-            if len(batch) < 999:
-                break
-            start += 999
-        return out
+
+def _v2_pages(dev_key: str, session: str, entity: str, filters=None) -> list:
+    import json as _json
+
+    out, start = [], 0
+    for _ in range(100):
+        data = {"start": start, "max": 999}
+        if filters:
+            data["filters"] = filters
+        batch = _v2_call(f"List/{entity}.json", {
+            "devKey": dev_key, "sessionId": session,
+            "data": _json.dumps(data),
+        }) or []
+        out.extend(batch)
+        if len(batch) < 999:
+            break
+        start += 999
+    return out
+
+
+def _v2_session():
+    """pages(entity) — one login shared across entity listings."""
+    dev_key, session = _v2_login()
+
+    def pages(entity, filters=None):
+        return _v2_pages(dev_key, session, entity, filters)
 
     return pages
 
@@ -299,3 +312,147 @@ def fetch_index() -> list[dict]:
                 "If both say the developer key is invalid, the key is sandbox-only: "
                 "request PRODUCTION API access for your org at developer.bill.com "
                 "(or via Bill.com support), then update BILLDOTCOM_DEV_KEY.") from v2_err
+
+
+# --- Bill Check: open bills + their attachments ------------------------------
+# The AP review pulls every unpaid bill (what the clerk entered) and the
+# invoice attached to it (what the vendor actually sent), so the two can be
+# compared field by field. Same first-pass conventions as above: v2 entity
+# names/fields are best effort, the document-pages path is env-overridable
+# (BILLDOTCOM_DOC_PAGES_PATH), and failures carry the raw response.
+
+_APPROVAL_STATUS = {"0": "unassigned", "1": "assigned", "3": "approving",
+                    "4": "approved", "5": "denied"}
+_PAYMENT_STATUS = {"0": "paid", "1": "open", "2": "partially paid",
+                   "4": "scheduled"}
+
+
+def _iso_day(value) -> str:
+    return str(value or "")[:10]
+
+
+def _money_str(value) -> str:
+    try:
+        return f"{float(str(value).replace(',', '')):.2f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _normalize_bill(b: dict, vendor: dict, term: dict) -> dict:
+    days = term.get("dueDays")
+    try:
+        terms_days = int(days) if days not in (None, "") else None
+    except (TypeError, ValueError):
+        terms_days = None
+    return {
+        "id": str(b.get("id") or ""),
+        "vendor": str(vendor.get("name") or "").strip(),
+        "vendor_id": str(b.get("vendorId") or ""),
+        "invoice": str(b.get("invoiceNumber") or "").strip(),
+        "invoice_date": _iso_day(b.get("invoiceDate")),
+        "due_date": _iso_day(b.get("dueDate")),
+        "amount": _money_str(b.get("amount")),
+        "terms": str(term.get("name") or "").strip(),
+        "terms_days": terms_days,
+        "approval_status": _APPROVAL_STATUS.get(str(b.get("approvalStatus")), str(b.get("approvalStatus") or "")),
+        "payment_status": _PAYMENT_STATUS.get(str(b.get("paymentStatus")), str(b.get("paymentStatus") or "")),
+        "description": str(b.get("description") or "").strip(),
+        "po": str(b.get("poNumber") or "").strip(),
+        "created": _iso_day(b.get("createdTime")),
+        "updated": _iso_day(b.get("updatedTime")),
+    }
+
+
+def fetch_open_bills() -> list[dict]:
+    """Every active, not-yet-paid bill with the fields Bill Check compares.
+
+    Payment terms come from the bill's term when it has one, else the
+    vendor's default term — that is what Bill.com used to propose the due
+    date the clerk confirmed.
+    """
+    if not credentials_present():
+        raise RuntimeError("Bill.com credentials missing: set "
+                           + ", ".join(_REQUIRED) + " (see .env.example).")
+    dev_key, session = _v2_login()
+
+    def pages(entity, filters=None):
+        return _v2_pages(dev_key, session, entity, filters)
+
+    vendors = {v.get("id"): v for v in pages("Vendor")}
+    try:
+        terms = {t.get("id"): t for t in pages("PaymentTerm")}
+    except RuntimeError:
+        terms = {}
+    out = []
+    for b in pages("Bill", [{"field": "isActive", "op": "=", "value": "1"}]):
+        if str(b.get("isActive") or "1") != "1":
+            continue
+        if str(b.get("paymentStatus") or "") == "0":      # paid in full
+            continue
+        vendor = vendors.get(b.get("vendorId")) or {}
+        term = (terms.get(b.get("paymentTermId"))
+                or terms.get(vendor.get("paymentTermId")) or {})
+        out.append(_normalize_bill(b, vendor, term))
+    return out
+
+
+def sniff_media_type(data: bytes, header: str = "") -> str:
+    head = data[:12]
+    if head.startswith(b"%PDF"):
+        return "application/pdf"
+    if head.startswith(b"\x89PNG"):
+        return "image/png"
+    if head.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if head.startswith(b"GIF8"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    mime = (header or "").split(";")[0].strip().lower()
+    return mime or "application/octet-stream"
+
+
+def fetch_bill_documents(bill_id: str) -> list[dict]:
+    """The attachment(s) on a bill as [{name, media_type, data}].
+
+    Uses the classic GetDocumentPages call: page 1 tells us how many pages
+    there are and where the file is; a PDF comes back whole, an image-backed
+    attachment one page at a time. Raises with the raw response when the org
+    has no attachment on the bill (or the path is different for this org).
+    """
+    import json as _json
+    import requests
+
+    dev_key, session = _v2_login()
+    path = os.environ.get("BILLDOTCOM_DOC_PAGES_PATH") or "GetDocumentPages.json"
+    docs: list[dict] = []
+    page = 1
+    for _ in range(60):
+        resp = _v2_call(path, {
+            "devKey": dev_key, "sessionId": session,
+            "data": _json.dumps({"id": bill_id, "pageNumber": page}),
+        }) or {}
+        info = resp.get("documentPages") if isinstance(resp, dict) else None
+        info = info if isinstance(info, dict) else (resp if isinstance(resp, dict) else {})
+        url = info.get("fileUrl") or info.get("url") or info.get("downloadUrl")
+        if not url:
+            raise RuntimeError("Bill.com returned no file URL for the attachment on "
+                               f"bill {bill_id}:\n" + _json.dumps(resp, default=str)[:400])
+        try:
+            r = requests.get(url, headers={"devKey": dev_key, "sessionId": session},
+                             timeout=60)
+        except requests.exceptions.RequestException as exc:
+            raise RuntimeError(f"Attachment download failed: {type(exc).__name__}: {exc}") from exc
+        if r.status_code != 200 or not r.content:
+            raise RuntimeError(f"Attachment download failed: HTTP {r.status_code}\n{r.text[:300]}")
+        media = sniff_media_type(r.content, r.headers.get("Content-Type", ""))
+        docs.append({"name": str(info.get("name") or info.get("fileName") or f"page-{page}"),
+                     "media_type": media, "data": r.content})
+        try:
+            num_pages = int(info.get("numPages") or 1)
+        except (TypeError, ValueError):
+            num_pages = 1
+        if media == "application/pdf" or page >= num_pages:
+            break
+        page += 1
+    return docs

@@ -310,12 +310,56 @@ GL accounts are cash, matching windows, and bank-specific noise words. See the
 Cash Proof design doc for the full phasing (Ramp depth, Bill.com duplicates,
 vendor integrity, payroll).
 
+## Bill Check (AP entry review)
+
+The **Bill Check** page answers one question for every unpaid bill in Bill.com:
+*does the invoice PDF say what the clerk entered?* Bill.com's auto-capture gets
+the due date wrong often enough that payments go out on the wrong day; this
+catches it before the payment is scheduled.
+
+```
+open bills (Bill.com API)  ─┐
+                            ├─ compare field by field ─► queue (critical/high/review)
+attached invoice (PDF)     ─┘
+      └─ read by Claude, blind to the entered values (no anchoring)
+```
+
+- **Fields compared**: vendor, invoice number, invoice date, due date, total,
+  plus PO and currency when present. The due date is derived in order of
+  trust: printed on the invoice → invoice date + printed terms → invoice date
+  + the vendor's terms in Bill.com (review-level only).
+- **Ranking**: *critical* — total differs, entered due date **later** than the
+  invoice's (a late payment waiting to happen), or a duplicate vendor +
+  invoice number (queue and paid history both scanned); *high* — invoice
+  date, early due date, invoice number, vendor; *review* — field not on the
+  PDF, attachment isn't an invoice, PO/currency differences, low-confidence
+  read.
+- **Cost discipline**: a bill is read once. Unchanged bills are skipped on
+  every later run; an edited bill re-compares against its cached read (no
+  Claude call); only new bills (or an explicit re-read) cost anything, capped
+  per run (`BILLCHECK_MAX_READS_PER_RUN`, default 200).
+- **Workflow**: nothing is written to Bill.com. Open a queue item to see the
+  entry next to the PDF, fix it in Bill.com, mark it *Fixed* (or *Accept* with
+  a note, or *Investigating*); the next run re-verifies the corrected entry
+  and keeps the earlier decision in the bill's history. Every disposition is
+  appended to `out/billcheck/audit.jsonl`.
+- **When the attachment can't be pulled**: the bill shows *no attachment* with
+  Bill.com's raw reply; upload the PDF on the bill page and it is read and
+  compared on the spot. Bills paid or deleted in Bill.com drop out of the
+  queue on the next run.
+
+Needs `BILLDOTCOM_*` credentials (production-enabled developer key; the
+classic v2 API is used) and `ANTHROPIC_API_KEY`. Model and read effort are
+env-overridable (`BILLCHECK_MODEL`, default `claude-opus-5`; `BILLCHECK_EFFORT`,
+default `medium`).
+
 ## Configuration
 
 - `config/sources.yml` — per-source CSV column mapping + destination.
 - `config/categories.yml` — categorization rules (keyword → GL account / category).
 - `config/recon.yml` — Cash Proof: Sage GL mapping, cash accounts, matching windows.
-- `.env` — API credentials (copy from `.env.example`). Never commit this.
+- `.env` — API credentials (copy from `.env.example`), including `ANTHROPIC_API_KEY`
+  for Bill Check. Never commit this.
 
 ## Status
 

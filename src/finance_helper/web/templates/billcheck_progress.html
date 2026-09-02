@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Bill Check — running{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="3">{% endblock %}
+{% block content %}
+<h1>Bill Check <span class="status-pill status-unknown">running</span></h1>
+<p class="subtle" style="max-width:60ch">Pulling open bills and reading their attachments — this page
+refreshes itself every few seconds and returns to the queue when the run finishes. Each new
+attachment takes a few seconds to read; it's safe to leave this page open.</p>
+
+<ul style="list-style:none;padding:0;max-width:70ch">
+  {% for stage in job.stages %}
+  <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.06)">
+    {% if loop.last %}<span aria-hidden="true">⏳</span>{% else %}<span aria-hidden="true" style="opacity:.7">✓</span>{% endif %}
+    {{ stage }}
+  </li>
+  {% endfor %}
+</ul>
+<p class="subtle">Started {{ job.started.replace('T', ' ') }}</p>
+{% endblock %}

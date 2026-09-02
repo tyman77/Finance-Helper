@@ -33,6 +33,8 @@
         <span class="navdot s2"></span>Rental Cars</a>
       <a href="{{ url_for('cashproof.landing') }}"
          class="navlink {{ 'active' if ep.startswith('cashproof.') }}">Cash Proof</a>
+      <a href="{{ url_for('billcheck.landing') }}"
+         class="navlink {{ 'active' if ep.startswith('billcheck.') }}">Bill Check</a>
     </nav>
     <span class="topbar-right">
       <a href="{{ url_for('insights_page') }}" class="logout-link {{ 'active' if ep == 'insights_page' }}">All spend</a>

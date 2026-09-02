@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% set b = r.bill or {} %}{% set c = r.comparison or {} %}{% set ex = r.extracted or {} %}
+{% block title %}{{ b.vendor }} #{{ b.invoice }} — Bill Check{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('billcheck.landing') }}">← Bill Check</a></p>
+<h1>{{ b.vendor or 'Unknown vendor' }} <span class="subtle">· #{{ b.invoice or '—' }}</span>
+  {% if r.status == 'match' %}<span class="status-pill status-auto">clean</span>
+  {% elif r.status == 'no_document' %}<span class="status-pill status-review">no attachment</span>
+  {% elif r.status == 'error' %}<span class="status-pill status-review">read error</span>
+  {% elif r.severity == 'critical' %}<span class="status-pill status-unknown">critical</span>
+  {% elif r.severity == 'high' %}<span class="status-pill status-pick">high</span>
+  {% else %}<span class="status-pill status-review">review</span>{% endif %}</h1>
+<p class="subtle">{% if b.amount %}{{ b.amount | money }} · {% endif %}entered due {{ b.due_date or '—' }}
+  · {{ b.approval_status or '?' }} / {{ b.payment_status or '?' }}
+  {% if b.description %} · {{ b.description | truncate(80, True) }}{% endif %}
+  · checked {{ (r.checked_at or '')[:16].replace('T', ' ') }} · Bill.com id {{ bill_id }}</p>
+
+<div class="panel-grid">
+<div>
+  {% if r.error %}<div class="flash"><p>{{ r.error }}</p></div>{% endif %}
+
+  {% if c %}
+  <h2>Findings</h2>
+  {% if c.findings %}
+  <ul>
+    {% for f in c.findings %}
+    <li>{% if f.severity == 'critical' %}<span class="status-pill status-unknown">critical</span>
+        {% elif f.severity == 'high' %}<span class="status-pill status-pick">high</span>
+        {% else %}<span class="status-pill status-review">review</span>{% endif %}
+        {{ f.reason }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}<p>Everything on the invoice matches the entry.</p>{% endif %}
+
+  <h2>Entered vs invoice</h2>
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Field</th><th>Entered in Bill.com</th><th>On the invoice</th><th></th></tr></thead>
+    <tbody>
+    {% for row in c.fields %}
+    <tr>
+      <td>{{ row.label }}</td>
+      <td>{{ row.entered or '—' }}</td>
+      <td>{{ row.pdf or '—' }}</td>
+      <td>{% if row.state == 'match' %}<span class="status-pill status-auto">✓</span>
+          {% elif row.state == 'mismatch' %}<span class="status-pill status-unknown">≠</span>
+          {% elif row.state == 'review' %}<span class="status-pill status-review">?</span>
+          {% else %}<span class="status-pill neutral">n/a</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if c.expected_due %}
+  <p class="subtle">Due date should be <strong>{{ c.expected_due }}</strong>, per {{ c.expected_due_basis }}.</p>
+  {% endif %}
+  {% if ex.notes %}<p class="subtle">Reader's notes: {{ ex.notes }}</p>{% endif %}
+  {% if ex.confidence %}<p class="subtle">Read confidence: {{ ex.confidence }}{% if ex.model %} · {{ ex.model }}{% endif %}</p>{% endif %}
+  {% endif %}
+
+  {% if r.duplicates %}
+  <div class="flash"><p><strong>Possible duplicate.</strong> Same vendor and invoice number as:
+    {% for d in r.duplicates %}{{ d }}{% if not loop.last %}; {% endif %}{% endfor %}</p></div>
+  {% endif %}
+
+  <h2>Disposition</h2>
+  {% if r.disposition %}
+    {% set d = r.disposition %}
+    <p><span class="status-pill neutral">{{ d.action }}</span>
+      <span class="subtle">{{ d.who }} · {{ d.when[:16].replace('T', ' ') }}{% if d.note %} — {{ d.note }}{% endif %}</span></p>
+    {% if d.action == 'fixed' %}<p class="subtle">The next run re-verifies the corrected entry against the invoice.</p>{% endif %}
+  {% elif r.status == 'match' %}
+    <p class="subtle">Nothing to do — the invoice matches.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('billcheck.disposition', bill_id=bill_id) }}" class="dispo">
+    <select name="action">
+      <option value="fixed">Fixed in Bill.com</option>
+      <option value="accept">Accept as entered (note why)</option>
+      <option value="investigate">Investigating</option>
+    </select>
+    <input type="text" name="note" placeholder="why / what was done" size="28">
+    <button type="submit">Save</button>
+  </form>
+  {% endif %}
+  {% if r.history %}
+  <details><summary class="subtle" style="cursor:pointer">Earlier decisions ({{ r.history | length }})</summary>
+    <ul>{% for h in r.history %}
+      <li class="subtle">{{ h.action }} · {{ h.who }} · {{ (h.when or '')[:16].replace('T', ' ') }}{% if h.note %} — {{ h.note }}{% endif %}
+        {% if h.bill %}(entered then: due {{ h.bill.due_date }}, {{ h.bill.amount }}){% endif %}</li>
+    {% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  <h2>Attachment</h2>
+  <form method="post" action="{{ url_for('billcheck.upload', bill_id=bill_id) }}"
+        enctype="multipart/form-data" class="dispo">
+    <input type="file" name="attachment" accept=".pdf,image/*">
+    <button type="submit">Read this file instead</button>
+    <span class="subtle">for a bill whose attachment can't be pulled from Bill.com</span>
+  </form>
+  <form method="post" action="{{ url_for('billcheck.recheck', bill_id=bill_id) }}" class="dispo" style="margin-top:.5rem">
+    <button type="submit" {% if not ready.billdotcom or not ready.claude %}disabled{% endif %}>Re-read from Bill.com</button>
+    <span class="subtle">pulls the attachment again and re-compares</span>
+  </form>
+</div>
+
+<div>
+  {% if r.documents %}
+    {% for d in r.documents %}
+      {% if d.media_type == 'application/pdf' %}
+      <iframe src="{{ url_for('billcheck.document', bill_id=bill_id, i=loop.index0) }}" title="{{ d.name }}"
+              style="width:100%;height:82vh;border:1px solid var(--border);border-radius:var(--radius);background:#fff"></iframe>
+      {% else %}
+      <img src="{{ url_for('billcheck.document', bill_id=bill_id, i=loop.index0) }}" alt="{{ d.name }}"
+           style="width:100%;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
+      {% endif %}
+    {% endfor %}
+    <p class="subtle">{{ r.documents | length }} file{{ 's' if r.documents | length != 1 }} ·
+      {{ r.documents[0].source }}{% if r.documents[0].name %} · {{ r.documents[0].name }}{% endif %}</p>
+  {% else %}
+    <p class="subtle">No attachment stored for this bill.</p>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Bill Check — Scout{% endblock %}
+{% macro sev_pill(sev) -%}
+  {%- if sev == 'critical' %}<span class="status-pill status-unknown">critical</span>
+  {%- elif sev == 'high' %}<span class="status-pill status-pick">high</span>
+  {%- elif sev == 'review' %}<span class="status-pill status-review">review</span>
+  {%- else %}<span class="status-pill status-auto">clear</span>{% endif -%}
+{%- endmacro %}
+{% block content %}
+<h1>Bill Check</h1>
+<p class="subtle" style="max-width:64ch">Reads the invoice attached to every unpaid bill in Bill.com and
+compares it, field by field, with what was entered — vendor, invoice number, invoice date, due date,
+total. Anything that disagrees lands here before the bill is paid. Nothing is changed in Bill.com:
+fix the entry there, mark it <em>fixed</em>, and the next run re-verifies it.</p>
+
+{% if not ready.billdotcom or not ready.claude %}
+<div class="flash"><p><strong>Not ready to run.</strong>
+  {% if not ready.billdotcom %}Bill.com credentials (BILLDOTCOM_DEV_KEY / USERNAME / PASSWORD / ORG_ID) are not set.{% endif %}
+  {% if not ready.claude %}ANTHROPIC_API_KEY is not set — the attachments can't be read.{% endif %}
+  See .env.example.</p></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('billcheck.run') }}" class="upload-form">
+  {% if running %}
+  <p>A check is running — <a href="{{ url_for('billcheck.progress', job_id=running) }}">watch progress →</a></p>
+  {% else %}
+  <label>Attachments to read this run
+    <input type="number" name="limit" value="{{ default_limit }}" min="1" max="5000" style="width:7em">
+    <span class="subtle">only bills not read before count — unchanged bills cost nothing</span></label>
+  <label><input type="checkbox" name="force"> Re-read every attachment
+    <span class="subtle">(ignores cached reads; e.g. after switching the model — currently {{ ready.model }})</span></label>
+  <button type="submit" {% if not ready.billdotcom or not ready.claude %}disabled{% endif %}>Run Bill Check</button>
+  {% endif %}
+</form>
+
+{% if last_run %}
+<p class="subtle">Last run {{ last_run.when[:16].replace('T', ' ') }} by {{ last_run.by or 'local' }} ·
+  {{ last_run.bills }} unpaid bills · {{ last_run.counts.read }} read ·
+  {{ last_run.counts.reused }} re-compared · {{ last_run.counts.unchanged }} unchanged ·
+  {{ last_run.counts.no_document }} without an attachment · {{ last_run.counts.error }} read errors
+  {% if last_run.limit_hit %}· <strong>stopped at the per-run limit of {{ last_run.limit }} — run again to continue</strong>{% endif %}</p>
+{% endif %}
+
+{% if total %}
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Open</div>
+    <div class="kpi-value">{{ open_count }}</div>
+    <div class="kpi-sub">{{ counts.critical }} critical · {{ counts.high }} high · {{ counts.review }} review</div></div>
+  <div class="kpi"><div class="kpi-label">Clean</div>
+    <div class="kpi-value">{{ clean }}</div>
+    <div class="kpi-sub">invoice matches the entry</div></div>
+  <div class="kpi"><div class="kpi-label">Bills checked</div>
+    <div class="kpi-value">{{ total }}</div>
+    <div class="kpi-sub">unpaid in Bill.com</div></div>
+</div>
+
+<h2>{% if show_all %}All bills{% else %}Needs a look{% endif %}</h2>
+<p class="subtle">
+  {% if show_all %}<a href="{{ url_for('billcheck.landing') }}">Show open items only</a>
+  {% else %}<a href="{{ url_for('billcheck.landing', all=1) }}">Show all {{ total }} bills</a>{% endif %}
+  · <a href="{{ url_for('billcheck.queue_csv') }}">Download the queue as CSV ↓</a></p>
+
+{% if rows %}
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th></th><th>Vendor</th><th>Invoice #</th><th>Due (entered)</th><th>Due (per invoice)</th>
+    <th class="amt">Total (entered)</th><th>What's off</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    {% set b = r.bill or {} %}{% set c = r.comparison or {} %}
+    <tr>
+      <td>{% if r.status == 'match' %}<span class="status-pill status-auto">clean</span>
+          {% elif r.status == 'no_document' %}<span class="status-pill status-review">no attachment</span>
+          {% elif r.status == 'error' %}<span class="status-pill status-review">read error</span>
+          {% else %}{{ sev_pill(r.severity) }}{% endif %}</td>
+      <td>{{ b.vendor or '—' }}</td>
+      <td>{{ b.invoice or '—' }}</td>
+      <td>{{ b.due_date or '—' }}</td>
+      <td>{% if c.expected_due and c.expected_due != b.due_date %}<strong>{{ c.expected_due }}</strong>
+          {% elif c.expected_due %}{{ c.expected_due }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="amt">{{ b.amount | money if b.amount else '—' }}</td>
+      <td style="max-width:34ch">
+        {% if r.disposition %}<span class="subtle">{{ r.disposition.action }} · {{ r.disposition.who }}{% if r.disposition.note %} — {{ r.disposition.note }}{% endif %}</span>
+        {% elif c.findings %}{{ c.findings[0].reason }}{% if c.findings | length > 1 %} <span class="subtle">+{{ c.findings | length - 1 }} more</span>{% endif %}
+        {% elif r.error %}<span class="subtle">{{ r.error | truncate(90, True) }}</span>
+        {% else %}<span class="subtle">matches</span>{% endif %}</td>
+      <td><a href="{{ url_for('billcheck.bill_page', bill_id=r.bill_id) }}">Open →</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="subtle">Nothing open — every unpaid bill matches its invoice or has been dispositioned.</p>
+{% endif %}
+{% else %}
+<p class="subtle">No bills checked yet. Run Bill Check to pull the open bills from Bill.com.</p>
+{% endif %}
+{% endblock %}
