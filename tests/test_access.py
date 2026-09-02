@@ -107,3 +107,12 @@ def test_admin_manages_users(gated_client):
     assert access.is_admin("boss@x.com")
     gated_client.post("/admin/users/delete", data={"email": "new@x.com"})
     assert access.sections_for("new@x.com") is None
+
+
+def test_preexisting_session_bootstraps_empty_store(gated_client):
+    # A session from before the permission system existed: authed, store
+    # empty -> first request makes them admin instead of locking them out.
+    _login_as(gated_client, "tyson@x.com")
+    resp = gated_client.get("/cashproof/")
+    assert resp.status_code == 200
+    assert access.is_admin("tyson@x.com")

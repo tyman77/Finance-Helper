@@ -268,6 +268,12 @@ def create_app() -> Flask:
             return None
         if not session.get("authed"):
             return redirect(url_for("login", next=request.path))
+        email = session.get("email", "")
+        # Sessions that predate the permission system never ran the login
+        # callback's bootstrap — give an empty store its first admin here too.
+        if access.sections_for(email) is None and access.ensure_bootstrap_admin(email):
+            flash("You're the first user, so you've been made an admin — "
+                  "manage who can access Scout in Admin → Users.")
         section = access.section_for_endpoint(request.endpoint)
         if section and not access.allowed(session.get("email", ""), section):
             flash("You don't have access to that section — ask an admin "
