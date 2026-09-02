@@ -318,3 +318,50 @@ def test_quickpay_policy_overrides_always_take_rule_end_to_end():
     fs = _by_field(r)
     assert "discount" not in fs and "due_date" not in fs and "amount" not in fs
     assert r["expected_due"] == "2026-09-15"
+
+
+VENDOR_DEALS = {
+    "Gator": {"quickpay": "take", "pct": 5},
+    "Shure": {"quickpay": "take", "pct": 2},
+    "Yamaha": {"quickpay": "take", "pct": 2,
+               "notes": "no QP on warranty work"},
+    "Elite Core": {"due_anchor": "ship_date"},
+}
+
+
+def test_deal_pct_mismatch_is_flagged_for_review():
+    # Gator's negotiated deal is 5%; this invoice only offers 3%.
+    pdf = _gator_pdf(discount_total="579.53", discount_terms="3% 25 Days")
+    r = compare.compare_bill(_gator_bill(amount="579.53"), pdf,
+                             policies=VENDOR_DEALS)
+    f = _by_field(r)["discount"]
+    assert f["severity"] == "review"
+    assert "3.0% offered" in f["entered"] + f["pdf"]
+    assert "negotiated deal with this vendor is 5%" in f["reason"]
+
+
+def test_deal_vendor_invoice_without_discount_flags_missed_savings():
+    pdf = _pdf(vendor="Yamaha Corporation", discount_total=None,
+               discount_date=None, discount_terms=None)
+    bill = _bill(vendor="Yamaha")
+    f = _by_field(compare.compare_bill(bill, pdf, policies=VENDOR_DEALS))["discount"]
+    assert f["severity"] == "review"
+    assert "money left on the table" in f["reason"]
+    assert "no QP on warranty work" in f["reason"]     # deal notes echoed
+
+
+def test_matching_deal_pct_stays_quiet():
+    # 5% offered, 5% negotiated: no deal finding on a clean Gator bill.
+    r = compare.compare_bill(_gator_bill(), _gator_pdf(), policies=VENDOR_DEALS)
+    assert r["status"] == "match"
+
+
+def test_ship_date_anchor_policy():
+    # Elite Core: Net 30 runs from the SHIP date, not the invoice date.
+    pdf = _pdf(vendor="Elite Core Audio", due_date=None, terms="Net 30",
+               terms_days=30, ship_date="2026-08-10")
+    bill = _bill(vendor="Elite Core", due_date="2026-09-09")   # ship + 30
+    r = compare.compare_bill(bill, pdf, policies=VENDOR_DEALS)
+    assert "due_date" not in _by_field(r)
+    assert r["expected_due"] == "2026-09-09"
+    assert "SHIP date" in r["expected_due_basis"]

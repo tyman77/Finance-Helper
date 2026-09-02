@@ -22,7 +22,7 @@ DEFAULT_MODEL = "claude-opus-5"
 MAX_BYTES = 30 * 1024 * 1024          # API request ceiling is 32 MB
 # Bump when InvoiceFields gains something the comparison depends on; reads
 # stored under an older number are refreshed on the next run.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SYSTEM_PROMPT = """You read vendor invoices for an accounts-payable team. Report only what the document actually states; use null for anything not printed on it. Do not guess.
 
@@ -36,6 +36,7 @@ Field rules:
 - vendor: the business issuing the invoice (the "from"/remit-to party), not the customer being billed.
 - invoice_number: exactly as printed.
 - po_number: the customer PO / reference number if printed.
+- ship_date: the date goods shipped, if printed (YYYY-MM-DD); some vendors' payment terms run from it. Null if absent.
 - is_invoice: false for statements, purchase orders, quotes, receipts, packing slips, credit memos, or anything that is not a bill for payment.
 - confidence: low when the scan is unreadable, fields are hand-written, or several invoices/amounts compete.
 - notes: anything a reviewer should know — multiple invoices in one file, a past-due balance included in the total, hand-written changes, missing pages."""
@@ -56,6 +57,7 @@ class InvoiceFields(BaseModel):
     discount_terms: Optional[str]
     currency: Optional[str]
     po_number: Optional[str]
+    ship_date: Optional[str] = None
     confidence: Literal["high", "medium", "low"]
     notes: str
 

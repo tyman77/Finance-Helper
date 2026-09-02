@@ -167,6 +167,10 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     # vendor the quick-pay discount is NEVER taken — full amount, net terms.
     skip_quickpay = str(policy.get("quickpay") or "").lower() in ("never", "no", "skip") \
         or policy.get("ignore_quickpay") is True
+    take_quickpay = str(policy.get("quickpay") or "").lower() in ("take", "always", "yes")
+    policy_pct = policy.get("pct")
+    policy_note = str(policy.get("notes") or "")
+    note_sfx = f" (vendor deal notes: {policy_note})" if policy_note else ""
 
     if not ex:
         return {"status": "unreadable", "severity": "review", "findings": [
@@ -214,6 +218,27 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
             + (disc_date.isoformat() if disc_date else "by the cut-off")
             + f" (saves {saving:,.2f}). The full amount was entered."))
 
+    # Negotiated-deal verification for vendors on the quick-pay list.
+    if take_quickpay and policy_pct is not None:
+        if (has_discount and saving is not None and pdf_amt
+                and pdf_amt > 0):
+            offered = (saving / pdf_amt) * Decimal("100")
+            if abs(offered - Decimal(str(policy_pct))) > Decimal("0.3"):
+                findings.append(_finding(
+                    "discount", "review", f"{policy_pct}% (negotiated deal)",
+                    f"{offered:.1f}% offered",
+                    f"The invoice's early-pay discount works out to {offered:.1f}%, "
+                    f"but the negotiated deal with this vendor is {policy_pct}% — "
+                    f"check the terms{note_sfx}."))
+        elif (not has_discount and pdf_amt is not None and pdf_amt > 0
+                and ex.get("is_invoice") is not False):
+            findings.append(_finding(
+                "discount", "review", f"{policy_pct}% QP (negotiated deal)",
+                "none on the invoice",
+                f"This vendor gives a {policy_pct}% quick-pay discount but none "
+                f"appears on this invoice — money left on the table unless the "
+                f"deal doesn't apply here{note_sfx}."))
+
     # Invoice number — duplicates and vendor remittance keys hang off it.
     ent_inv, pdf_inv = bill.get("invoice") or "", ex.get("invoice_number") or ""
     if not pdf_inv:
@@ -244,6 +269,11 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     if pdf_terms_days is None:
         pdf_terms_days = parse_terms_days(ex.get("terms"))
     anchor = pdf_idate or ent_idate
+    anchor_note = ""
+    if str(policy.get("due_anchor") or "") == "ship_date":
+        ship = parse_date(ex.get("ship_date"))
+        if ship is not None:
+            anchor, anchor_note = ship, " (anchored to the SHIP date, per this vendor's terms)"
 
     # Vendor policy: this vendor's quick-pay discount is never taken, so the
     # discount deadline is NOT the due date. Expect the NET terms instead —
@@ -273,13 +303,13 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     elif pdf_terms_days is not None and anchor is not None:
         expected_due = add_days(anchor, int(pdf_terms_days))
         basis = (f"the invoice's terms ({ex.get('terms') or f'Net {pdf_terms_days}'}) "
-                 f"from its {anchor.isoformat()} invoice date")
+                 f"from its {anchor.isoformat()} invoice date{anchor_note}")
         basis_is_pdf = True
     elif bill.get("terms_days") is not None and anchor is not None:
         expected_due = add_days(anchor, int(bill["terms_days"]))
         term_label = bill.get("terms") or f"Net {bill['terms_days']}"
         basis = (f"the vendor's terms in Bill.com ({term_label}) "
-                 f"from the {anchor.isoformat()} invoice date")
+                 f"from the {anchor.isoformat()} invoice date{anchor_note}")
         basis_is_pdf = False
 
     if has_discount and not skip_quickpay:

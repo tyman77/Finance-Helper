@@ -52,11 +52,39 @@ cards:
 
 billcheck:
   # Per-vendor payment policies for the Bill Check comparison.
-  # quickpay: never — this vendor's early-pay discount is never taken, so
-  # findings expect the NET terms, not the discount deadline.
+  #   quickpay: take  — we take this vendor's early-pay discount; `pct` is
+  #                     the negotiated rate (the invoice's offer is verified
+  #                     against it, and a listed vendor's invoice with NO
+  #                     discount gets a money-left-on-the-table review).
+  #   quickpay: never — the discount is never taken; findings expect the
+  #                     full amount at NET terms, not the discount deadline.
+  #   due_anchor: ship_date — terms run from the ship date, not invoice date.
+  #   notes — deal wrinkles, echoed on findings for the reviewer.
   vendor_policies:
     "TD SYNNEX":
       quickpay: never
+    "ACE Backstage": {quickpay: take, pct: 5}
+    "American Music": {quickpay: take, pct: 3}
+    "Audio Technica": {quickpay: take, pct: 2}
+    "Belden": {quickpay: take, pct: 1.5}
+    "Elite Core": {due_anchor: ship_date,
+                   notes: "due date runs from the ship date"}
+    "Gator": {quickpay: take, pct: 5}
+    "KMC Music": {quickpay: take, pct: 1}
+    "L-Acoustics": {quickpay: take, pct: 2,
+                    notes: "terms change with the QP deal"}
+    "Legrand": {quickpay: take, pct: 1}
+    "Lenbrook": {quickpay: take, pct: 3}
+    "Light Source": {quickpay: take, pct: 2,
+                     notes: "terms change from Net 30 to Due on Receipt; 2% QP with prepay — except clamps"}
+    "Lowell": {quickpay: take, pct: 1}
+    "McMaster Carr": {quickpay: take, pct: 2}
+    "Nigel B Design": {quickpay: take, pct: 2}
+    "QSC": {quickpay: take, pct: 3}
+    "Sennheiser": {quickpay: take, pct: 2}
+    "Shure": {quickpay: take, pct: 2}
+    "Yamaha": {quickpay: take, pct: 2,
+               notes: "terms change 30/90/120; no QP on warranty work"}
 
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
