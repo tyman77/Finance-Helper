@@ -9,6 +9,7 @@ a bill never seen before — or an explicit re-read — costs a Claude call.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 
 from . import compare
@@ -55,6 +56,12 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                 extracted, outcome = extract_fn(documents), "read"
             except Exception as exc:
                 error, outcome = str(exc)[:400], "error"
+
+    if error:
+        # Surfaced in the host's log too, so an attachment/API problem can
+        # be diagnosed from the server side without opening each bill.
+        print(f"[billcheck] bill {bill.get('id')} ({bill.get('vendor')} #{bill.get('invoice')}): "
+              f"{outcome}: {error}", file=sys.stderr, flush=True)
 
     comparison = compare.compare_bill(bill, extracted) if extracted else None
     if comparison and duplicates:
