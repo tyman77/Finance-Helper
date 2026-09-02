@@ -430,6 +430,52 @@ def absolute_file_url(url: str) -> str:
     return urljoin(base + "/", url)
 
 
+def _redact_url(url: str) -> str:
+    return re.sub(r"(sessionId|devKey)=[^&]+", r"\1=…", url)
+
+
+def _html_snippet(r) -> str:
+    text = r.text[:4000] if isinstance(getattr(r, "text", None), str) else ""
+    m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+    if m:
+        return "title: " + " ".join(m.group(1).split())[:120]
+    stripped = " ".join(re.sub(r"<[^>]+>", " ", text).split())
+    return stripped[:160]
+
+
+def _download_file(url: str, dev_key: str, session: str) -> tuple[bytes, str, str]:
+    """GET the attachment, trying each way Bill.com might want the session
+    presented (headers, query string, form POST). Returns (bytes, media
+    type, filename). Raises with every attempt's outcome — including what an
+    HTML answer said — when none yields a PDF or image."""
+    import requests
+
+    headers = {"devKey": dev_key, "sessionId": session}
+    creds = {"devKey": dev_key, "sessionId": session}
+    attempts = (
+        ("GET with session headers", lambda: requests.get(url, headers=headers, timeout=60)),
+        ("GET with session in query", lambda: requests.get(url, params=creds, headers=headers, timeout=60)),
+        ("POST with session form", lambda: requests.post(url, data=creds, headers=headers, timeout=60)),
+    )
+    tried = []
+    for label, call in attempts:
+        try:
+            r = call()
+        except requests.exceptions.RequestException as exc:
+            tried.append(f"{label}: {type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        media = sniff_media_type(r.content, r.headers.get("Content-Type", ""))
+        if r.status_code == 200 and r.content and (
+                media == "application/pdf" or media.startswith("image/")):
+            disp = r.headers.get("Content-Disposition", "")
+            m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disp)
+            return r.content, media, (m.group(1).strip() if m else "")
+        detail = _html_snippet(r) if media.startswith("text/") else f"{len(r.content)} bytes"
+        tried.append(f"{label}: HTTP {r.status_code} {media} — {detail}")
+    raise RuntimeError("Attachment download returned no PDF/image from "
+                       + _redact_url(url)[:200] + "\n" + "\n".join(tried))
+
+
 def fetch_bill_documents(bill_id: str) -> list[dict]:
     """The attachment(s) on a bill as [{name, media_type, data}].
 
@@ -457,18 +503,10 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
             raise RuntimeError("Bill.com returned no file URL for the attachment on "
                                f"bill {bill_id}:\n" + _json.dumps(resp, default=str)[:400])
         url = absolute_file_url(url)
-        try:
-            r = requests.get(url, headers={"devKey": dev_key, "sessionId": session},
-                             timeout=60)
-        except requests.exceptions.RequestException as exc:
-            raise RuntimeError(f"Attachment download failed ({url[:160]}): "
-                               f"{type(exc).__name__}: {exc}") from exc
-        if r.status_code != 200 or not r.content:
-            raise RuntimeError(f"Attachment download failed ({url[:160]}): "
-                               f"HTTP {r.status_code}\n{r.text[:300]}")
-        media = sniff_media_type(r.content, r.headers.get("Content-Type", ""))
-        docs.append({"name": str(info.get("name") or info.get("fileName") or f"page-{page}"),
-                     "media_type": media, "data": r.content})
+        content, media, filename = _download_file(url, dev_key, session)
+        docs.append({"name": str(info.get("name") or info.get("fileName")
+                                 or filename or f"page-{page}"),
+                     "media_type": media, "data": content})
         try:
             num_pages = int(info.get("numPages") or 1)
         except (TypeError, ValueError):

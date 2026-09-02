@@ -135,3 +135,50 @@ def test_fetch_bill_documents_makes_relative_url_absolute(fake_v2, monkeypatch):
     monkeypatch.setattr(requests, "get", lambda url, **kw: (seen.append(url) or R()))
     api.fetch_bill_documents("b1")
     assert seen == ["https://api.bill.com/api/v2/GetDocumentPages?x=1"]
+
+
+class _Resp:
+    def __init__(self, content, ctype, status=200, disp=""):
+        self.status_code, self.content, self.text = status, content, content.decode("latin-1")
+        self.headers = {"Content-Type": ctype}
+        if disp:
+            self.headers["Content-Disposition"] = disp
+
+
+def test_download_falls_back_to_query_credentials(fake_v2, monkeypatch):
+    import requests
+
+    calls = []
+
+    def get(url, **kw):
+        calls.append(("GET", url, kw.get("params")))
+        if kw.get("params"):
+            return _Resp(b"%PDF-1.4 ok", "application/pdf",
+                         disp='attachment; filename="invoice 36397.pdf"')
+        return _Resp(b"<html><title>Sign in to Bill.com</title></html>", "text/html")
+
+    monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("no POST needed")))
+    docs = api.fetch_bill_documents("b1")
+    assert docs[0]["media_type"] == "application/pdf"
+    assert docs[0]["name"] == "invoice.pdf"          # GetDocumentPages name wins
+    assert calls[1][2] == {"devKey": "key", "sessionId": "sess"}
+
+
+def test_download_reports_every_attempt_when_all_return_html(fake_v2, monkeypatch):
+    import requests
+
+    html = _Resp(b"<html><head><title>Bill.com - Login</title></head></html>", "text/html; charset=utf-8")
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: html)
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: html)
+    with pytest.raises(RuntimeError) as exc:
+        api.fetch_bill_documents("b1")
+    msg = str(exc.value)
+    assert "no PDF/image from https://files.test/1" in msg
+    assert msg.count("text/html") == 3 and "Bill.com - Login" in msg
+    assert "POST with session form" in msg
+
+
+def test_redact_url_hides_session():
+    out = api._redact_url("https://api.bill.com/x?sessionId=abc123&devKey=k9&id=1")
+    assert "abc123" not in out and "k9" not in out and "id=1" in out
