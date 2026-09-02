@@ -103,17 +103,27 @@ def extract_invoice(documents: list[dict], client=None) -> dict:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (see .env.example).")
     blocks = content_blocks(documents)
     client = client or _client()
-    try:
-        resp = client.messages.parse(
-            model=model_name(),
-            max_tokens=8000,
-            system=SYSTEM_PROMPT,
-            output_config={"effort": os.environ.get("BILLCHECK_EFFORT") or "medium"},
-            messages=[{"role": "user", "content": blocks}],
-            output_format=InvoiceFields,
-        )
-    except Exception as exc:                       # SDK errors carry the reason
-        raise RuntimeError(f"Claude read failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.parse(
+                model=model_name(),
+                max_tokens=8000,
+                system=SYSTEM_PROMPT,
+                output_config={"effort": os.environ.get("BILLCHECK_EFFORT") or "medium"},
+                messages=[{"role": "user", "content": blocks}],
+                output_format=InvoiceFields,
+            )
+            break
+        except Exception as exc:                   # SDK errors carry the reason
+            # The structured-output grammar is compiled server-side and can
+            # time out transiently; that is worth a couple of retries. The
+            # SDK already retries 429/5xx itself.
+            if "Grammar compilation timed out" in str(exc) and attempt < 2:
+                import time
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(f"Claude read failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
     if getattr(resp, "stop_reason", None) == "refusal":
         details = getattr(resp, "stop_details", None)
         why = getattr(details, "explanation", None) or "no reason given"

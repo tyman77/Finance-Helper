@@ -88,3 +88,30 @@ def test_extract_invoice_requires_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         extract.extract_invoice(PDF, client=FakeClient(FakeResp(None)))
+
+
+def test_grammar_timeout_is_retried(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    parsed = extract.InvoiceFields(
+        is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
+        due_date=None, terms=None, terms_days=None, total="10.00",
+        discount_total=None, discount_date=None, discount_terms=None, currency="USD",
+        po_number=None, confidence="high", notes="")
+
+    class Flaky(FakeClient):
+        calls = 0
+        def parse(self, **kw):
+            Flaky.calls += 1
+            if Flaky.calls < 3:
+                raise ValueError("Error code: 400 - Grammar compilation timed out.")
+            return FakeResp(parsed)
+
+    out = extract.extract_invoice(PDF, client=Flaky(None))
+    assert out["vendor"] == "Acme" and Flaky.calls == 3
+
+    class AlwaysFlaky(FakeClient):
+        def parse(self, **kw):
+            raise ValueError("Grammar compilation timed out.")
+    with pytest.raises(RuntimeError, match="Grammar compilation"):
+        extract.extract_invoice(PDF, client=AlwaysFlaky(None))
