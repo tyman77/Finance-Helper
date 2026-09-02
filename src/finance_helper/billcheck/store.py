@@ -132,7 +132,7 @@ def delete_result(bill_id: str) -> None:
 
 
 def is_open(result: dict) -> bool:
-    return (result.get("status") not in ("match",)
+    return (result.get("status") not in ("match", "skipped")
             and not result.get("disposition"))
 
 

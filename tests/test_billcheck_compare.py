@@ -365,3 +365,95 @@ def test_ship_date_anchor_policy():
     assert "due_date" not in _by_field(r)
     assert r["expected_due"] == "2026-09-09"
     assert "SHIP date" in r["expected_due_basis"]
+
+
+# --- AP-team rules batch -----------------------------------------------------
+
+AP_RULES = {
+    "Xcel": {"autopay": True},
+    "L-Acoustics": {"due_check_terms_days": [30]},
+    "Light Source": {"no_qp_when_terms_days": [30], "accept_proforma": True,
+                     "quickpay": "take", "pct": 2},
+    "Staging Dimensions": {"invoice_number_from": "order_number"},
+    "XPO": {"invoice_date_from": "ship_date"},
+    "Pea Soup": {"currency": "GBP"},
+    "Western Disposal": {"no_invoice_number": True},
+}
+ALIASES = {"SnapAV": "Snap One", "AC Lighting": "AC Americas"}
+
+
+def test_po_prefix_and_leading_zeros_normalize():
+    assert compare.normalize_po("PO011111") == compare.normalize_po("011111") \
+        == compare.normalize_po("11111") == compare.normalize_po("P.O. #11111")
+    r = compare.compare_bill(_bill(po="PO011224"), _pdf(po_number="011224"))
+    assert "po" not in _by_field(r)
+
+
+def test_autopay_vendor_zero_total_is_fine():
+    r = compare.compare_bill(_bill(vendor="Xcel Energy", amount="0.00"),
+                             _pdf(vendor="Xcel", total="482.11"),
+                             policies=AP_RULES)
+    assert "amount" not in _by_field(r)
+
+
+def test_due_dates_only_checked_on_listed_terms():
+    # L-Acoustics on prepay terms: no due-date policing; on Net 30: normal.
+    pdf = _pdf(vendor="L-Acoustics", due_date="2026-08-05", terms="Prepay",
+               terms_days=None)
+    bill = _bill(vendor="L-Acoustics", due_date="2026-09-30", terms_days=None)
+    assert "due_date" not in _by_field(
+        compare.compare_bill(bill, pdf, policies=AP_RULES))
+    pdf30 = _pdf(vendor="L-Acoustics", due_date="2026-08-05", terms="Net 30")
+    assert "due_date" in _by_field(
+        compare.compare_bill(bill, pdf30, policies=AP_RULES))
+
+
+def test_vendor_aliases_match():
+    r = compare.compare_bill(_bill(vendor="SnapAV"),
+                             _pdf(vendor="Snap One LLC"), aliases=ALIASES)
+    assert "vendor" not in _by_field(r)
+    r2 = compare.compare_bill(_bill(vendor="AC Lighting Inc"),
+                              _pdf(vendor="AC Americas"), aliases=ALIASES)
+    assert "vendor" not in _by_field(r2)
+
+
+def test_order_number_accepted_as_invoice_number():
+    r = compare.compare_bill(
+        _bill(vendor="Staging Dimensions", invoice="SO4471"),
+        _pdf(vendor="Staging Dimensions", invoice_number="88123",
+             order_number="S.O. 4471"),
+        policies=AP_RULES)
+    assert "invoice" not in _by_field(r)
+
+
+def test_ship_date_as_invoice_date_policy():
+    r = compare.compare_bill(
+        _bill(vendor="XPO", invoice_date="2026-08-10"),
+        _pdf(vendor="XPO Logistics", invoice_date="2026-08-01",
+             ship_date="2026-08-10"),
+        policies=AP_RULES)
+    assert "invoice_date" not in _by_field(r)
+
+
+def test_expected_currency_policy():
+    r = compare.compare_bill(_bill(vendor="Pea Soup"),
+                             _pdf(vendor="Pea Soup Ltd", currency="GBP"),
+                             policies=AP_RULES)
+    assert "currency" not in _by_field(r)
+
+
+def test_no_invoice_number_policy():
+    r = compare.compare_bill(_bill(vendor="Western Disposal", invoice="AUG26"),
+                             _pdf(vendor="Western Disposal", invoice_number=None),
+                             policies=AP_RULES)
+    assert "invoice" not in _by_field(r)
+
+
+def test_proforma_accepted_and_net30_needs_no_qp():
+    pdf = _pdf(vendor="Light Source", is_invoice=False, terms="Net 30",
+               discount_total=None, discount_date=None, discount_terms=None,
+               notes="reads as a proforma / order confirmation")
+    r = compare.compare_bill(_bill(vendor="Light Source"), pdf, policies=AP_RULES)
+    fs = _by_field(r)
+    assert "document" not in fs          # proforma is a real invoice here
+    assert "discount" not in fs          # Net 30 never carries their QP

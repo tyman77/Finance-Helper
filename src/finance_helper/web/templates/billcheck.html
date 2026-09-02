@@ -72,7 +72,9 @@ fix the entry there, mark it <em>fixed</em>, and the next run re-verifies it.</p
           {% elif r.status == 'no_document' %}<span class="status-pill status-review">no attachment</span>
           {% elif r.status == 'error' %}<span class="status-pill status-review">read error</span>
           {% else %}{{ sev_pill(r.severity) }}{% endif %}</td>
-      <td>{{ b.vendor or '—' }}</td>
+      <td>{{ b.vendor or '—' }}{% if b.description %}
+        <div class="subtle" title="{{ b.description }}">📝 {{ b.description | truncate(48, True) }}</div>
+      {% endif %}</td>
       <td>{{ b.invoice or '—' }}</td>
       <td>{{ b.due_date or '—' }}</td>
       <td>{% if c.expected_due and c.expected_due != b.due_date %}<strong>{{ c.expected_due }}</strong>

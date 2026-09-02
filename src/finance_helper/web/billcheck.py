@@ -22,7 +22,7 @@ from ..billcheck import store as bc_store
 
 billcheck_bp = Blueprint("billcheck", __name__, url_prefix="/billcheck")
 
-DISPOSITION_ACTIONS = ["accept", "fixed", "investigate"]
+DISPOSITION_ACTIONS = ["accept", "fixed", "investigate", "not_an_issue"]
 DEFAULT_LIMIT = int(os.environ.get("BILLCHECK_MAX_READS_PER_RUN") or 200)
 
 # Same background-thread pattern as Cash Proof (one gunicorn worker, see
@@ -187,7 +187,7 @@ def disposition(bill_id):
     if action not in DISPOSITION_ACTIONS:
         flash("Pick an action for that bill.")
         return redirect(url_for("billcheck.bill_page", bill_id=bill_id))
-    if action == "accept" and not note:
+    if action in ("accept", "not_an_issue") and not note:
         flash("A note is required — say why the entry is right as is.")
         return redirect(url_for("billcheck.bill_page", bill_id=bill_id))
     if not bc_store.record_disposition(bill_id, action, note, _who()):

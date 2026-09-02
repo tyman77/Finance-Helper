@@ -213,3 +213,27 @@ def test_read_from_an_older_schema_is_refreshed_once():
     store.save_result("b1", again)
     third, outcome3 = engine.check_bill(_bill(), store.load_result("b1"), f.fetch, f.extract)
     assert third is None and outcome3 == "unchanged" and f.reads == 2
+
+
+def test_vendor_skip_policy_never_fetches_or_reads(monkeypatch, tmp_path):
+    from finance_helper.recon import settings as recon_settings
+    monkeypatch.setattr(recon_settings, "recon_config", lambda: {
+        "billcheck": {"vendor_policies": {
+            "EAN Services": {"skip": True, "notes": "reviewed in Google Sheets"}},
+            "vendor_aliases": {}},
+        "sage": {"cash_accounts": [], "aux_accounts": []},
+    })
+    fakes = Fakes()
+    payload, outcome = engine.check_bill(_bill(vendor="EAN Services Inc"),
+                                         None, fakes.fetch, fakes.extract)
+    assert outcome == "skipped"
+    assert payload["status"] == "skipped" and payload["severity"] == "clear"
+    assert "Google Sheets" in payload["skip_reason"]
+    assert fakes.fetches == 0 and fakes.reads == 0
+    assert not store.is_open(payload)
+
+    # Second pass with the same bill: unchanged, still nothing fetched.
+    payload2, outcome2 = engine.check_bill(_bill(vendor="EAN Services Inc"),
+                                           payload, fakes.fetch, fakes.extract)
+    assert payload2 is None and outcome2 == "unchanged"
+    assert fakes.fetches == 0

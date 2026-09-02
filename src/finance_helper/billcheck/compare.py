@@ -110,6 +110,15 @@ def normalize_invoice_number(text) -> str:
     return s.lstrip("0") or s
 
 
+def normalize_po(text) -> str:
+    """PO011111 == 011111 == PO#11111: strip a leading PO marker, then
+    compare digits/letters with leading zeros dropped."""
+    s = re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
+    if s.startswith("PO") and len(s) > 2:
+        s = s[2:]
+    return s.lstrip("0") or s
+
+
 def normalize_vendor(text) -> list[str]:
     s = re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower())
     return [t for t in s.split() if t and t not in _VENDOR_NOISE]
@@ -157,7 +166,7 @@ def _vendor_policy(vendor, policies: dict | None) -> dict:
 
 
 def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
-                 policies: dict | None = None) -> dict:
+                 policies: dict | None = None, aliases: dict | None = None) -> dict:
     bill = bill or {}
     ex = extracted or {}
     findings: list[dict] = []
@@ -179,7 +188,7 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
             "fields": _side_by_side(bill, ex, []), "expected_due": None,
             "expected_due_basis": ""}
 
-    if ex.get("is_invoice") is False:
+    if ex.get("is_invoice") is False and not policy.get("accept_proforma"):
         findings.append(_finding(
             "document", "review", "", "",
             "The attachment doesn't read as an invoice"
@@ -197,7 +206,9 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     discount_taken = (has_discount and ent_amt is not None
                       and abs(ent_amt - disc_amt) <= AMOUNT_TOLERANCE)
     saving = (pdf_amt - disc_amt) if (has_discount and pdf_amt is not None) else None
-    if pdf_amt is None and not discount_taken:
+    if policy.get("autopay") and (ent_amt is None or ent_amt == 0):
+        pass    # autopay vendor: the $0 entry is deliberate — nothing to pay here
+    elif pdf_amt is None and not discount_taken:
         findings.append(_finding("amount", "review", bill.get("amount"), "",
                                  "No total found on the PDF."))
     elif discount_taken:
@@ -231,7 +242,9 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
                     f"but the negotiated deal with this vendor is {policy_pct}% — "
                     f"check the terms{note_sfx}."))
         elif (not has_discount and pdf_amt is not None and pdf_amt > 0
-                and ex.get("is_invoice") is not False):
+                and ex.get("is_invoice") is not False
+                and parse_terms_days(ex.get("terms")) not in
+                    (policy.get("no_qp_when_terms_days") or [])):
             findings.append(_finding(
                 "discount", "review", f"{policy_pct}% QP (negotiated deal)",
                 "none on the invoice",
@@ -242,14 +255,25 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     # Invoice number — duplicates and vendor remittance keys hang off it.
     ent_inv, pdf_inv = bill.get("invoice") or "", ex.get("invoice_number") or ""
     if not pdf_inv:
-        findings.append(_finding("invoice", "review", ent_inv, "",
-                                 "No invoice number found on the PDF."))
+        if not policy.get("no_invoice_number"):
+            findings.append(_finding("invoice", "review", ent_inv, "",
+                                     "No invoice number found on the PDF."))
     elif normalize_invoice_number(ent_inv) != normalize_invoice_number(pdf_inv):
-        findings.append(_finding("invoice", "high", ent_inv, pdf_inv,
-                                 "Invoice number differs from the PDF."))
+        # Some vendors are keyed by their order/S.O. number instead
+        # (policy invoice_number_from: order_number).
+        order_no = ex.get("order_number") or ""
+        if not (str(policy.get("invoice_number_from") or "") == "order_number"
+                and order_no
+                and normalize_invoice_number(ent_inv) == normalize_invoice_number(order_no)):
+            findings.append(_finding("invoice", "high", ent_inv, pdf_inv,
+                                     "Invoice number differs from the PDF."))
 
     # Invoice date — the anchor every terms-based due date hangs off.
     ent_idate, pdf_idate = parse_date(bill.get("invoice_date")), parse_date(ex.get("invoice_date"))
+    if str(policy.get("invoice_date_from") or "") == "ship_date":
+        # This vendor's convention: the shipment date is entered as the
+        # invoice date (e.g. XPO) — judge the entry against it.
+        pdf_idate = parse_date(ex.get("ship_date")) or pdf_idate
     if pdf_idate is None:
         findings.append(_finding("invoice_date", "review", bill.get("invoice_date"), "",
                                  "No invoice date found on the PDF."))
@@ -322,7 +346,14 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
         if disc_date is not None:
             expected_due, basis_is_pdf = disc_date, True
             basis = "the early-pay cut-off on the invoice (the discount is always taken)"
-    if ent_due is None:
+    # Some vendors only get due-date review on standard terms (policy
+    # due_check_terms_days) — everything else runs on customized prepay
+    # dates a comparison can't model (e.g. L-Acoustics).
+    due_terms_filter = policy.get("due_check_terms_days")
+    effective_terms = pdf_terms_days if pdf_terms_days is not None else bill.get("terms_days")
+    if due_terms_filter and effective_terms not in due_terms_filter:
+        pass
+    elif ent_due is None:
         findings.append(_finding(
             "due_date", "high", "", expected_due.isoformat() if expected_due else "",
             "No due date entered in Bill.com."))
@@ -368,19 +399,29 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
                 f"Due date is {gap} days after the invoice date and the PDF states "
                 "no due date or terms — confirm."))
 
-    # Vendor — paying the right party.
+    # Vendor — paying the right party. Known trade-name aliases
+    # (billcheck.vendor_aliases: SnapAV = Snap One, ...) count as the same.
     if ex.get("vendor") and bill.get("vendor") and not vendor_matches(bill["vendor"], ex["vendor"]):
-        findings.append(_finding("vendor", "high", bill.get("vendor"), ex.get("vendor"),
-                                 "Vendor on the PDF doesn't match the vendor on the bill."))
+        alias_ok = any(
+            (vendor_matches(bill["vendor"], a) and vendor_matches(ex["vendor"], b))
+            or (vendor_matches(bill["vendor"], b) and vendor_matches(ex["vendor"], a))
+            for a, b in (aliases or {}).items())
+        if not alias_ok:
+            findings.append(_finding("vendor", "high", bill.get("vendor"), ex.get("vendor"),
+                                     "Vendor on the PDF doesn't match the vendor on the bill."))
 
-    # PO — only when both sides have one.
+    # PO — only when both sides have one. Vendors print it with or without
+    # the "PO" prefix and leading zeros; normalize both away.
     if bill.get("po") and ex.get("po_number"):
-        if normalize_invoice_number(bill["po"]) != normalize_invoice_number(ex["po_number"]):
+        if normalize_po(bill["po"]) != normalize_po(ex["po_number"]):
             findings.append(_finding("po", "review", bill.get("po"), ex.get("po_number"),
                                      "PO number differs from the PDF."))
 
     cur = str(ex.get("currency") or "").strip().upper()
-    if cur and cur not in ("USD", "US$", "$", "US DOLLARS"):
+    expected_cur = str(policy.get("currency") or "").strip().upper()
+    if cur and cur == expected_cur:
+        pass                    # this vendor always bills in that currency
+    elif cur and cur not in ("USD", "US$", "$", "US DOLLARS"):
         findings.append(_finding("currency", "review", "USD", cur,
                                  f"Invoice is in {cur} — confirm the entered USD amount."))
 

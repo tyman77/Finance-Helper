@@ -17,6 +17,10 @@
 
 <div class="panel-grid">
 <div>
+  {% if b.description %}
+  <div class="flash"><p><strong>AP note on the bill:</strong> {{ b.description }}</p></div>
+  {% endif %}
+  {% if r.skip_reason %}<p class="subtle">{{ r.skip_reason }}</p>{% endif %}
   {% if r.error %}<div class="flash"><p>{{ r.error }}</p></div>{% endif %}
 
   {% if c %}
@@ -74,6 +78,7 @@
     <select name="action">
       <option value="fixed">Fixed in Bill.com</option>
       <option value="accept">Accept as entered (note why)</option>
+      <option value="not_an_issue">Not an actual error (clear from list)</option>
       <option value="investigate">Investigating</option>
     </select>
     <input type="text" name="note" placeholder="why / what was done" size="28">

@@ -28,6 +28,31 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
     existing = existing or {}
     duplicates = duplicates or []
     fp = store.fingerprint(bill, extra=sorted(duplicates))
+
+    from ..recon.settings import recon_config
+    bc_cfg = recon_config().get("billcheck") or {}
+    policies = bc_cfg.get("vendor_policies") or {}
+    aliases = bc_cfg.get("vendor_aliases") or {}
+
+    # A vendor excluded from review entirely (policy skip: true) — reviewed
+    # by hand elsewhere; never fetch or read its attachments.
+    policy = compare._vendor_policy(bill.get("vendor"), policies)
+    if policy.get("skip"):
+        if existing.get("fingerprint") == fp and existing.get("status") == "skipped" \
+                and not force:
+            return None, "unchanged"
+        return {
+            "bill": bill, "fingerprint": fp, "extracted": None,
+            "comparison": None, "status": "skipped", "severity": "clear",
+            "error": None, "documents": list(existing.get("documents") or []),
+            "duplicates": duplicates,
+            "skip_reason": ("excluded from review by vendor policy"
+                            + (f" — {policy['notes']}" if policy.get("notes") else "")),
+            "checked_at": (now or datetime.now()).isoformat(timespec="seconds"),
+            "checked_by": who,
+            "disposition": existing.get("disposition"),
+            "history": list(existing.get("history") or []),
+        }, "skipped"
     cached_read = existing.get("extracted") or {}
     read_current = bool(cached_read) and cached_read.get("schema") == SCHEMA_VERSION
     if (existing.get("fingerprint") == fp and not force and read_current
@@ -66,9 +91,8 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
         print(f"[billcheck] bill {bill.get('id')} ({bill.get('vendor')} #{bill.get('invoice')}): "
               f"{outcome}: {error}", file=sys.stderr, flush=True)
 
-    from ..recon.settings import recon_config
-    policies = (recon_config().get("billcheck") or {}).get("vendor_policies") or {}
-    comparison = (compare.compare_bill(bill, extracted, policies=policies)
+    comparison = (compare.compare_bill(bill, extracted, policies=policies,
+                                       aliases=aliases)
                   if extracted else None)
     if comparison and duplicates:
         comparison["findings"].insert(0, {

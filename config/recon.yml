@@ -71,12 +71,13 @@ billcheck:
                    notes: "due date runs from the ship date"}
     "Gator": {quickpay: take, pct: 5}
     "KMC Music": {quickpay: take, pct: 1}
-    "L-Acoustics": {quickpay: take, pct: 2,
-                    notes: "terms change with the QP deal"}
+    "L-Acoustics": {quickpay: take, pct: 2, due_check_terms_days: [30],
+                    notes: "terms change with the QP deal; non-Net-30 invoices carry customized prepay dates, so only Net 30 gets due-date review"}
     "Legrand": {quickpay: take, pct: 1}
     "Lenbrook": {quickpay: take, pct: 3}
-    "Light Source": {quickpay: take, pct: 2,
-                     notes: "terms change from Net 30 to Due on Receipt; 2% QP with prepay — except clamps"}
+    "Light Source": {quickpay: take, pct: 2, no_qp_when_terms_days: [30],
+                     accept_proforma: true,
+                     notes: "2% prepaid discount = the QP; proforma docs are real invoices here; Net 30 invoices never carry a QP; terms change from Net 30 to Due on Receipt with prepay — except clamps"}
     "Lowell": {quickpay: take, pct: 1}
     "McMaster Carr": {quickpay: take, pct: 2}
     "Nigel B Design": {quickpay: take, pct: 2}
@@ -85,6 +86,21 @@ billcheck:
     "Shure": {quickpay: take, pct: 2}
     "Yamaha": {quickpay: take, pct: 2,
                notes: "terms change 30/90/120; no QP on warranty work"}
+    "Xcel": {autopay: true,
+             notes: "autopay utility — the $0 entered total is deliberate"}
+    "Staging Dimensions": {invoice_number_from: order_number,
+                           notes: "their S.O. number is entered as the invoice number"}
+    "XPO": {invoice_date_from: ship_date,
+            notes: "the shipment date is entered as the invoice date"}
+    "EAN Services": {skip: true,
+                     notes: "reviewed by hand in Google Sheets — the uploaded PDFs are always blurry"}
+    "Pea Soup": {currency: GBP}
+    "Western Disposal": {no_invoice_number: true}
+  # Trade names vs legal names that are the SAME vendor.
+  vendor_aliases:
+    "SnapAV": "Snap One"
+    "AC Lighting": "AC Americas"
+    "MBI Acoustics": "MBI"
 
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
