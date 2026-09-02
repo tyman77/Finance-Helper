@@ -385,3 +385,58 @@ def refresh_sage_projects():
     except Exception as exc:
         flash(f"Could not fetch Sage projects: {exc}")
     return redirect(url_for("admin.admin_page"))
+
+
+# --- User access management (Admin -> Users) --------------------------------
+
+from flask import session as _session  # noqa: E402
+
+from . import access as _access  # noqa: E402
+
+
+@admin_bp.get("/users")
+def users_page():
+    return render_template(
+        "users.html",
+        users=sorted(_access.load_users().items()),
+        sections=_access.SECTIONS,
+        env_admins=sorted(_access.env_admins()),
+    )
+
+
+@admin_bp.post("/users/save")
+def users_save():
+    email = (request.form.get("email") or "").strip().lower()
+    if "@" not in email:
+        flash("Enter the person's full work email.")
+        return redirect(url_for("admin.users_page"))
+    sections = [s for s in request.form.getlist("sections") if s in _access.SECTIONS]
+    if not sections:
+        flash("Pick at least one section (or remove the user instead).")
+        return redirect(url_for("admin.users_page"))
+    users = _access.load_users()
+    entry = users.get(email) or {}
+    entry.update({
+        "sections": sorted(sections),
+        "added_by": entry.get("added_by") or _session.get("email", "local"),
+        "added": entry.get("added") or datetime.now().isoformat(timespec="seconds"),
+        "updated_by": _session.get("email", "local"),
+        "updated": datetime.now().isoformat(timespec="seconds"),
+    })
+    users[email] = entry
+    _access.save_users(users)
+    flash(f"Saved access for {email}.")
+    return redirect(url_for("admin.users_page"))
+
+
+@admin_bp.post("/users/delete")
+def users_delete():
+    email = (request.form.get("email") or "").strip().lower()
+    users = _access.load_users()
+    if email == (_session.get("email") or "").lower():
+        flash("You can't remove your own access.")
+        return redirect(url_for("admin.users_page"))
+    if users.pop(email, None) is not None:
+        _access.save_users(users)
+        flash(f"Removed {email}.")
+    return redirect(url_for("admin.users_page"))

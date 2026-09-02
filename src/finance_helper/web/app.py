@@ -27,7 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import config, destinations, insights, pipeline, validate
 from .. import review as proposal_review
-from . import store
+from . import access, store
 from .admin import admin_bp
 from .billcheck import billcheck_bp
 from .cashproof import cashproof_bp
@@ -268,7 +268,18 @@ def create_app() -> Flask:
             return None
         if not session.get("authed"):
             return redirect(url_for("login", next=request.path))
+        section = access.section_for_endpoint(request.endpoint)
+        if section and not access.allowed(session.get("email", ""), section):
+            flash("You don't have access to that section — ask an admin "
+                  "(Admin → Users).")
+            return redirect(url_for("index"))
         return None
+
+    @app.context_processor
+    def _access_context():
+        if not google_login_enabled:
+            return {"perms": set(access.SECTIONS)}
+        return {"perms": access.sections_for(session.get("email", "")) or set()}
 
     @app.get("/login")
     def login():
@@ -337,11 +348,21 @@ def create_app() -> Flask:
             flash(f"{email or 'That Google account'} isn't authorized for this tool.")
             return redirect(url_for("login"))
 
+        # Domain proved WHO they are; the user store decides IF and WHAT.
+        became_admin = access.ensure_bootstrap_admin(email)
+        if access.sections_for(email) is None:
+            flash(f"{email} isn't authorized for Scout yet — ask an admin to "
+                  "add you (Admin → Users).")
+            return redirect(url_for("login"))
+
         next_path = session.pop("oauth_next", None)
         session.clear()
         session["authed"] = True
         session["email"] = email
         session.permanent = True
+        if became_admin:
+            flash("You're the first user, so you've been made an admin — "
+                  "manage who can access Scout in Admin → Users.")
         return redirect(next_path or url_for("index"))
 
     @app.get("/logout")

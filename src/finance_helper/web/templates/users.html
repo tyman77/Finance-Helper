@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Users — Scout{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<p class="subtle" style="max-width:65ch">Who can open Scout at all, and which sections they see.
+Someone signing in with a company Google account who isn't listed here gets no access.
+Granting the <strong>Admin</strong> section makes them an admin (all sections + this page).</p>
+
+<div class="panel">
+  <h2>Add or update a user</h2>
+  <form method="post" action="{{ url_for('admin.users_save') }}" class="upload-form">
+    <label>Email <input type="email" name="email" placeholder="name@summitintegrated.com" required></label>
+    {% for key, label in sections.items() %}
+    <label><input type="checkbox" name="sections" value="{{ key }}"
+                  {% if key != 'admin' %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <button type="submit">Save access</button>
+  </form>
+</div>
+
+{% if env_admins %}
+<p class="subtle">Always admins (set by FINANCE_HELPER_ADMIN_EMAILS in the environment):
+{{ env_admins | join(', ') }}</p>
+{% endif %}
+
+<h2>Current users</h2>
+{% if users %}
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Email</th><th>Sections</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {% for email, u in users %}
+    <tr>
+      <td>{{ email }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.users_save') }}" class="dispo">
+          <input type="hidden" name="email" value="{{ email }}">
+          {% for key, label in sections.items() %}
+          <label style="margin-right:.7rem;white-space:nowrap">
+            <input type="checkbox" name="sections" value="{{ key }}"
+                   {% if key in (u.get('sections') or []) %}checked{% endif %}>
+            {{ key }}</label>
+          {% endfor %}
+          <button type="submit">Update</button>
+        </form>
+      </td>
+      <td class="subtle">{{ (u.get('added') or '')[:10] }}
+        {% if u.get('added_by') %}<br>by {{ u['added_by'] }}{% endif %}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.users_delete') }}"
+              onsubmit="return confirm('Remove all access for {{ email }}?')">
+          <input type="hidden" name="email" value="{{ email }}">
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="subtle">No users yet — the first person to sign in becomes admin automatically.</p>
+{% endif %}
+{% endblock %}

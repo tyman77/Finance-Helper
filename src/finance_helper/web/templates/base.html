@@ -22,6 +22,7 @@
       Scout
     </a>
     <nav class="nav">
+      {% if 'travel' in perms %}
       <a href="{{ url_for('domain_page', domain='flights') }}"
          class="navlink {{ 'active' if ep == 'domain_page' and request.view_args.get('domain') == 'flights' }}">
         <span class="navdot s0"></span>Flights</a>
@@ -31,14 +32,22 @@
       <a href="{{ url_for('domain_page', domain='cars') }}"
          class="navlink {{ 'active' if ep == 'domain_page' and request.view_args.get('domain') == 'cars' }}">
         <span class="navdot s2"></span>Rental Cars</a>
+      {% endif %}
+      {% if 'cashproof' in perms %}
       <a href="{{ url_for('cashproof.landing') }}"
          class="navlink {{ 'active' if ep.startswith('cashproof.') }}">Cash Proof</a>
       <a href="{{ url_for('billcheck.landing') }}"
          class="navlink {{ 'active' if ep.startswith('billcheck.') }}">Bill Check</a>
+      {% endif %}
     </nav>
     <span class="topbar-right">
+      {% if 'travel' in perms %}
       <a href="{{ url_for('insights_page') }}" class="logout-link {{ 'active' if ep == 'insights_page' }}">All spend</a>
-      <a href="{{ url_for('admin.admin_page') }}" class="logout-link {{ 'active' if ep.startswith('admin.') }}">Admin</a>
+      {% endif %}
+      {% if 'admin' in perms %}
+      <a href="{{ url_for('admin.users_page') }}" class="logout-link {{ 'active' if ep == 'admin.users_page' }}">Users</a>
+      <a href="{{ url_for('admin.admin_page') }}" class="logout-link {{ 'active' if ep.startswith('admin.') and ep != 'admin.users_page' }}">Admin</a>
+      {% endif %}
       {% if session.get('authed') %}
         <span class="subtle whoami">{{ session.get('email') }}</span>
         <a href="{{ url_for('logout') }}" class="logout-link">Log out</a>
