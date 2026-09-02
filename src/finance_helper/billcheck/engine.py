@@ -14,6 +14,7 @@ from datetime import datetime
 
 from . import compare
 from . import store
+from .extract import SCHEMA_VERSION
 
 SKIP_STATUSES = ("match", "mismatch", "review", "unreadable")
 
@@ -27,7 +28,9 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
     existing = existing or {}
     duplicates = duplicates or []
     fp = store.fingerprint(bill, extra=sorted(duplicates))
-    if (existing.get("fingerprint") == fp and not force
+    cached_read = existing.get("extracted") or {}
+    read_current = bool(cached_read) and cached_read.get("schema") == SCHEMA_VERSION
+    if (existing.get("fingerprint") == fp and not force and read_current
             and existing.get("status") in SKIP_STATUSES):
         return None, "unchanged"
 
@@ -35,8 +38,8 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
     uploaded = bool(docs_meta) and docs_meta[0].get("source") == "upload"
     extracted, error, outcome = None, None, ""
 
-    if existing.get("extracted") and not force:
-        extracted, outcome = existing["extracted"], "reused"
+    if read_current and not force:
+        extracted, outcome = cached_read, "reused"
     else:
         # Only a hand-uploaded file is reused from disk. Anything that came
         # from Bill.com is pulled again — a cached copy of a bad answer
@@ -122,7 +125,8 @@ def run_check(fetch_bills, fetch_documents, extract_fn, log=lambda m: None,
         if not bill.get("id"):
             continue
         existing = store.load_result(bill["id"])
-        needs_read = force or not (existing or {}).get("extracted")
+        cached = (existing or {}).get("extracted") or {}
+        needs_read = force or cached.get("schema") != SCHEMA_VERSION
         if needs_read and reads >= limit:
             limit_hit = True
             continue

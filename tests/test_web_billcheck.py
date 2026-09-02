@@ -61,7 +61,7 @@ def fakes(monkeypatch):
         calls["reads"] += 1
         calls["last_docs"] = docs
         bill_id = docs[0]["data"].split(b" ")[-1].decode()
-        return dict(PDFS.get(bill_id) or PDFS["b-ok"])
+        return {**(PDFS.get(bill_id) or PDFS["b-ok"]), "schema": extract.SCHEMA_VERSION}
 
     monkeypatch.setattr(billdotcom_api, "fetch_bill_documents", fetch_docs)
     monkeypatch.setattr(extract, "extract_invoice", read)

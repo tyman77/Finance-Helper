@@ -20,6 +20,9 @@ from pydantic import BaseModel
 
 DEFAULT_MODEL = "claude-opus-5"
 MAX_BYTES = 30 * 1024 * 1024          # API request ceiling is 32 MB
+# Bump when InvoiceFields gains something the comparison depends on; reads
+# stored under an older number are refreshed on the next run.
+SCHEMA_VERSION = 2
 
 SYSTEM_PROMPT = """You read vendor invoices for an accounts-payable team. Report only what the document actually states; use null for anything not printed on it. Do not guess.
 

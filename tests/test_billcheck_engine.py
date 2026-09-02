@@ -15,7 +15,8 @@ def _bill(**over):
 
 
 def _pdf(**over):
-    base = {"is_invoice": True, "vendor": "Acme Supply", "invoice_number": "1001",
+    base = {"schema": engine.SCHEMA_VERSION,
+            "is_invoice": True, "vendor": "Acme Supply", "invoice_number": "1001",
             "invoice_date": "2026-08-01", "due_date": "2026-08-31", "terms": "Net 30",
             "terms_days": 30, "total": "1500.00", "currency": "USD", "po_number": None,
             "confidence": "high", "notes": ""}
@@ -200,3 +201,15 @@ def test_failed_read_refetches_from_billcom_instead_of_cached_copy():
     assert outcome2 == "read" and payload2["status"] == "match"
     assert f.fetches == 2
     assert payload2["documents"][0]["media_type"] == "application/pdf"
+
+
+def test_read_from_an_older_schema_is_refreshed_once():
+    f = Fakes()
+    payload, _ = engine.check_bill(_bill(), None, f.fetch, f.extract)
+    payload["extracted"]["schema"] = 1                 # stored by an older build
+    store.save_result("b1", payload)
+    again, outcome = engine.check_bill(_bill(), store.load_result("b1"), f.fetch, f.extract)
+    assert outcome == "read" and f.reads == 2
+    store.save_result("b1", again)
+    third, outcome3 = engine.check_bill(_bill(), store.load_result("b1"), f.fetch, f.extract)
+    assert third is None and outcome3 == "unchanged" and f.reads == 2
