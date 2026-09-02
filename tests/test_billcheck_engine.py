@@ -172,3 +172,31 @@ def test_fingerprint_ignores_noise_fields():
     assert a == b
     assert store.fingerprint(_bill(due_date="2026-09-01")) != a
     assert store.fingerprint(_bill(), extra=["dup"]) != a
+
+
+def test_failed_read_refetches_from_billcom_instead_of_cached_copy():
+    """A bad cached attachment (Bill.com answered with HTML) must not be
+    re-read forever: the retry pulls the attachment again."""
+    class Flaky(Fakes):
+        def __init__(self):
+            super().__init__()
+            self.bad = True
+        def fetch(self, bill_id):
+            if self.bad:
+                self.fetches += 1
+                return [{"name": "page-1", "media_type": "text/html", "data": b"<html>login</html>"}]
+            return super().fetch(bill_id)
+        def extract(self, docs):
+            if docs[0]["media_type"] == "text/html":
+                raise RuntimeError("Unsupported attachment type text/html")
+            return super().extract(docs)
+
+    f = Flaky()
+    payload, outcome = engine.check_bill(_bill(), None, f.fetch, f.extract)
+    assert outcome == "error" and "text/html" in payload["error"]
+    store.save_result("b1", payload)
+    f.bad = False
+    payload2, outcome2 = engine.check_bill(_bill(), store.load_result("b1"), f.fetch, f.extract)
+    assert outcome2 == "read" and payload2["status"] == "match"
+    assert f.fetches == 2
+    assert payload2["documents"][0]["media_type"] == "application/pdf"

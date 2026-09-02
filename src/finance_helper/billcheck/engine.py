@@ -37,8 +37,11 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
     if existing.get("extracted") and not force:
         extracted, outcome = existing["extracted"], "reused"
     else:
+        # Only a hand-uploaded file is reused from disk. Anything that came
+        # from Bill.com is pulled again — a cached copy of a bad answer
+        # (an HTML page instead of the PDF) would otherwise fail forever.
         documents = []
-        if uploaded or (docs_meta and not force):
+        if uploaded:
             documents = store.load_documents(bill["id"], docs_meta)
         if not documents:
             try:
