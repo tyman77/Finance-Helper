@@ -161,11 +161,11 @@ def _v2_base() -> str:
     return (os.environ.get("BILLDOTCOM_V2_URL") or "https://api.bill.com/api/v2").rstrip("/")
 
 
-def _v2_call(path: str, data: dict) -> dict:
+def _v2_call(path: str, data: dict, http=None) -> dict:
     import requests
 
     try:
-        resp = requests.post(f"{_v2_base()}/{path}", data=data, timeout=60)
+        resp = (http or requests).post(f"{_v2_base()}/{path}", data=data, timeout=60)
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(f"Bill.com v2 request failed: {type(exc).__name__}: {exc}") from exc
     try:
@@ -179,15 +179,17 @@ def _v2_call(path: str, data: dict) -> dict:
     return js.get("response_data")
 
 
-def _v2_login() -> tuple[str, str]:
-    """(devKey, sessionId) for the classic API."""
+def _v2_login(http=None) -> tuple[str, str]:
+    """(devKey, sessionId) for the classic API. Pass a requests.Session as
+    `http` to keep the cookies the login sets — the image servlet that serves
+    attachments authenticates by cookie, not by the sessionId header."""
     dev_key = os.environ["BILLDOTCOM_DEV_KEY"].strip()
     session = _v2_call("Login.json", {
         "devKey": dev_key,
         "userName": os.environ["BILLDOTCOM_USERNAME"].strip(),
         "password": os.environ["BILLDOTCOM_PASSWORD"].strip(),
         "orgId": os.environ["BILLDOTCOM_ORG_ID"].strip(),
-    })["sessionId"]
+    }, http=http)["sessionId"]
     return dev_key, session
 
 
@@ -434,30 +436,42 @@ def _redact_url(url: str) -> str:
     return re.sub(r"(sessionId|devKey)=[^&]+", r"\1=…", url)
 
 
-def _html_snippet(r) -> str:
-    text = r.text[:4000] if isinstance(getattr(r, "text", None), str) else ""
+def _page_snippet(r) -> str:
+    text = r.text[:6000] if isinstance(getattr(r, "text", None), str) else ""
     m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
-    if m:
-        return "title: " + " ".join(m.group(1).split())[:120]
-    stripped = " ".join(re.sub(r"<[^>]+>", " ", text).split())
-    return stripped[:160]
+    title = " ".join(m.group(1).split())[:100] if m else ""
+    body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.I | re.S)
+    body = " ".join(re.sub(r"<[^>]+>", " ", body).split())[:220]
+    out = []
+    if title:
+        out.append(f"title: {title}")
+    if body:
+        out.append(f"text: {body}")
+    if not out:
+        out.append(f"{len(r.content)} bytes, no visible text")
+    return "; ".join(out)
 
 
-def _download_file(url: str, dev_key: str, session: str) -> tuple[bytes, str, str]:
+def _download_file(url: str, dev_key: str, session: str, http=None) -> tuple[bytes, str, str]:
     """GET the attachment, trying each way Bill.com might want the session
-    presented (headers, query string, form POST). Returns (bytes, media
-    type, filename). Raises with every attempt's outcome — including what an
-    HTML answer said — when none yields a PDF or image."""
+    presented — the login's own cookies first (the image servlet is a web
+    endpoint, not an API one), then headers, query string, an explicit
+    sessionId cookie, and a form POST. Only a PDF or image counts. Raises
+    with every attempt's outcome, final URL and page text when none does."""
     import requests
 
+    http = http or requests.Session()
     headers = {"devKey": dev_key, "sessionId": session}
     creds = {"devKey": dev_key, "sessionId": session}
+    jar = {c.name for c in http.cookies}
     attempts = (
-        ("GET with session headers", lambda: requests.get(url, headers=headers, timeout=60)),
-        ("GET with session in query", lambda: requests.get(url, params=creds, headers=headers, timeout=60)),
-        ("POST with session form", lambda: requests.post(url, data=creds, headers=headers, timeout=60)),
+        ("GET with login cookies", lambda: http.get(url, timeout=60)),
+        ("GET with session headers", lambda: http.get(url, headers=headers, timeout=60)),
+        ("GET with session in query", lambda: http.get(url, params=creds, headers=headers, timeout=60)),
+        ("GET with sessionId cookie", lambda: http.get(url, cookies=creds, timeout=60)),
+        ("POST with session form", lambda: http.post(url, data=creds, headers=headers, timeout=60)),
     )
-    tried = []
+    tried = [f"login cookies held: {', '.join(sorted(jar)) or 'none'}"]
     for label, call in attempts:
         try:
             r = call()
@@ -470,8 +484,12 @@ def _download_file(url: str, dev_key: str, session: str) -> tuple[bytes, str, st
             disp = r.headers.get("Content-Disposition", "")
             m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disp)
             return r.content, media, (m.group(1).strip() if m else "")
-        detail = _html_snippet(r) if media.startswith("text/") else f"{len(r.content)} bytes"
-        tried.append(f"{label}: HTTP {r.status_code} {media} — {detail}")
+        landed = ""
+        final = getattr(r, "url", "") or ""
+        if final and _redact_url(final) != _redact_url(url):
+            landed = f" (landed on {_redact_url(final)[:160]} after {len(getattr(r, 'history', []) or [])} redirects)"
+        detail = _page_snippet(r) if media.startswith("text/") else f"{len(r.content)} bytes"
+        tried.append(f"{label}: HTTP {r.status_code} {media}{landed} — {detail}")
     raise RuntimeError("Attachment download returned no PDF/image from "
                        + _redact_url(url)[:200] + "\n" + "\n".join(tried))
 
@@ -487,7 +505,8 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
     import json as _json
     import requests
 
-    dev_key, session = _v2_login()
+    http = requests.Session()               # keeps the login's cookies
+    dev_key, session = _v2_login(http)
     path = os.environ.get("BILLDOTCOM_DOC_PAGES_PATH") or "GetDocumentPages.json"
     docs: list[dict] = []
     page = 1
@@ -495,7 +514,7 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
         resp = _v2_call(path, {
             "devKey": dev_key, "sessionId": session,
             "data": _json.dumps({"id": bill_id, "pageNumber": page}),
-        }) or {}
+        }, http=http) or {}
         info = resp.get("documentPages") if isinstance(resp, dict) else None
         info = info if isinstance(info, dict) else (resp if isinstance(resp, dict) else {})
         url = info.get("fileUrl") or info.get("url") or info.get("downloadUrl")
@@ -503,7 +522,7 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
             raise RuntimeError("Bill.com returned no file URL for the attachment on "
                                f"bill {bill_id}:\n" + _json.dumps(resp, default=str)[:400])
         url = absolute_file_url(url)
-        content, media, filename = _download_file(url, dev_key, session)
+        content, media, filename = _download_file(url, dev_key, session, http)
         docs.append({"name": str(info.get("name") or info.get("fileName")
                                  or filename or f"page-{page}"),
                      "media_type": media, "data": content})

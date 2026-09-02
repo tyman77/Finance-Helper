@@ -30,9 +30,9 @@ ENTITIES = {
 @pytest.fixture
 def fake_v2(monkeypatch):
     calls = []
-    monkeypatch.setattr(api, "_v2_login", lambda: ("key", "sess"))
+    monkeypatch.setattr(api, "_v2_login", lambda http=None: ("key", "sess"))
 
-    def call(path, data):
+    def call(path, data, http=None):
         calls.append((path, data))
         if path.startswith("List/"):
             entity = path[len("List/"):-len(".json")]
@@ -74,12 +74,12 @@ def test_fetch_bill_documents_pdf_stops_after_first_page(fake_v2, monkeypatch):
             self.headers = {"Content-Type": ctype}
 
     got = []
-    monkeypatch.setattr(requests, "get", lambda url, **kw: (got.append((url, kw["headers"]))
+    monkeypatch.setattr(requests.Session, "get", lambda self, url, **kw: (got.append((url, kw.get("headers")))
                                                             or R(b"%PDF-1.7 doc", "application/pdf")))
     docs = api.fetch_bill_documents("b1")
     assert len(docs) == 1 and docs[0]["media_type"] == "application/pdf"
     assert docs[0]["name"] == "invoice.pdf" and docs[0]["data"].startswith(b"%PDF")
-    assert got[0][1] == {"devKey": "key", "sessionId": "sess"}
+    assert got[0][1] is None                      # first try: login cookies alone
 
 
 def test_fetch_bill_documents_images_walk_every_page(fake_v2, monkeypatch):
@@ -90,13 +90,13 @@ def test_fetch_bill_documents_images_walk_every_page(fake_v2, monkeypatch):
         content = b"\x89PNG\r\n\x1a\npage"
         headers = {"Content-Type": "image/png"}
 
-    monkeypatch.setattr(requests, "get", lambda url, **kw: R())
+    monkeypatch.setattr(requests.Session, "get", lambda self, url, **kw: R())
     docs = api.fetch_bill_documents("b1")
     assert len(docs) == 2 and {d["media_type"] for d in docs} == {"image/png"}
 
 
 def test_fetch_bill_documents_reports_missing_url(fake_v2, monkeypatch):
-    monkeypatch.setattr(api, "_v2_call", lambda path, data: {"documentPages": {}})
+    monkeypatch.setattr(api, "_v2_call", lambda path, data, http=None: {"documentPages": {}})
     with pytest.raises(RuntimeError, match="no file URL"):
         api.fetch_bill_documents("b1")
 
@@ -123,7 +123,7 @@ def test_absolute_file_url_resolves_relative_paths(monkeypatch):
 def test_fetch_bill_documents_makes_relative_url_absolute(fake_v2, monkeypatch):
     import requests
 
-    monkeypatch.setattr(api, "_v2_call", lambda path, data: {
+    monkeypatch.setattr(api, "_v2_call", lambda path, data, http=None: {
         "documentPages": {"fileUrl": "/api/v2/GetDocumentPages?x=1", "numPages": 1}})
 
     class R:
@@ -132,7 +132,7 @@ def test_fetch_bill_documents_makes_relative_url_absolute(fake_v2, monkeypatch):
         headers = {"Content-Type": "application/pdf"}
 
     seen = []
-    monkeypatch.setattr(requests, "get", lambda url, **kw: (seen.append(url) or R()))
+    monkeypatch.setattr(requests.Session, "get", lambda self, url, **kw: (seen.append(url) or R()))
     api.fetch_bill_documents("b1")
     assert seen == ["https://api.bill.com/api/v2/GetDocumentPages?x=1"]
 
@@ -150,32 +150,33 @@ def test_download_falls_back_to_query_credentials(fake_v2, monkeypatch):
 
     calls = []
 
-    def get(url, **kw):
+    def get(self, url, **kw):
         calls.append(("GET", url, kw.get("params")))
         if kw.get("params"):
             return _Resp(b"%PDF-1.4 ok", "application/pdf",
                          disp='attachment; filename="invoice 36397.pdf"')
         return _Resp(b"<html><title>Sign in to Bill.com</title></html>", "text/html")
 
-    monkeypatch.setattr(requests, "get", get)
-    monkeypatch.setattr(requests, "post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("no POST needed")))
+    monkeypatch.setattr(requests.Session, "get", get)
+    monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("no POST needed")))
     docs = api.fetch_bill_documents("b1")
     assert docs[0]["media_type"] == "application/pdf"
     assert docs[0]["name"] == "invoice.pdf"          # GetDocumentPages name wins
-    assert calls[1][2] == {"devKey": "key", "sessionId": "sess"}
+    assert calls[2][2] == {"devKey": "key", "sessionId": "sess"}   # cookies, headers, then query
 
 
 def test_download_reports_every_attempt_when_all_return_html(fake_v2, monkeypatch):
     import requests
 
     html = _Resp(b"<html><head><title>Bill.com - Login</title></head></html>", "text/html; charset=utf-8")
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: html)
-    monkeypatch.setattr(requests, "post", lambda *a, **kw: html)
+    monkeypatch.setattr(requests.Session, "get", lambda *a, **kw: html)
+    monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: html)
     with pytest.raises(RuntimeError) as exc:
         api.fetch_bill_documents("b1")
     msg = str(exc.value)
     assert "no PDF/image from https://files.test/1" in msg
-    assert msg.count("text/html") == 3 and "Bill.com - Login" in msg
+    assert msg.count("text/html") == 5 and "Bill.com - Login" in msg
+    assert "login cookies held: none" in msg
     assert "POST with session form" in msg
 
 
