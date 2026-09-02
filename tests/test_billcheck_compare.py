@@ -457,3 +457,10 @@ def test_proforma_accepted_and_net30_needs_no_qp():
     fs = _by_field(r)
     assert "document" not in fs          # proforma is a real invoice here
     assert "discount" not in fs          # Net 30 never carries their QP
+
+
+def test_vendor_check_can_be_disabled():
+    r = compare.compare_bill(_bill(vendor="Totally Different Co"),
+                             _pdf(vendor="Zenith Logistics"),
+                             check_vendor=False)
+    assert "vendor" not in _by_field(r)

@@ -51,6 +51,10 @@ cards:
     "RAMP STATEMENT": "20011"    # Ramp CC Payable — statement settlements
 
 billcheck:
+  # Vendor-name mismatches have never been a real problem here — trade
+  # names vs legal names would need a mass cleanup — so the check is off.
+  # (The duplicate scan still keys on vendor+invoice, unaffected.)
+  check_vendor: false
   # Per-vendor payment policies for the Bill Check comparison.
   #   quickpay: take  — we take this vendor's early-pay discount; `pct` is
   #                     the negotiated rate (the invoice's offer is verified

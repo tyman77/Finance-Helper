@@ -166,7 +166,8 @@ def _vendor_policy(vendor, policies: dict | None) -> dict:
 
 
 def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
-                 policies: dict | None = None, aliases: dict | None = None) -> dict:
+                 policies: dict | None = None, aliases: dict | None = None,
+                 check_vendor: bool = True) -> dict:
     bill = bill or {}
     ex = extracted or {}
     findings: list[dict] = []
@@ -400,8 +401,12 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
                 "no due date or terms — confirm."))
 
     # Vendor — paying the right party. Known trade-name aliases
-    # (billcheck.vendor_aliases: SnapAV = Snap One, ...) count as the same.
-    if ex.get("vendor") and bill.get("vendor") and not vendor_matches(bill["vendor"], ex["vendor"]):
+    # (billcheck.vendor_aliases: SnapAV = Snap One, ...) count as the same;
+    # billcheck.check_vendor: false turns this check off entirely (trade
+    # names vs legal names make it noisy, and the invoice-number duplicate
+    # scan is what really catches paying the wrong party).
+    if check_vendor and ex.get("vendor") and bill.get("vendor") \
+            and not vendor_matches(bill["vendor"], ex["vendor"]):
         alias_ok = any(
             (vendor_matches(bill["vendor"], a) and vendor_matches(ex["vendor"], b))
             or (vendor_matches(bill["vendor"], b) and vendor_matches(ex["vendor"], a))

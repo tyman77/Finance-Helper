@@ -24,7 +24,8 @@ _DEFAULTS = {
     },
     "entities": {"external": []},
     "cards": {"liability_accounts": {}},
-    "billcheck": {"vendor_policies": {}, "vendor_aliases": {}},
+    "billcheck": {"vendor_policies": {}, "vendor_aliases": {},
+                  "check_vendor": True},
     "matching": {
         "exact_window_days": 3,
         "batch_window_days": 45,

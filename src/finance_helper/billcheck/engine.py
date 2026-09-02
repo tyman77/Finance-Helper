@@ -92,7 +92,8 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
               f"{outcome}: {error}", file=sys.stderr, flush=True)
 
     comparison = (compare.compare_bill(bill, extracted, policies=policies,
-                                       aliases=aliases)
+                                       aliases=aliases,
+                                       check_vendor=bc_cfg.get("check_vendor", True))
                   if extracted else None)
     if comparison and duplicates:
         comparison["findings"].insert(0, {
