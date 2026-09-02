@@ -50,6 +50,14 @@ cards:
     "KOFAHL NICHOLAS": "20013"   # Credit Liability - Nick Chase
     "RAMP STATEMENT": "20011"    # Ramp CC Payable — statement settlements
 
+billcheck:
+  # Per-vendor payment policies for the Bill Check comparison.
+  # quickpay: never — this vendor's early-pay discount is never taken, so
+  # findings expect the NET terms, not the discount deadline.
+  vendor_policies:
+    "TD SYNNEX":
+      quickpay: never
+
 matching:
   exact_window_days: 3        # pass 1: same amount, name overlap
   batch_window_days: 45       # pass 2: GL batch posting can precede the bank

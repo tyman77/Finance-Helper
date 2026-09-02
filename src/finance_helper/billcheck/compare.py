@@ -149,11 +149,24 @@ def _finding(field, severity, entered, pdf, reason) -> dict:
             "pdf": "" if pdf is None else str(pdf), "reason": reason}
 
 
-def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) -> dict:
+def _vendor_policy(vendor, policies: dict | None) -> dict:
+    for name, pol in (policies or {}).items():
+        if isinstance(pol, dict) and vendor_matches(vendor, name):
+            return pol
+    return {}
+
+
+def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
+                 policies: dict | None = None) -> dict:
     bill = bill or {}
     ex = extracted or {}
     findings: list[dict] = []
     expected_due, basis, basis_is_pdf = None, "", False
+    policy = _vendor_policy(bill.get("vendor") or (ex or {}).get("vendor"), policies)
+    # Vendor exception to the always-take-the-discount house rule: for this
+    # vendor the quick-pay discount is NEVER taken — full amount, net terms.
+    skip_quickpay = str(policy.get("quickpay") or "").lower() in ("never", "no", "skip") \
+        or policy.get("ignore_quickpay") is True
 
     if not ex:
         return {"status": "unreadable", "severity": "review", "findings": [
@@ -194,7 +207,7 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
                        + (f" if paid by {disc_date.isoformat()}" if disc_date else " with the early-pay discount")
                        + "; the entry matches neither.")
         findings.append(_finding("amount", "critical", bill.get("amount"), f"{pdf_amt:.2f}", reason))
-    elif has_discount and saving is not None and saving > 0:
+    elif has_discount and saving is not None and saving > 0 and not skip_quickpay:
         findings.append(_finding(
             "discount", "high", bill.get("amount"), f"{disc_amt:.2f}",
             f"Early-pay discount not taken: enter {disc_amt:.2f} due "
@@ -231,7 +244,31 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
     if pdf_terms_days is None:
         pdf_terms_days = parse_terms_days(ex.get("terms"))
     anchor = pdf_idate or ent_idate
-    if pdf_due is not None:
+
+    # Vendor policy: this vendor's quick-pay discount is never taken, so the
+    # discount deadline is NOT the due date. Expect the NET terms instead —
+    # from an explicit "Net N" on the invoice, else the vendor's Bill.com
+    # terms. A printed due date at/after net terms is the real (net) due
+    # date and still wins.
+    terms_text = str(ex.get("terms") or "")
+    if skip_quickpay and anchor is not None and (has_discount or "%" in terms_text):
+        m = _NET.search(terms_text)
+        net_days = int(m.group(1)) if m else bill.get("terms_days")
+        if net_days is not None:
+            net_due = add_days(anchor, int(net_days))
+            if pdf_due is not None and pdf_due >= net_due:
+                expected_due, basis, basis_is_pdf = \
+                    pdf_due, "the due date printed on the invoice", True
+            else:
+                expected_due = net_due
+                basis = (f"the invoice's net terms (Net {net_days}) from "
+                         f"{anchor.isoformat()} — the quick-pay discount is "
+                         "never taken for this vendor (policy)")
+                basis_is_pdf = True
+
+    if expected_due is not None:
+        pass
+    elif pdf_due is not None:
         expected_due, basis, basis_is_pdf = pdf_due, "the due date printed on the invoice", True
     elif pdf_terms_days is not None and anchor is not None:
         expected_due = add_days(anchor, int(pdf_terms_days))
@@ -245,7 +282,7 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
                  f"from the {anchor.isoformat()} invoice date")
         basis_is_pdf = False
 
-    if has_discount:
+    if has_discount and not skip_quickpay:
         if disc_date is None:
             disc_days = ex.get("discount_days")
             if disc_days is None:
@@ -259,7 +296,7 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
         findings.append(_finding(
             "due_date", "high", "", expected_due.isoformat() if expected_due else "",
             "No due date entered in Bill.com."))
-    elif has_discount and disc_date is not None:
+    elif has_discount and disc_date is not None and not skip_quickpay:
         delta = (ent_due - disc_date).days
         if delta > 0:
             if discount_taken:

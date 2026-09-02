@@ -259,3 +259,62 @@ def test_amount_matching_neither_total_names_both():
 def test_no_discount_row_when_invoice_has_none():
     r = compare.compare_bill(_bill(), _pdf())
     assert not any(x["field"] == "discount" for x in r["fields"])
+
+# --- vendor policy: quick-pay never taken (TD Synnex) -----------------------
+
+POLICIES = {"TD SYNNEX": {"quickpay": "never"}}
+
+
+def test_quickpay_policy_expects_net_terms_not_discount_date():
+    # TD Synnex prints the discount deadline as the due date; we never take
+    # the discount, so an entered net-terms due date is correct.
+    bill = _bill(vendor="TD SYNNEX Corp", due_date="2026-09-15", terms="Net 45",
+                 terms_days=45)
+    pdf = _pdf(vendor="TD SYNNEX", due_date="2026-08-11",
+               terms="2% 10 Net 45", terms_days=45)
+    # Without the policy: flagged critical as "would be paid late".
+    without = _by_field(compare.compare_bill(bill, pdf))
+    assert without["due_date"]["severity"] == "critical"
+    # With the policy: clean, and the basis names the policy.
+    r = compare.compare_bill(bill, pdf, policies=POLICIES)
+    assert "due_date" not in _by_field(r)
+    assert "never taken" in r["expected_due_basis"]
+
+
+def test_quickpay_policy_still_flags_beyond_net_terms():
+    bill = _bill(vendor="TD SYNNEX", due_date="2026-11-30", terms="Net 45",
+                 terms_days=45)
+    pdf = _pdf(vendor="TD SYNNEX", due_date="2026-08-11",
+               terms="2% 10 Net 45", terms_days=45)
+    f = _by_field(compare.compare_bill(bill, pdf, policies=POLICIES))
+    assert f["due_date"]["severity"] == "critical"      # genuinely late
+
+
+def test_quickpay_policy_keeps_printed_net_due_when_later():
+    # A printed due date AT/AFTER net terms is the real net due date.
+    bill = _bill(vendor="TD SYNNEX", due_date="2026-09-15")
+    pdf = _pdf(vendor="TD SYNNEX", due_date="2026-09-20",
+               terms="2% 10 Net 45", terms_days=45)
+    f = _by_field(compare.compare_bill(bill, pdf, policies=POLICIES))
+    assert f["due_date"]["pdf"] == "2026-09-20"
+
+
+def test_quickpay_policy_leaves_other_vendors_alone():
+    bill = _bill(due_date="2026-09-15")
+    pdf = _pdf(due_date="2026-08-11", terms="2% 10 Net 45", terms_days=45)
+    f = _by_field(compare.compare_bill(bill, pdf, policies=POLICIES))
+    assert f["due_date"]["severity"] == "critical"      # Acme has no policy
+
+
+def test_quickpay_policy_overrides_always_take_rule_end_to_end():
+    # TD Synnex with a full discount offer on the invoice: entering the FULL
+    # amount at NET terms is clean — no 'discount not taken', no due-date flag.
+    pdf = _pdf(vendor="TD SYNNEX", invoice_date="2026-08-01", due_date="2026-08-11",
+               terms="2% 10 Net 45", terms_days=45, total="1500.00",
+               discount_total="1470.00", discount_date="2026-08-11")
+    bill = _bill(vendor="TD SYNNEX Corporation", due_date="2026-09-15",
+                 amount="1500.00", terms="Net 45", terms_days=45)
+    r = compare.compare_bill(bill, pdf, policies=POLICIES)
+    fs = _by_field(r)
+    assert "discount" not in fs and "due_date" not in fs and "amount" not in fs
+    assert r["expected_due"] == "2026-09-15"

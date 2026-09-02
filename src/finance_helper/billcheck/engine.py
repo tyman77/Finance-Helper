@@ -66,7 +66,10 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
         print(f"[billcheck] bill {bill.get('id')} ({bill.get('vendor')} #{bill.get('invoice')}): "
               f"{outcome}: {error}", file=sys.stderr, flush=True)
 
-    comparison = compare.compare_bill(bill, extracted) if extracted else None
+    from ..recon.settings import recon_config
+    policies = (recon_config().get("billcheck") or {}).get("vendor_policies") or {}
+    comparison = (compare.compare_bill(bill, extracted, policies=policies)
+                  if extracted else None)
     if comparison and duplicates:
         comparison["findings"].insert(0, {
             "field": "duplicate", "severity": "critical", "entered": bill.get("invoice", ""),
