@@ -51,7 +51,8 @@ def test_extract_invoice_calls_parse_with_structured_output(monkeypatch):
     monkeypatch.setenv("BILLCHECK_EFFORT", "low")
     parsed = extract.InvoiceFields(
         is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
-        due_date=None, terms="Net 30", terms_days=30, total="10.00", currency="USD",
+        due_date=None, terms="Net 30", terms_days=30, total="10.00",
+        discount_total=None, discount_date=None, discount_terms=None, currency="USD",
         po_number=None, confidence="high", notes="")
     client = FakeClient(FakeResp(parsed))
     out = extract.extract_invoice(PDF, client=client)

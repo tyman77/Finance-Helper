@@ -175,3 +175,59 @@ def test_parse_date_formats():
     assert compare.parse_date("Aug 1, 2026") == date(2026, 8, 1)
     assert compare.parse_date("2026-08-01T00:00:00") == date(2026, 8, 1)
     assert compare.parse_date("soon") is None
+
+
+# --- early-payment discounts (the Gator Cases case) -------------------------
+
+def _gator_pdf(**over):
+    base = dict(vendor="Gator Co.", invoice_number="1386039-IN", invoice_date="2026-08-25",
+                due_date=None, terms="5% 25 Days, Net 26", terms_days=26, total="597.45",
+                discount_total="567.58", discount_date="2026-09-19",
+                discount_terms="5% 25 Days", po_number="PO011224")
+    return _pdf(**{**base, **over})
+
+
+def _gator_bill(**over):
+    base = dict(vendor="Gator Cases", invoice="1386039-IN", invoice_date="2026-08-25",
+                due_date="2026-09-19", amount="567.58", terms="Net 25", terms_days=25,
+                po="PO011224")
+    return _bill(**{**base, **over})
+
+
+def test_discount_taken_with_due_on_cutoff_is_clean():
+    r = compare.compare_bill(_gator_bill(), _gator_pdf())
+    assert r["status"] == "match" and r["discount_taken"] is True
+    assert r["expected_due"] == "2026-09-19"
+    row = next(x for x in r["fields"] if x["field"] == "discount")
+    assert row["entered"] == "taken" and row["state"] == "match" and "567.58 by 2026-09-19" in row["pdf"]
+
+
+def test_discount_taken_with_due_before_cutoff_is_clean_too():
+    r = compare.compare_bill(_gator_bill(due_date="2026-09-10"), _gator_pdf())
+    assert r["status"] == "match"
+
+
+def test_discount_taken_but_due_after_cutoff_is_critical():
+    r = compare.compare_bill(_gator_bill(due_date="2026-09-25"), _gator_pdf())
+    f = _by_field(r)["due_date"]
+    assert f["severity"] == "critical" and "short-pays the vendor by 29.87" in f["reason"]
+    assert "amount" not in _by_field(r)
+
+
+def test_full_amount_entered_flags_missed_discount_as_review():
+    r = compare.compare_bill(_gator_bill(amount="597.45", due_date="2026-09-20"), _gator_pdf())
+    assert r["status"] == "review"
+    f = _by_field(r)["discount"]
+    assert "saves 29.87" in f["reason"] and "2026-09-19" in f["reason"]
+    assert "amount" not in _by_field(r) and "due_date" not in _by_field(r)
+
+
+def test_amount_matching_neither_total_names_both():
+    r = compare.compare_bill(_gator_bill(amount="580.00"), _gator_pdf())
+    f = _by_field(r)["amount"]
+    assert f["severity"] == "critical" and "597.45 (full) or 567.58 if paid by 2026-09-19" in f["reason"]
+
+
+def test_no_discount_row_when_invoice_has_none():
+    r = compare.compare_bill(_bill(), _pdf())
+    assert not any(x["field"] == "discount" for x in r["fields"])

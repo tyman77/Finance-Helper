@@ -33,6 +33,7 @@ FIELD_LABELS = [
     ("invoice_date", "Invoice date"),
     ("due_date", "Due date"),
     ("amount", "Total"),
+    ("discount", "Early-pay discount"),
     ("terms", "Terms"),
     ("po", "PO #"),
 ]
@@ -159,17 +160,37 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
             + (f": {ex['notes']}" if ex.get("notes") else "")
             + ". Confirm the right document is attached."))
 
-    # Total — the number that leaves the bank.
+    # Total — the number that leaves the bank. An early-payment discount
+    # gives the invoice two valid totals: the full amount by the net date,
+    # or the reduced amount by the cut-off. Entering the reduced amount is
+    # taking the discount, which is fine as long as the due date honours
+    # the cut-off.
     ent_amt, pdf_amt = to_amount(bill.get("amount")), to_amount(ex.get("total"))
-    if pdf_amt is None:
+    disc_amt, disc_date = to_amount(ex.get("discount_total")), parse_date(ex.get("discount_date"))
+    has_discount = disc_amt is not None and (pdf_amt is None or disc_amt < pdf_amt)
+    discount_taken = (has_discount and ent_amt is not None
+                      and abs(ent_amt - disc_amt) <= AMOUNT_TOLERANCE)
+    saving = (pdf_amt - disc_amt) if (has_discount and pdf_amt is not None) else None
+    if pdf_amt is None and not discount_taken:
         findings.append(_finding("amount", "review", bill.get("amount"), "",
                                  "No total found on the PDF."))
+    elif discount_taken:
+        pass                                     # reduced amount, on purpose
     elif ent_amt is None or abs(ent_amt - pdf_amt) > AMOUNT_TOLERANCE:
         diff = (ent_amt - pdf_amt) if ent_amt is not None else None
+        reason = ("Entered total differs from the invoice"
+                  + (f" by {diff:+,.2f}" if diff is not None else "") + ".")
+        if has_discount:
+            reason += (f" The invoice's totals are {pdf_amt:.2f} (full) or {disc_amt:.2f}"
+                       + (f" if paid by {disc_date.isoformat()}" if disc_date else " with the early-pay discount")
+                       + "; the entry matches neither.")
+        findings.append(_finding("amount", "critical", bill.get("amount"), f"{pdf_amt:.2f}", reason))
+    elif has_discount and saving is not None and saving > 0:
         findings.append(_finding(
-            "amount", "critical", bill.get("amount"), f"{pdf_amt:.2f}",
-            "Entered total differs from the invoice"
-            + (f" by {diff:+,.2f}" if diff is not None else "") + "."))
+            "discount", "review", bill.get("amount"), f"{disc_amt:.2f}",
+            f"Early-pay discount available: {disc_amt:.2f} if paid by "
+            + (disc_date.isoformat() if disc_date else "the cut-off")
+            + f" saves {saving:,.2f}."))
 
     # Invoice number — duplicates and vendor remittance keys hang off it.
     ent_inv, pdf_inv = bill.get("invoice") or "", ex.get("invoice_number") or ""
@@ -215,10 +236,22 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
                  f"from the {anchor.isoformat()} invoice date")
         basis_is_pdf = False
 
+    if discount_taken and disc_date is not None:
+        # The discounted amount is only good through the cut-off.
+        expected_due, basis, basis_is_pdf = disc_date, "the early-pay cut-off printed on the invoice", True
     if ent_due is None:
         findings.append(_finding(
             "due_date", "high", "", expected_due.isoformat() if expected_due else "",
             "No due date entered in Bill.com."))
+    elif discount_taken:
+        if disc_date is not None and ent_due > disc_date:
+            late = (ent_due - disc_date).days
+            findings.append(_finding(
+                "due_date", "critical", ent_due.isoformat(), disc_date.isoformat(),
+                f"The discounted amount {disc_amt:.2f} was entered but the due date is {late} "
+                f"day{'s' if late != 1 else ''} after the {disc_date.isoformat()} cut-off — paying "
+                "then short-pays the vendor"
+                + (f" by {saving:,.2f}" if saving else "") + "."))
     elif expected_due is not None and ent_due != expected_due:
         delta = (ent_due - expected_due).days
         late = delta > 0
@@ -276,26 +309,38 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None) 
         "status": status,
         "severity": severity,
         "findings": findings,
-        "fields": _side_by_side(bill, ex, findings),
+        "fields": _side_by_side(bill, ex, findings, discount_taken),
         "expected_due": expected_due.isoformat() if expected_due else None,
         "expected_due_basis": basis,
+        "discount_taken": discount_taken,
     }
 
 
-def _side_by_side(bill: dict, ex: dict, findings: list[dict]) -> list[dict]:
+def _side_by_side(bill: dict, ex: dict, findings: list[dict], discount_taken: bool = False) -> list[dict]:
     by_field = {f["field"]: f for f in findings}
+    discount_pdf = ""
+    if ex.get("discount_total"):
+        discount_pdf = str(ex["discount_total"])
+        if ex.get("discount_date"):
+            discount_pdf += f" by {ex['discount_date']}"
+        if ex.get("discount_terms"):
+            discount_pdf += f" ({ex['discount_terms']})"
     pdf_values = {
         "vendor": ex.get("vendor"),
         "invoice": ex.get("invoice_number"),
         "invoice_date": ex.get("invoice_date"),
         "due_date": ex.get("due_date"),
         "amount": ex.get("total"),
+        "discount": discount_pdf,
         "terms": ex.get("terms"),
         "po": ex.get("po_number"),
     }
+    entered_values = {**bill, "discount": ("taken" if discount_taken else ("not taken" if discount_pdf else ""))}
     rows = []
     for key, label in FIELD_LABELS:
-        entered = bill.get(key)
+        if key == "discount" and not discount_pdf:
+            continue
+        entered = entered_values.get(key)
         pdf = pdf_values.get(key)
         f = by_field.get(key)
         if f:

@@ -485,7 +485,14 @@ def _candidate_urls(url: str, dev_key: str, session: str, page: int) -> list[tup
             q = {**base_q, **{k: str(v) for k, v in params.items()}}
             out.append((f"{host} {label}",
                         urlunsplit((parts.scheme or "https", host, parts.path, urlencode(q), ""))))
+    # Whatever worked last time goes first, so a working org costs one request.
+    good = _LAST_GOOD_VARIANT.get("label")
+    if good:
+        out.sort(key=lambda item: 0 if item[0] == good else 1)
     return out
+
+
+_LAST_GOOD_VARIANT: dict = {}
 
 
 def _download_file(url: str, dev_key: str, session: str, http=None, page: int = 1) -> tuple[bytes, str, str]:
@@ -510,6 +517,10 @@ def _download_file(url: str, dev_key: str, session: str, http=None, page: int = 
         media = sniff_media_type(r.content, r.headers.get("Content-Type", ""))
         if r.status_code == 200 and r.content and (
                 media == "application/pdf" or media.startswith("image/")):
+            if _LAST_GOOD_VARIANT.get("label") != label:
+                import sys
+                print(f"[billcheck] attachments download via: {label}", file=sys.stderr, flush=True)
+                _LAST_GOOD_VARIANT["label"] = label
             disp = r.headers.get("Content-Disposition", "")
             m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disp)
             return r.content, media, (m.group(1).strip() if m else "")
