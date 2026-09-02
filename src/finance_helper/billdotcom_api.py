@@ -523,19 +523,61 @@ def _download_file(url: str, dev_key: str, session: str, http=None, page: int = 
                        + _redact_url(url)[:200] + "\n" + "\n".join(tried))
 
 
+def _fetch_original_documents(bill_id: str, dev_key: str, session: str,
+                              http) -> list[dict]:
+    """The ORIGINAL uploaded file(s) via GetDocuments, when the org exposes
+    it. GetDocumentPages serves the viewer's re-rendered page previews at
+    screen resolution — reading a low-res preview is why scans come back
+    'illegible'. Any failure here is silent: the page-render path below
+    still works everywhere."""
+    import json as _json
+
+    path = os.environ.get("BILLDOTCOM_DOCS_PATH") or "GetDocuments.json"
+    try:
+        resp = _v2_call(path, {
+            "devKey": dev_key, "sessionId": session,
+            "data": _json.dumps({"id": bill_id, "start": 0, "max": 10}),
+        }, http=http) or {}
+    except Exception:
+        return []
+    items = resp if isinstance(resp, list) else \
+        (resp.get("documents") if isinstance(resp, dict) else None) or []
+    docs: list[dict] = []
+    for d in items:
+        if not isinstance(d, dict):
+            continue
+        url = d.get("fileUrl") or d.get("url") or d.get("downloadUrl")
+        if not url:
+            continue
+        try:
+            content, media, filename = _download_file(
+                absolute_file_url(url), dev_key, session, http, 1)
+        except Exception:
+            continue
+        docs.append({"name": str(d.get("name") or d.get("fileName")
+                                 or filename or "document"),
+                     "media_type": media, "data": content})
+    return docs
+
+
 def fetch_bill_documents(bill_id: str) -> list[dict]:
     """The attachment(s) on a bill as [{name, media_type, data}].
 
-    Uses the classic GetDocumentPages call: page 1 tells us how many pages
-    there are and where the file is; a PDF comes back whole, an image-backed
-    attachment one page at a time. Raises with the raw response when the org
-    has no attachment on the bill (or the path is different for this org).
+    Prefers the original uploaded file (GetDocuments — full resolution);
+    falls back to the classic GetDocumentPages call: page 1 tells us how
+    many pages there are and where the file is; a PDF comes back whole, an
+    image-backed attachment one page at a time. Raises with the raw
+    response when the org has no attachment on the bill (or the path is
+    different for this org).
     """
     import json as _json
     import requests
 
     http = requests.Session()               # keeps the login's cookies
     dev_key, session = _v2_login(http)
+    originals = _fetch_original_documents(bill_id, dev_key, session, http)
+    if originals:
+        return originals
     path = os.environ.get("BILLDOTCOM_DOC_PAGES_PATH") or "GetDocumentPages.json"
     docs: list[dict] = []
     page = 1

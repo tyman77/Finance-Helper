@@ -206,3 +206,25 @@ def test_candidate_urls_use_login_endpoint_host(monkeypatch):
     assert hosts == ["api.bill.com", "api-app02.us.bill.com", "app.bill.com"]
     assert urls[1][1] == "https://api.bill.com/is/BillImageServlet?entityId=X&pageNumber=2"
     assert urls[2][1].endswith("entityId=X&pageNumber=2&sessionId=s&devKey=k")
+
+
+def test_fetch_bill_documents_prefers_originals(fake_v2, monkeypatch):
+    import requests
+
+    def call(path, data, http=None):
+        if path == "GetDocuments.json":
+            return {"documents": [{"id": "d1", "fileUrl": "https://files.test/orig",
+                                   "name": "vendor-invoice.pdf"}]}
+        raise AssertionError("page-render path should not be used when originals exist")
+
+    monkeypatch.setattr(api, "_v2_call", call)
+
+    class R:
+        status_code, text = 200, ""
+        content = b"%PDF-1.7 full resolution original"
+        headers = {"Content-Type": "application/pdf"}
+
+    monkeypatch.setattr(requests.Session, "get", lambda self, url, **kw: R())
+    docs = api.fetch_bill_documents("b1")
+    assert len(docs) == 1 and docs[0]["name"] == "vendor-invoice.pdf"
+    assert docs[0]["data"].startswith(b"%PDF")
