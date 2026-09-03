@@ -351,3 +351,19 @@ def test_recent_batch_entries_are_timing_not_exceptions():
     assert batch.status == "timing"
     assert "after this export" in batch.reason
     assert plain.status == "exception"
+
+
+def test_active_projects_include_job_numbers_from_names(tmp_path, monkeypatch):
+    # sage_projects.json keys are Intacct P-numbers; coding filters by the
+    # JOB number inside the name. Both must count as active.
+    import json
+    from finance_helper.project_resolver import load_active_projects
+    p = tmp_path / "sage_projects.json"
+    p.write_text(json.dumps({
+        "P000635": {"name": "Emmaus Church, GA | Building Expansion | 5368 |",
+                    "status": "active"},
+        "P000158": {"name": "Old Job | 4100", "status": "inactive"},
+    }))
+    active = load_active_projects(str(p))
+    assert "P000635" in active and "5368" in active
+    assert "4100" not in active and "P000158" not in active

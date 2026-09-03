@@ -40,7 +40,18 @@ def load_active_projects(path: str | None = None) -> set[str] | None:
         return None
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
-    return {code for code, info in data.items() if (info.get("status") or "").lower() == "active"}
+    # The index is keyed by Intacct PROJECTID (P000635) but the coding
+    # pipeline filters by JOB NUMBER (5368), which lives inside the project
+    # NAME ("Emmaus Church | Building Expansion | 5368 |"). An active set of
+    # P-numbers alone filtered EVERY candidate to nothing — include both the
+    # ids and the numeric tokens from each active project's name.
+    active: set[str] = set()
+    for code, info in data.items():
+        if (info.get("status") or "").lower() != "active":
+            continue
+        active.add(code)
+        active.update(re.findall(r"\b\d{3,5}\b", str(info.get("name") or "")))
+    return active
 
 
 def _filter_active(codes: set[str], active_projects: set[str] | None) -> set[str]:
