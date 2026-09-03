@@ -232,6 +232,7 @@ def test_calendars_all_skipped_explains_delegation(client, monkeypatch):
     (data_dir / "roster.json").write_text(
         json.dumps({"Joshua Judy": "jjudy@summitintegrated.com"}))
     monkeypatch.delenv("USE_DWD", raising=False)
+    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
     monkeypatch.setattr(
         admin_module._fetch_calendar_index, "fetch_all",
         lambda roster, s, e, dwd, checkpoint_path=None: ({}, sorted(set(roster.values()))))
@@ -240,3 +241,18 @@ def test_calendars_all_skipped_explains_delegation(client, monkeypatch):
                   follow_redirects=True)
     assert b"Domain-wide delegation" in resp.data
     assert b"USE_DWD=1" in resp.data
+
+
+def test_calendars_without_credentials_names_the_missing_variable(client, monkeypatch):
+    """Regression: with no key configured, every calendar failed identically
+    and the per-calendar handling reported "119 skipped" instead of the cause."""
+    c, data_dir = client
+    os.makedirs(data_dir, exist_ok=True)
+    (data_dir / "roster.json").write_text(
+        json.dumps({"Joshua Judy": "jjudy@summitintegrated.com"}))
+    monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    resp = c.post("/admin/calendars",
+                  data={"start": "2026-08-01", "end": "2026-09-03"},
+                  follow_redirects=True)
+    assert b"GOOGLE_SERVICE_ACCOUNT_JSON" in resp.data

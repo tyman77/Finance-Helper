@@ -365,6 +365,14 @@ def refresh_calendars():
     if not os.path.exists(roster_path):
         flash("Build the roster first — calendars are fetched per person from it.")
         return redirect(url_for("admin.admin_page"))
+    # Without credentials every calendar fails identically and the per-calendar
+    # error handling turns that into "119 skipped" — say the real cause instead.
+    if not (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")):
+        flash("Google credentials aren't configured — paste the service-account "
+              "key file's contents into the GOOGLE_SERVICE_ACCOUNT_JSON variable "
+              "in Railway, then fetch again.")
+        return redirect(url_for("admin.admin_page"))
     try:
         with open(roster_path, encoding="utf-8") as fh:
             roster = json.load(fh)
