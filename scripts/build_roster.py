@@ -93,6 +93,41 @@ def fetch_directory() -> dict:
     return directory
 
 
+_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+
+
+def _norm_parts(name: str) -> list[str]:
+    parts = [p.strip(".") for p in name.lower().split()]
+    return [p for p in parts if p and p not in _SUFFIXES]
+
+
+def _match_directory(person: str, directory: dict) -> tuple[str | None, str]:
+    """Find this traveler in the Workspace directory. Exact full-name first;
+    then same surname + compatible first name (booking names use nicknames —
+    "Zach" for Zachary, "Nick" for Nicholas), taken only when exactly ONE
+    directory person fits, so ambiguity falls through to the guesses."""
+    exact = directory.get(person.lower())
+    if exact:
+        return exact, "directory"
+    parts = _norm_parts(person)
+    if len(parts) < 2:
+        return None, ""
+    first, last = parts[0], parts[-1]
+    exact = directory.get(f"{first} {last}")
+    if exact:
+        return exact, "directory"
+    hits: dict[str, str] = {}
+    for name, email in directory.items():
+        nparts = _norm_parts(name)
+        if len(nparts) < 2 or nparts[-1] != last:
+            continue
+        if nparts[0][:2] == first[:2]:
+            hits[email] = name
+    if len(hits) == 1:
+        return next(iter(hits)), "directory~"
+    return None, ""
+
+
 def build(travelers: dict, directory: dict | None = None) -> tuple[dict, list]:
     directory = directory or {}
     surname_to_vanity = {v.lower(): k for k, v in _VANITY.items()}
@@ -104,12 +139,11 @@ def build(travelers: dict, directory: dict | None = None) -> tuple[dict, list]:
             continue
         seen.add(person)
         parts = person.split()
-        dir_email = directory.get(person.lower()) or (
-            directory.get(f"{parts[0]} {parts[-1]}".lower()) if len(parts) > 2 else None)
+        dir_email, dir_conf = _match_directory(person, directory)
         surname = parts[-1].lower()
         if dir_email:
             roster[person] = dir_email
-            conf = "directory"
+            conf = dir_conf
         elif surname in surname_to_vanity:
             roster[person] = surname_to_vanity[surname]
             conf = "vanity"

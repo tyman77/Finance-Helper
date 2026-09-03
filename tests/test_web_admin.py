@@ -281,3 +281,35 @@ def test_fetch_directory_surfaces_googles_error_message(monkeypatch):
     monkeypatch.setattr(google_auth, "session", lambda scopes, subject=None: _Sess())
     with pytest.raises(RuntimeError, match="Admin SDK API has not been used"):
         admin_module._build_roster.fetch_directory()
+
+
+def test_build_roster_matches_nicknames_and_suffixes():
+    """Booking names carry nicknames and suffixes the directory doesn't:
+    same surname + compatible first name matches, but only when exactly one
+    directory person fits — ambiguity falls through to the convention guess."""
+    build = admin_module._build_roster.build
+    travelers = {
+        "A": {"person": "Zach Kay"},            # directory: Zachary Kay
+        "B": {"person": "Mike Johnson"},        # directory: Michael Johnson
+        "C": {"person": "Frank Martinez Jr"},   # directory drops the suffix
+        "D": {"person": "Jason Blount"},        # two Ja* Blounts: ambiguous
+    }
+    directory = {
+        "zachary kay": "zkay@summitintegrated.com",
+        "michael johnson": "mjohnson@summitintegrated.com",
+        "frank martinez": "fmartinezjr@summitintegrated.com",
+        "jason blount": "jblount@summitintegrated.com",
+        "jared blount": "jablount@summitintegrated.com",
+    }
+    roster, review = build(travelers, directory)
+    assert roster["Zach Kay"] == "zkay@summitintegrated.com"
+    assert roster["Mike Johnson"] == "mjohnson@summitintegrated.com"
+    assert roster["Frank Martinez Jr"] == "fmartinezjr@summitintegrated.com"
+    # "Jason Blount" is an exact directory key, so it still matches directly…
+    assert roster["Jason Blount"] == "jblount@summitintegrated.com"
+    # …but a nickname form with two candidates stays a convention guess.
+    directory2 = {"nathan kofahl": "nkofahl@summitintegrated.com",
+                  "natalie kofahl": "nakofahl@summitintegrated.com"}
+    roster2, review2 = build({"X": {"person": "Nate Kofahl"}}, directory2)
+    assert roster2["Nate Kofahl"] == "nkofahl@summitintegrated.com"  # convention
+    assert any("[convention" in line for line in review2)
