@@ -23,7 +23,7 @@ document.querySelectorAll(".chip").forEach((chip) => {
 function setVisibleChecks(on) {
   document.querySelectorAll("tr[data-status]").forEach((tr) => {
     if (tr.style.display === "none") return;
-    const box = tr.querySelector('input[type="checkbox"][name^="needs_review_"]');
+    const box = tr.querySelector('input[type="checkbox"][name^="post_"]');
     if (box) box.checked = on;
   });
 }
@@ -38,13 +38,13 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
   const boxes = () => Array.from(
     document.querySelectorAll("tr[data-status]"))
     .filter((tr) => tr.style.display !== "none")
-    .map((tr) => tr.querySelector('input[type="checkbox"][name^="needs_review_"]'))
+    .map((tr) => tr.querySelector('input[type="checkbox"][name^="post_"]'))
     .filter(Boolean);
   let last = null;
   document.addEventListener("click", (ev) => {
     const box = ev.target;
     if (!(box instanceof HTMLInputElement) || box.type !== "checkbox"
-        || !box.name.startsWith("needs_review_")) return;
+        || !box.name.startsWith("post_")) return;
     const list = boxes();
     if (ev.shiftKey && last && list.includes(last)) {
       const a = list.indexOf(last);

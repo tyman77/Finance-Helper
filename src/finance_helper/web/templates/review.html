@@ -73,7 +73,7 @@
   </colgroup>
   <thead>
     <tr>
-      <th title="Needs review">⚑</th>
+      <th title="Include in the posted journal entry">Post</th>
       <th>Status</th>
       <th>Date</th>
       <th>Description</th>
@@ -90,7 +90,7 @@
     {% set idx = loop.index0 %}
     {% set status = statuses[idx] %}
     <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}" data-status="{{ status }}">
-      <td class="chk"><input type="checkbox" name="needs_review_{{ idx }}" {{ 'checked' if li.needs_review else '' }}></td>
+      <td class="chk"><input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry"></td>
       <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
       <td class="nowrap">{{ li.date or '' }}</td>
       <td class="desc" title="{{ li.description }}">

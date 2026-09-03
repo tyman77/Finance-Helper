@@ -127,7 +127,7 @@ def test_approve_without_credentials_shows_clean_failure(client):
     doc = RUNS[run_id]["doc"]
     data = {f"gl_account_{i}": (li.gl_account or "")
             for i, li in enumerate(doc.line_items)}
-    data["needs_review_0"] = "on"
+    data["post_0"] = "on"
     resp = client.post(f"/review/{run_id}/approve", data=data)
     assert resp.status_code == 302
     body = client.get(f"/review/{run_id}").data.decode()
@@ -356,7 +356,7 @@ def test_approve_posts_only_checked_lines(client, monkeypatch):
             for i in range(n)}
     data.update({f"department_{i}": (doc.line_items[i].department or "") for i in range(n)})
     data.update({f"project_{i}": (doc.line_items[i].project or "") for i in range(n)})
-    data["needs_review_0"] = "on"
+    data["post_0"] = "on"
     resp = client.post(f"/review/{run_id}/approve", data=data)
     assert resp.status_code == 302
     assert len(posted["doc"].line_items) == 1
@@ -365,6 +365,6 @@ def test_approve_posts_only_checked_lines(client, monkeypatch):
 
     # Nothing checked: refuses with guidance, nothing posted.
     posted.clear()
-    data.pop("needs_review_0")
+    data.pop("post_0")
     client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
     assert "doc" not in posted

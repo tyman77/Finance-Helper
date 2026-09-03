@@ -669,7 +669,10 @@ def create_app() -> Flask:
             li.project = (request.form.get(f"project_{i}") or "").strip() or None
             if f"person_{i}" in request.form:
                 li.person = (request.form.get(f"person_{i}") or "").strip() or None
-            li.needs_review = request.form.get(f"needs_review_{i}") == "on"
+            # needs_review stays whatever the coder set — the checkbox column
+            # is post-selection now (post_{i}), never persisted. JE 54224:
+            # wiring selection to the pre-checked needs_review flag posted
+            # all 84 uncertain lines instead of the user's picks.
 
     @app.post("/review/<run_id>/update")
     def update_line(run_id):
@@ -703,7 +706,7 @@ def create_app() -> Flask:
             return redirect(url_for("review_page", run_id=run_id))
         _apply_line_edits(doc)
         selected = [li for i, li in enumerate(doc.line_items)
-                    if request.form.get(f"needs_review_{i}") == "on"]
+                    if request.form.get(f"post_{i}") == "on"]
         if not selected:
             store.save_run(run_id, run)
             flash("No lines selected — tick the checkbox on each line you want "
@@ -716,8 +719,6 @@ def create_app() -> Flask:
             result = destinations.post(post_doc, payload)
             run["posted"] = {"ok": True,
                              "detail": f"{len(selected)} line(s): {result}"}
-            for li in selected:          # posted lines untick — done
-                li.needs_review = False
         except (RuntimeError, NotImplementedError) as exc:
             run["posted"] = {"ok": False, "detail": str(exc)}
         store.save_run(run_id, run)
