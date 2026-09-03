@@ -70,13 +70,17 @@ billcheck:
     "ACE Backstage": {quickpay: take, pct: 5}
     "American Music": {quickpay: take, pct: 3}
     "Audio Technica": {quickpay: take, pct: 2}
-    "Belden": {quickpay: take, pct: 1.5}
+    "Belden": {quickpay: take, pct: 1.5,
+               notes: "QP is 1.5% of the PRE-TAX balance; the printed discount includes tax and AP corrects it by hand"}
+    "MBI": {invoice_date_from: ship_date,
+            notes: "the ship date is entered as the invoice date"}
     "Elite Core": {due_anchor: ship_date,
                    notes: "due date runs from the ship date"}
     "Gator": {quickpay: take, pct: 5}
     "KMC Music": {quickpay: take, pct: 1}
     "L-Acoustics": {quickpay: take, pct: 2, due_check_terms_days: [30],
-                    notes: "terms change with the QP deal; non-Net-30 invoices carry customized prepay dates, so only Net 30 gets due-date review"}
+                    no_qp_when_terms_days: [30],
+                    notes: "terms change with the QP deal; non-Net-30 invoices carry customized prepay dates, so only Net 30 gets due-date review; Net 30 invoices usually carry no QP"}
     "Legrand": {quickpay: take, pct: 1}
     "Lenbrook": {quickpay: take, pct: 3}
     "Light Source": {quickpay: take, pct: 2, no_qp_when_terms_days: [30],
@@ -90,8 +94,8 @@ billcheck:
     "Shure": {quickpay: take, pct: 2}
     "Yamaha": {quickpay: take, pct: 2,
                notes: "terms change 30/90/120; no QP on warranty work"}
-    "Xcel": {autopay: true,
-             notes: "autopay utility — the $0 entered total is deliberate"}
+    "Xcel": {autopay: true, total_from: current_charges,
+             notes: "autopay utility — a $0 entry is deliberate; otherwise the entered total is the CURRENT BILL amount, not the rolled-up amount due"}
     "Staging Dimensions": {invoice_number_from: order_number,
                            notes: "their S.O. number is entered as the invoice number"}
     "XPO": {invoice_date_from: ship_date,

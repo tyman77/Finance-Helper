@@ -464,3 +464,63 @@ def test_vendor_check_can_be_disabled():
                              _pdf(vendor="Zenith Logistics"),
                              check_vendor=False)
     assert "vendor" not in _by_field(r)
+
+
+# --- second AP review batch --------------------------------------------------
+
+AP_RULES_2 = {
+    "MBI": {"invoice_date_from": "ship_date"},
+    "Xcel": {"autopay": True, "total_from": "current_charges"},
+    "Shure": {"quickpay": "take", "pct": 2},
+    "Belden": {"quickpay": "take", "pct": 1.5},
+}
+
+
+def test_mbi_ship_date_is_invoice_date():
+    r = compare.compare_bill(
+        _bill(vendor="MBI Acoustics", invoice_date="2026-08-12"),
+        _pdf(vendor="MBI", invoice_date="2026-08-01", ship_date="2026-08-12"),
+        policies=AP_RULES_2)
+    assert "invoice_date" not in _by_field(r)
+
+
+def test_xcel_current_bill_is_the_total():
+    pdf = _pdf(vendor="Xcel Energy", total="982.44",       # amount due rollup
+               current_charges="311.07", due_date=None, terms=None,
+               terms_days=None)
+    bill = _bill(vendor="Xcel", amount="311.07", terms_days=None)
+    assert "amount" not in _by_field(
+        compare.compare_bill(bill, pdf, policies=AP_RULES_2))
+
+
+def test_qp_off_product_subtotal_counts_as_taken():
+    # Shure: 2% off the $1,000 product subtotal, shipping excluded.
+    # Entered 1050 - 20 = 1030; no printed discount amount at all.
+    pdf = _pdf(vendor="Shure", total="1050.00", subtotal="1000.00",
+               terms="2% 10 Net 30",
+               discount_total=None, discount_date=None, discount_terms=None)
+    bill = _bill(vendor="Shure", amount="1030.00")
+    fs = _by_field(compare.compare_bill(bill, pdf, policies=AP_RULES_2))
+    assert "amount" not in fs and "discount" not in fs
+
+
+def test_belden_pretax_qp_counts_as_taken_despite_printed_amount():
+    # Total 1080 incl. 80 tax. Deal: 1.5% of 1000 pre-tax = 15.00 ->
+    # enter 1065.00. The PRINTED discount (incl. tax) says 1063.80 — AP's
+    # hand-corrected entry must not flag.
+    pdf = _pdf(vendor="Belden Inc", total="1080.00", tax="80.00",
+               terms="1.5% 10 Net 30", discount_total="1063.80",
+               discount_date="2026-08-11")
+    bill = _bill(vendor="Belden", amount="1065.00", due_date="2026-08-11")
+    fs = _by_field(compare.compare_bill(bill, pdf, policies=AP_RULES_2))
+    assert "amount" not in fs and "discount" not in fs
+
+
+def test_wrong_discount_still_flags_on_every_base():
+    # Entered discount matches no base (total, subtotal, pre-tax): critical.
+    pdf = _pdf(vendor="Shure", total="1050.00", subtotal="1000.00", tax="30.00",
+               terms="2% 10 Net 30",
+               discount_total=None, discount_date=None, discount_terms=None)
+    bill = _bill(vendor="Shure", amount="990.00")
+    assert _by_field(compare.compare_bill(
+        bill, pdf, policies=AP_RULES_2))["amount"]["severity"] == "critical"

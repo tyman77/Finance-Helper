@@ -202,10 +202,39 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
     # the discounted figures are the expected ones; the full amount / net
     # date is a deviation, not an alternative.
     ent_amt, pdf_amt = to_amount(bill.get("amount")), to_amount(ex.get("total"))
+    if str(policy.get("total_from") or "") == "current_charges":
+        # Utility-style statements: the number to enter is the CURRENT
+        # period's charges, not the rolled-up amount due (e.g. Xcel).
+        cur_chg = to_amount(ex.get("current_charges"))
+        if cur_chg is not None:
+            pdf_amt = cur_chg
     disc_amt, disc_date = to_amount(ex.get("discount_total")), parse_date(ex.get("discount_date"))
     has_discount = disc_amt is not None and (pdf_amt is None or disc_amt < pdf_amt)
     discount_taken = (has_discount and ent_amt is not None
                       and abs(ent_amt - disc_amt) <= AMOUNT_TOLERANCE)
+    # Vendors compute the QP off different bases: the invoice total, the
+    # product subtotal (shipping excluded), or the pre-tax balance (Belden —
+    # the printed discount even includes tax there and AP corrects it by
+    # hand). An entered amount matching the negotiated pct off ANY base is
+    # the discount properly taken.
+    sub_amt, tax_amt = to_amount(ex.get("subtotal")), to_amount(ex.get("tax"))
+    deal_bases: list[Decimal] = []
+    if take_quickpay and policy_pct is not None and pdf_amt is not None and pdf_amt > 0:
+        deal_bases.append(pdf_amt)
+        if sub_amt is not None and 0 < sub_amt < pdf_amt:
+            deal_bases.append(sub_amt)
+        if tax_amt is not None and 0 < tax_amt < pdf_amt:
+            deal_bases.append(pdf_amt - tax_amt)
+        pct_frac = Decimal(str(policy_pct)) / Decimal("100")
+    base_taken = False          # entered amount == the deal computed on a base
+    if deal_bases and ent_amt is not None and not discount_taken:
+        for base in deal_bases:
+            expect = (pdf_amt - base * pct_frac).quantize(Decimal("0.01"))
+            if abs(ent_amt - expect) <= Decimal("0.05"):
+                discount_taken = base_taken = True
+                if not has_discount:
+                    has_discount, disc_amt = True, expect
+                break
     saving = (pdf_amt - disc_amt) if (has_discount and pdf_amt is not None) else None
     if policy.get("autopay") and (ent_amt is None or ent_amt == 0):
         pass    # autopay vendor: the $0 entry is deliberate — nothing to pay here
@@ -230,12 +259,18 @@ def compare_bill(bill: dict, extracted: dict | None, today: date | None = None,
             + (disc_date.isoformat() if disc_date else "by the cut-off")
             + f" (saves {saving:,.2f}). The full amount was entered."))
 
-    # Negotiated-deal verification for vendors on the quick-pay list.
+    # Negotiated-deal verification for vendors on the quick-pay list. The
+    # offered rate passes if it matches the deal on ANY base (total, product
+    # subtotal, or pre-tax balance).
     if take_quickpay and policy_pct is not None:
         if (has_discount and saving is not None and pdf_amt
-                and pdf_amt > 0):
+                and pdf_amt > 0 and not base_taken):
             offered = (saving / pdf_amt) * Decimal("100")
-            if abs(offered - Decimal(str(policy_pct))) > Decimal("0.3"):
+            rate_ok = any(
+                abs((saving / base) * Decimal("100") - Decimal(str(policy_pct)))
+                <= Decimal("0.3")
+                for base in (deal_bases or [pdf_amt]) if base and base > 0)
+            if not rate_ok:
                 findings.append(_finding(
                     "discount", "review", f"{policy_pct}% (negotiated deal)",
                     f"{offered:.1f}% offered",
