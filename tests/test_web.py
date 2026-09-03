@@ -507,3 +507,39 @@ def test_mark_posted_restamps_lines_from_sage(client, monkeypatch):
     resp = client.post(f"/review/{run_id}/mark_posted",
                        data={"je_number": "99999"}, follow_redirects=True)
     assert b"no lines for JE 99999" in resp.data
+
+
+def test_approve_refuses_dept_required_line_before_sage(client, monkeypatch, tmp_path):
+    """Posting a line coded to a require_department account with no department
+    used to burn a Sage round-trip and fail the whole entry — now Scout
+    refuses locally and names the line."""
+    (tmp_path / "chart_of_accounts.json").write_text(
+        '{"71000": {"title": "OH - Travel", "require_department": true}}')
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper import destinations
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    monkeypatch.setattr(destinations, "post",
+                        lambda d, payload: (_ for _ in ()).throw(
+                            AssertionError("should not reach Sage")))
+    data = {f"gl_account_{i}": "71000" for i in range(len(doc.line_items))}
+    data.update({f"department_{i}": "" for i in range(len(doc.line_items))})
+    data["post_0"] = "on"
+    resp = client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
+    assert b"requires a Department" in resp.data
+    assert RUNS[run_id].get("posted") is None
+
+
+def test_project_titles_merges_registry_and_sage_names(monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "project_registry.json").write_text(_json.dumps(
+        {"registry": {"4804": {"client": "Northview Church"}}}))
+    (tmp_path / "sage_projects.json").write_text(_json.dumps(
+        {"P000635": {"name": "Emmaus Church, GA | Building Expansion | 5368 |",
+                     "status": "active"}}))
+    from finance_helper.web.app import _project_titles
+    titles = _project_titles()
+    assert titles["4804"] == "Northview Church"
+    assert titles["5368"].startswith("Emmaus Church")

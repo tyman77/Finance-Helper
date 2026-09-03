@@ -286,6 +286,16 @@ ul.issues li { margin: 2px 0; }
   cursor: pointer;
 }
 .chip:hover { background: var(--accent); color: white; }
+.chip:hover .chip-name { color: white; }
+.chip .chip-name {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-align: left;
+  max-width: 16ch;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
 
 .link-danger {
   background: none;

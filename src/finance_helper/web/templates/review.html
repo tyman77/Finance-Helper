@@ -120,10 +120,14 @@
       </td>
       <td>
         <input type="text" list="projects" name="project_{{ idx }}" value="{{ li.project or '' }}" size="6">
+        {% if li.project and project_titles.get(li.project) %}
+          <div class="hint">{{ project_titles[li.project] }}</div>
+        {% endif %}
         {% if candidates_by_line.get(idx) %}
           <div class="candidates">
             {% for code in candidates_by_line[idx] %}
-            <button type="button" class="chip" data-fill="project_{{ idx }}" data-value="{{ code }}">{{ code }}</button>
+            <button type="button" class="chip" data-fill="project_{{ idx }}" data-value="{{ code }}"
+                    title="{{ project_titles.get(code, '') }}">{{ code }}{% if project_titles.get(code) %}<span class="chip-name">{{ project_titles[code] }}</span>{% endif %}</button>
             {% endfor %}
           </div>
         {% endif %}

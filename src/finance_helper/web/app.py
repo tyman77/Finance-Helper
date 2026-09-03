@@ -245,6 +245,19 @@ def _project_options() -> list[tuple[str, str]]:
     return sorted(options)
 
 
+def _project_titles() -> dict[str, str]:
+    """Job code -> a full display name: the registry's client, enriched with
+    Sage's project name when it says more (e.g. "Emmaus Church, GA | Building
+    Expansion | 5368"). Covers codes only Sage knows about too."""
+    titles = {code: name for code, name in _project_options() if name}
+    for pid, info in _load_json_data("sage_projects.json").items():
+        name = (info.get("name") or "").strip()
+        for code in re.findall(r"\b\d{3,5}\b", name):
+            if len(name) > len(titles.get(code, "")):
+                titles[code] = name
+    return titles
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     # Railway (and most PaaS hosts) terminate TLS at a proxy and forward over
@@ -747,6 +760,7 @@ def create_app() -> Flask:
             account_titles=account_titles,
             department_options=_department_options(),
             project_options=_project_options(),
+            project_titles=_project_titles(),
             candidates_by_line=candidates_by_line,
             statuses=statuses,
             status_counts=status_counts,
@@ -809,6 +823,23 @@ def create_app() -> Flask:
             store.save_run(run_id, run)
             flash("No lines selected — tick the checkbox on each line you want "
                   "in the journal entry, then Approve & Post.")
+            return redirect(url_for("review_page", run_id=run_id))
+        # Intacct will reject the whole entry over one such line (the mirror
+        # carries the department FROM the line, so a blank can't be papered
+        # over) — catch it here instead of a Sage round-trip.
+        chart = validate.load_chart() or {}
+        undept = [li for li in selected
+                  if (chart.get((li.gl_account or "").split("--")[0].strip()) or {})
+                  .get("require_department") and not li.department]
+        if undept:
+            store.save_run(run_id, run)
+            shown = "; ".join(f"{li.description} ({li.amount} to {li.gl_account})"
+                              for li in undept[:4])
+            more = f" … and {len(undept) - 4} more" if len(undept) > 4 else ""
+            flash(f"Not posted — {len(undept)} selected line(s) post to an "
+                  f"account that requires a Department but have none set: "
+                  f"{shown}{more}. Pick a department on those lines, Save "
+                  "changes, then Approve & Post again.")
             return redirect(url_for("review_page", run_id=run_id))
         post_doc = _dc_replace(doc, line_items=selected)
         payload = destinations.build_payload(post_doc)
