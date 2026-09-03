@@ -82,6 +82,8 @@ def _line_status(li, candidates: list[str]) -> str:
         return "wifi"
     if "not found in history" in note:
         return "unknown"
+    if "— double-check" in note:
+        return "review"          # auto-coded but contradicted by the flight
     if candidates:
         return "pick"
     if li.project:
@@ -147,6 +149,9 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: "Projects from Ramp per-diem memos — pick one below"),
     (re.compile(r"^flight lands in (\S+) -> project (\S+) \((.+)\) \(confirm\)$"),
      lambda m: f"Flight lands in {m.group(1)} → {m.group(3)} (confirm)"),
+    (re.compile(r"^⚠ project (\S+) is in (\S+) but the flight went to (\S+) — double-check$"),
+     lambda m: f"⚠ Project {m.group(1)} is in {m.group(2)} but the flight went to "
+               f"{m.group(3)} — double-check"),
     (re.compile(r"^destination matches projects .+ — pick one$"),
      lambda m: "Flight destination matches these projects — pick one below"),
     (re.compile(r"^flight lands in (\S+) — projects there: .+ — pick one$"),
@@ -223,6 +228,10 @@ def _format_note(note: str | None) -> dict:
                     if p is not usual and not p.startswith("⚠")), None)
         if alt:
             parts.insert(0, parts.pop(alt))
+    # A flight-contradiction warning is the row's most important fact.
+    dc = next((i for i, p in enumerate(parts) if "double-check" in p), None)
+    if dc:
+        parts.insert(0, parts.pop(dc))
     details = parts[1:]
     if calendar_events:
         details.append("Calendar: " + "; ".join(calendar_events))

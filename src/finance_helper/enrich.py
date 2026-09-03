@@ -164,8 +164,7 @@ def enrich_united(
                 li.project = resolved["project"]
             li.needs_review = True  # reviewed to start
             li.note = (li.note + "; " if li.note else "") + resolved["note"]
-            if not li.project:
-                _destination_narrow(li, registry, active_projects)
+            _destination_pass(li, registry, active_projects)
             continue
 
         # 2) Everyone else falls back to the traveler's usual account, with any
@@ -188,13 +187,35 @@ def enrich_united(
         # cross-reference Hotel Engine bookings on the same dates to narrow them.
         if not li.project:
             _fallback_project(li, entry, hotel_index, ramp_index, active_projects)
-        # Last cross-check: the flight's destination state vs. the state in
-        # project names — narrows candidate lists, and surfaces the projects
-        # in that state when history offers nothing at all.
-        if not li.project:
-            _destination_narrow(li, registry, active_projects)
+        # Last cross-check against the flight itself: narrow/fill from the
+        # destination state, or flag an auto-coded project that contradicts
+        # everywhere the flight actually went.
+        _destination_pass(li, registry, active_projects)
 
     return doc
+
+
+def _destination_pass(li, registry, active_projects) -> None:
+    if li.project:
+        _destination_conflict(li, registry)
+    else:
+        _destination_narrow(li, registry, active_projects)
+
+
+def _destination_conflict(li, registry) -> None:
+    """An auto-filled project whose state contradicts every state the flight
+    touched is suspect (the crew schedule or history pointed elsewhere) —
+    flag it for review instead of letting it sail through as auto-coded."""
+    routing = next((str(v) for k, v in (li.raw or {}).items()
+                    if k.lower().startswith("routing")), "") or li.description or ""
+    states = project_resolver.route_states(routing)
+    pstate = project_resolver.registry_state(registry or {}, li.project)
+    if not states or not pstate or pstate in states:
+        return
+    li.needs_review = True
+    li.note = (li.note or "") + (
+        f"; ⚠ project {li.project} is in {pstate} but the flight went to "
+        f"{'/'.join(states)} — double-check")
 
 
 _PICK_RE = re.compile(

@@ -95,23 +95,29 @@ _STATE_IN_NAME = re.compile(r",\s*([A-Z]{2})\b")
 
 
 def route_states(routing: str) -> list[str]:
-    """Destination states from a routing string ("DEN AUS DEN" -> ["TX"]).
-    The first airport is the origin; on a round trip (first == last) the
-    return leg is dropped too, leaving the places actually visited."""
+    """States the trip actually visited, from a routing string. Everything
+    except the HOME airport counts: "DEN AUS DEN" -> ["TX"], and a one-way
+    return "ICT DEN" -> ["KS"] (the traveler is coming back FROM the Wichita
+    job, not going to Denver). Positional origin-dropping got this wrong."""
+    home = {a.strip().upper() for a in
+            (os.environ.get("FINANCE_HELPER_HOME_AIRPORTS") or "DEN").split(",")}
     codes = [t for t in (routing or "").upper().split()
              if len(t) == 3 and t.isalpha() and t in _AIRPORT_STATES]
-    if not codes:
-        return []
-    if len(codes) >= 2 and codes[0] == codes[-1]:
-        mids = codes[1:-1]
-    else:
-        mids = codes[1:] or codes
     states: list[str] = []
-    for c in mids:
+    for c in codes:
+        if c in home:
+            continue
         st = _AIRPORT_STATES[c]
         if st not in states:
             states.append(st)
     return states
+
+
+def registry_state(registry: dict, code: str) -> str:
+    """The ", XX" state in a project's client name, or ""."""
+    reg = registry.get("registry", registry) or {}
+    m = _STATE_IN_NAME.search((reg.get(code) or {}).get("client") or "")
+    return m.group(1) if m else ""
 
 
 def projects_in_states(registry: dict, states: list[str],

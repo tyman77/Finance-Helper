@@ -417,13 +417,15 @@ def test_no_match_notes_explain_which_link_broke():
     assert "no hotel stays indexed yet" in note
 
 
-def test_route_states_drops_origin_and_return_leg():
+def test_route_states_excludes_home_airport_not_position():
     assert project_resolver.route_states("DEN AUS DEN") == ["TX"]
     assert project_resolver.route_states("DEN PIT DEN") == ["PA"]
-    assert project_resolver.route_states("ICT DEN") == ["CO"]
+    # One-way RETURN: the traveler is coming back FROM the Wichita job.
+    assert project_resolver.route_states("ICT DEN") == ["KS"]
     assert project_resolver.route_states("DEN DFW ATL DEN") == ["TX", "GA"]
     assert project_resolver.route_states("") == []
     assert project_resolver.route_states("XXX YYY") == []
+    assert project_resolver.route_states("DEN DEN") == []
 
 
 def test_destination_state_narrows_candidates_to_one():
@@ -483,3 +485,28 @@ def test_destination_state_suggests_registry_projects_when_no_history():
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project is None
     assert "flight lands in AZ — projects there: 3495, 3496 — pick one" in john.note
+
+
+def test_auto_coded_project_contradicting_flight_gets_flagged():
+    """August statement finding: DILL flew DEN MCI DEN (Missouri) but the
+    schedule pinned project 3495 (Rock Point Church, AZ) — that sailed
+    through as auto-coded. Now it's flagged for review."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "DEN MCI DEN"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": [], "n": 10}}
+    registry = {"registry": {"3495": {"client": "Rock Point Church, AZ"}}}
+    schedule = {"John Doe": {"2026-05-10": "3495", "2026-05-11": "3495",
+                             "2026-05-12": "3495"}}
+    doc = enrich.enrich_united(doc, tmap, schedule_index=schedule,
+                               calendar_index={}, roster={}, registry=registry,
+                               active_projects=None, hotel_index=[],
+                               ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project == "3495"          # kept — the human decides
+    assert john.needs_review
+    assert "project 3495 is in AZ but the flight went to MO — double-check" in john.note
