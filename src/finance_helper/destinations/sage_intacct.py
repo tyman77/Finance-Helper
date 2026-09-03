@@ -149,10 +149,73 @@ def _get_token() -> str:
     return resp.json()["access_token"]
 
 
+def _mdy(iso_date: str | None) -> str:
+    from datetime import date as _date
+    from datetime import datetime as _dt
+    if iso_date:
+        try:
+            return _dt.strptime(iso_date[:10], "%Y-%m-%d").strftime("%m/%d/%Y")
+        except ValueError:
+            pass
+    return _date.today().strftime("%m/%d/%Y")
+
+
+def _to_xml_batch(payload: dict, fn) -> None:
+    """Fill the XML gateway <create><GLBATCH> for this journal entry —
+    the documented legacy shape, the same gateway every working Sage read
+    in this app already uses."""
+    from decimal import Decimal
+
+    from ..recon.sage_xml import _el
+
+    create = _el(fn, "create")
+    batch = _el(create, "GLBATCH")
+    _el(batch, "JOURNAL", payload["journal"])
+    _el(batch, "BATCH_DATE", _mdy(payload.get("date")))
+    _el(batch, "BATCH_TITLE", (payload.get("description") or "")[:80])
+    if payload.get("reference_no"):
+        _el(batch, "REFERENCENO", str(payload["reference_no"])[:20])
+    entries = _el(batch, "ENTRIES")
+    for line in payload["lines"]:
+        debit = Decimal(str(line.get("debit") or "0"))
+        credit = Decimal(str(line.get("credit") or "0"))
+        amount, tr_type = (debit, 1) if debit > 0 else (credit, -1)
+        if amount == 0:
+            continue
+        entry = _el(entries, "GLENTRY")
+        _el(entry, "ACCOUNTNO", line["account_no"])
+        _el(entry, "TR_TYPE", tr_type)
+        _el(entry, "TRX_AMOUNT", str(amount))
+        _el(entry, "DESCRIPTION", (line.get("memo") or "")[:1000])
+        if line.get("department"):
+            _el(entry, "DEPARTMENT", line["department"])
+        if line.get("project"):
+            _el(entry, "PROJECTID", line["project"])
+
+
+def _post_via_xml(payload: dict) -> dict:
+    from ..recon import sage_xml
+
+    root = sage_xml._post(sage_xml._request_xml(lambda fn: _to_xml_batch(payload, fn)))
+    record_no = ""
+    data = root.find(".//result/data")
+    if data is not None:
+        for row in data:
+            record_no = row.findtext("RECORDNO", "") or record_no
+    return {"posted_via": "xml_gateway", "journal": payload["journal"],
+            "record_no": record_no}
+
+
 def post_journal_entry(payload: dict) -> dict:
-    """POST the journal entry to Sage Intacct. Raises with the full response
-    body on failure — see the module docstring if this is your first live test."""
+    """POST the journal entry to Sage Intacct. Prefers the XML gateway (the
+    credential style this company actually has — same as every working Sage
+    read); the REST path below remains for orgs with a registered app.
+    Raises with the full response body on failure."""
     import requests
+
+    from ..recon import sage_xml
+    if sage_xml.credentials_present():
+        return _post_via_xml(payload)
 
     required = [
         "INTACCT_CLIENT_ID", "INTACCT_CLIENT_SECRET", "INTACCT_COMPANY_ID",
@@ -161,7 +224,9 @@ def post_journal_entry(payload: dict) -> dict:
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise RuntimeError(
-            "Sage Intacct credentials missing: " + ", ".join(missing) + ". Add them to .env (see .env.example)."
+            "Sage Intacct credentials missing: set the INTACCT_SENDER_* (XML "
+            "gateway) variables, or for REST: " + ", ".join(missing)
+            + ". Add them to .env (see .env.example)."
         )
 
     token = _get_token()

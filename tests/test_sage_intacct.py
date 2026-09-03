@@ -133,3 +133,44 @@ def test_network_failure_wrapped_as_runtime_error_not_uncaught(monkeypatch):
     with pytest.raises(RuntimeError) as exc:
         sage_intacct.post_journal_entry({"lines": []})
     assert "ProxyError" in str(exc.value)
+
+
+def test_post_prefers_xml_gateway_and_builds_glbatch(monkeypatch):
+    """With sender credentials present (this company's actual setup), posting
+    goes through the XML gateway as a GLBATCH create — the REST token flow
+    (which 401s invalid_client without a registered app) is never touched."""
+    import xml.etree.ElementTree as ET
+
+    from finance_helper.recon import sage_xml
+
+    monkeypatch.setattr(sage_xml, "credentials_present", lambda: True)
+    monkeypatch.setattr(sage_intacct, "_get_token",
+                        lambda: (_ for _ in ()).throw(AssertionError("REST used")))
+    sent = {}
+
+    def fake_post(body):
+        sent["xml"] = body
+        return ET.fromstring(
+            "<response><operation><result><status>success</status>"
+            "<data><glbatch><RECORDNO>4471</RECORDNO></glbatch></data>"
+            "</result></operation></response>")
+
+    monkeypatch.setattr(sage_xml, "_post", fake_post)
+    payload = sage_intacct.build_journal_entry(_doc([
+        LineItem(description="Hotel", amount=Decimal("100.00"), gl_account="52200",
+                 department="20--Integration", project="P-9"),
+        LineItem(description="Refund", amount=Decimal("-25.00"), gl_account="52200"),
+    ]))
+    out = sage_intacct.post_journal_entry(payload)
+    assert out["posted_via"] == "xml_gateway" and out["record_no"] == "4471"
+
+    root = ET.fromstring(sent["xml"])
+    batch = root.find(".//function/create/GLBATCH")
+    assert batch is not None
+    assert batch.findtext("JOURNAL") == "GJ"
+    entries = batch.findall("ENTRIES/GLENTRY")
+    # 100 debit + 25 credit + clearing credit for the 75 net.
+    assert [(e.findtext("TR_TYPE"), e.findtext("TRX_AMOUNT")) for e in entries] \
+        == [("1", "100.00"), ("-1", "25.00"), ("-1", "75.00")]
+    assert entries[0].findtext("DEPARTMENT") == "20"
+    assert entries[0].findtext("PROJECTID") == "P-9"
