@@ -256,3 +256,28 @@ def test_calendars_without_credentials_names_the_missing_variable(client, monkey
                   data={"start": "2026-08-01", "end": "2026-09-03"},
                   follow_redirects=True)
     assert b"GOOGLE_SERVICE_ACCOUNT_JSON" in resp.data
+
+
+def test_fetch_directory_surfaces_googles_error_message(monkeypatch):
+    """A 403 used to bubble up as a bare "Forbidden for url" — Google's error
+    body (e.g. "Admin SDK API has not been used in project…") is the part
+    that says what to fix."""
+    from finance_helper import google_auth
+
+    monkeypatch.setenv("GOOGLE_ADMIN_SUBJECT", "tyson@summitintegrated.com")
+    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
+
+    class _Resp:
+        status_code = 403
+
+        def json(self):
+            return {"error": {"message": "Admin SDK API has not been used in "
+                                         "project 12345 before or it is disabled."}}
+
+    class _Sess:
+        def get(self, url, params=None, timeout=0):
+            return _Resp()
+
+    monkeypatch.setattr(google_auth, "session", lambda scopes, subject=None: _Sess())
+    with pytest.raises(RuntimeError, match="Admin SDK API has not been used"):
+        admin_module._build_roster.fetch_directory()

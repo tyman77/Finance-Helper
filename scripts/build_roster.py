@@ -63,7 +63,14 @@ def fetch_directory() -> dict:
             params["pageToken"] = page
         resp = sess.get("https://admin.googleapis.com/admin/directory/v1/users",
                         params=params, timeout=60)
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            # Google's error body names the actual problem (e.g. "Admin SDK API
+            # has not been used in project ... or it is disabled") — surface it.
+            try:
+                detail = (resp.json().get("error") or {}).get("message") or ""
+            except ValueError:
+                detail = resp.text[:300]
+            raise RuntimeError(f"Directory API HTTP {resp.status_code}: {detail}")
         data = resp.json()
         users.extend(data.get("users") or [])
         page = data.get("nextPageToken")

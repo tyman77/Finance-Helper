@@ -308,10 +308,11 @@ def refresh_roster():
     try:
         with open(tmap_path, encoding="utf-8") as fh:
             travelers = yaml.safe_load(fh) or {}
-        directory = {}
+        directory, dir_err = {}, False
         try:
             directory = _build_roster.fetch_directory()
         except Exception as exc:
+            dir_err = True
             flash(f"Could not read the Google Workspace directory ({exc}) — "
                   "falling back to the email-convention guesses.")
         roster, review = _build_roster.build(travelers, directory)
@@ -323,6 +324,9 @@ def refresh_roster():
         if directory:
             msg += (f" ({confirmed} confirmed from the Google Workspace "
                     f"directory, {low_confidence} guessed by email convention).")
+        elif dir_err:
+            msg += (f" ({low_confidence} guessed by email convention — fix the "
+                    "directory error above and rebuild to confirm them).")
         else:
             msg += (f" ({low_confidence} guessed by email convention — set "
                     "GOOGLE_ADMIN_SUBJECT and domain-wide delegation to pull "
