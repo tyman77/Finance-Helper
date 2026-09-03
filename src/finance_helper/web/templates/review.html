@@ -30,6 +30,8 @@
 {% endif %}
 
 <div class="filters">
+  <button type="button" class="filter-btn" id="select-visible">☑ Select shown</button>
+  <button type="button" class="filter-btn" id="clear-visible">☐ Clear shown</button>
   <button type="button" class="filter-btn active" data-filter="all">All ({{ doc.line_items|length }})</button>
   {% for key in ["pick", "unknown", "review", "auto", "wifi"] %}
     {% if status_counts.get(key) %}
