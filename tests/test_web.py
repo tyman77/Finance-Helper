@@ -433,3 +433,20 @@ def test_schedule_public_csv_fallback(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda url, timeout=0: H())
     with pytest.raises(RuntimeError, match="Anyone with the link"):
         mod.fetch_values("SHEET123", "x")
+
+    # A 404 gets its own diagnosis (bad ID or an Excel upload, not sharing).
+    class NF:
+        status_code = 404
+        headers = {"Content-Type": "text/html"}
+        content = b"not found"
+    monkeypatch.setattr(requests, "get", lambda url, timeout=0: NF())
+    with pytest.raises(RuntimeError, match="SCHEDULE_SHEET_ID"):
+        mod.fetch_values("SHEET123", "x")
+
+    # A full URL pasted as the ID still works — the ID is extracted.
+    monkeypatch.setattr(requests, "get", fake_get)
+    mod.fetch_values(
+        "https://docs.google.com/spreadsheets/d/"
+        "1Pznz22qs2HuAq9iWFZTtcxqJGzzx2QksEPuwwldJOcE/edit#gid=555", "x")
+    assert "/d/1Pznz22qs2HuAq9iWFZTtcxqJGzzx2QksEPuwwldJOcE/export" \
+        in captured["url"]

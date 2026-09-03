@@ -116,6 +116,15 @@ def fetch_public_csv(sheet_id: str) -> list:
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
            f"?format=csv&gid={gid}")
     resp = requests.get(url, timeout=60)
+    if resp.status_code == 404:
+        raise RuntimeError(
+            "Google says no such spreadsheet (HTTP 404). Usually this means "
+            f"SCHEDULE_SHEET_ID doesn't match the sheet (using '{sheet_id}' — "
+            "compare it to the long code between /d/ and /edit in the sheet's "
+            "URL), or the file is an uploaded Excel file rather than a native "
+            "Google Sheet (an .XLSX badge shows next to its name — use "
+            "File > Save as Google Sheets and point SCHEDULE_SHEET_ID at the "
+            "new file).")
     if resp.status_code != 200 or \
             "text/html" in (resp.headers.get("Content-Type") or ""):
         raise RuntimeError(
@@ -128,9 +137,18 @@ def fetch_public_csv(sheet_id: str) -> list:
     return [row for row in csv.reader(io.StringIO(text))]
 
 
+def normalize_sheet_id(raw: str) -> str:
+    """Accept either the bare spreadsheet ID or a full docs.google.com URL
+    (SCHEDULE_SHEET_ID is often pasted straight from the address bar)."""
+    raw = (raw or "").strip()
+    m = re.search(r"/d/([A-Za-z0-9_-]{20,})", raw)
+    return m.group(1) if m else raw
+
+
 def fetch_values(sheet_id: str, rng: str) -> list:
     """Service-account API when a key is configured; public CSV export
     otherwise."""
+    sheet_id = normalize_sheet_id(sheet_id)
     if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or \
             os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         return fetch(sheet_id, rng)
