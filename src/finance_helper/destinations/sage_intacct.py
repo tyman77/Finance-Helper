@@ -39,20 +39,26 @@ _JE_URL = os.environ.get(
 
 
 def build_journal_entry(doc: SourceDocument) -> dict:
-    clearing = os.environ.get("INTACCT_CLEARING_ACCOUNT", "<INTACCT_CLEARING_ACCOUNT>")
+    """Their real JE shape (from the AP team's working import file): NO
+    clearing account. The entry reclasses within the SAME expense account —
+    each statement line gets a dimensioned entry (project/department/
+    location), mirrored by an undimensioned opposite entry to the same
+    account, so the account nets to zero while cost lands in dimensions."""
     entry_date = (doc.document_date.isoformat() if doc.document_date else None)
+    default_location = os.environ.get("INTACCT_DEFAULT_LOCATION", "")
 
-    lines = []
+    dimensioned, mirrors = [], []
     for li in doc.line_items:
         # Positive amounts are expenses (debit); negatives are refunds/credits
         # and post as a credit to the same account rather than a negative debit.
         debit = li.amount if li.amount >= 0 else 0
         credit = -li.amount if li.amount < 0 else 0
+        memo = f"{doc.vendor}: {li.description}"[:200]
         line = {
             "account_no": li.gl_account,
             "debit": str(debit),
             "credit": str(credit),
-            "memo": f"{doc.vendor}: {li.description}"[:200],
+            "memo": memo,
             "category": li.category,
         }
         # Intacct dimensions, when we learned them via enrichment.
@@ -60,26 +66,25 @@ def build_journal_entry(doc: SourceDocument) -> dict:
             line["department"] = li.department.split("--")[0].strip()
         if li.project:
             line["project"] = li.project
-        lines.append(line)
-    # Offsetting line to the clearing/AP account for the net total. If the net is
-    # a credit (a net refund), flip it to a debit so the entry still balances.
-    net = doc.total
-    lines.append(
-        {
-            "account_no": clearing,
-            "debit": str(-net if net < 0 else 0),
-            "credit": str(net if net >= 0 else 0),
-            "memo": f"{doc.vendor} {doc.document_id}"[:200],
-        }
-    )
+        location = getattr(li, "location", "") or default_location
+        if location:
+            line["location"] = str(location).split("--")[0].strip()
+        dimensioned.append(line)
+        # The undimensioned mirror on the opposite side, same account.
+        mirrors.append({
+            "account_no": li.gl_account,
+            "debit": str(credit),
+            "credit": str(debit),
+            "memo": memo,
+        })
 
     return {
         "journal": _JOURNAL_SYMBOL,
         "date": entry_date,
         "reference_no": doc.document_id,
-        "description": f"{doc.vendor} — {doc.document_id}",
+        "description": f"{doc.vendor} — {doc.document_id}"[:80],
         "currency": doc.currency,
-        "lines": lines,
+        "lines": dimensioned + mirrors,
     }
 
 
@@ -160,6 +165,36 @@ def _mdy(iso_date: str | None) -> str:
     return _date.today().strftime("%m/%d/%Y")
 
 
+def _load_projects_index() -> dict:
+    import json
+
+    data_dir = os.environ.get(
+        "FINANCE_HELPER_DATA",
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
+    try:
+        with open(os.path.join(data_dir, "sage_projects.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _intacct_project_id(code: str) -> str:
+    """Scout codes projects by job number (5368); Intacct's PROJECTID is a
+    P-number (P000635) whose project NAME carries the job number. Translate
+    via the fetched projects index; unmapped codes post without a project
+    (their own import files do the same) with the job number kept in the memo."""
+    import re
+
+    code = str(code or "").strip()
+    if not code:
+        return ""
+    if re.match(r"^P\d+$", code, re.I):
+        return code
+    hits = [pid for pid, meta in _load_projects_index().items()
+            if code in str((meta or {}).get("name") or "")]
+    return hits[0] if len(hits) == 1 else ""
+
+
 def _to_xml_batch(payload: dict, fn) -> None:
     """Fill the XML gateway <create><GLBATCH> for this journal entry —
     the documented legacy shape, the same gateway every working Sage read
@@ -183,14 +218,21 @@ def _to_xml_batch(payload: dict, fn) -> None:
         if amount == 0:
             continue
         entry = _el(entries, "GLENTRY")
-        _el(entry, "ACCOUNTNO", line["account_no"])
+        _el(entry, "ACCOUNTNO", str(line["account_no"]).split("--")[0].strip())
         _el(entry, "TR_TYPE", tr_type)
         _el(entry, "TRX_AMOUNT", str(amount))
-        _el(entry, "DESCRIPTION", (line.get("memo") or "")[:1000])
+        memo = (line.get("memo") or "")[:1000]
         if line.get("department"):
             _el(entry, "DEPARTMENT", line["department"])
+        if line.get("location"):
+            _el(entry, "LOCATION", line["location"])
         if line.get("project"):
-            _el(entry, "PROJECTID", line["project"])
+            pid = _intacct_project_id(line["project"])
+            if pid:
+                _el(entry, "PROJECTID", pid)
+            else:
+                memo = (memo + f" | job {line['project']}")[:1000]
+        _el(entry, "DESCRIPTION", memo)
 
 
 def _post_via_xml(payload: dict) -> dict:

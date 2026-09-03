@@ -156,9 +156,11 @@ def test_post_prefers_xml_gateway_and_builds_glbatch(monkeypatch):
             "</result></operation></response>")
 
     monkeypatch.setattr(sage_xml, "_post", fake_post)
+    monkeypatch.setenv("INTACCT_DEFAULT_LOCATION", "100--Design & Install")
     payload = sage_intacct.build_journal_entry(_doc([
-        LineItem(description="Hotel", amount=Decimal("100.00"), gl_account="52200",
-                 department="20--Integration", project="P-9"),
+        LineItem(description="Hotel", amount=Decimal("100.00"),
+                 gl_account="52200--COGS Travel: Flights / Parking",
+                 department="20--Integration", project="P000635"),
         LineItem(description="Refund", amount=Decimal("-25.00"), gl_account="52200"),
     ]))
     out = sage_intacct.post_journal_entry(payload)
@@ -169,8 +171,26 @@ def test_post_prefers_xml_gateway_and_builds_glbatch(monkeypatch):
     assert batch is not None
     assert batch.findtext("JOURNAL") == "GJ"
     entries = batch.findall("ENTRIES/GLENTRY")
-    # 100 debit + 25 credit + clearing credit for the 75 net.
+    # Their real JE shape: dimensioned lines, then undimensioned mirrors on
+    # the opposite side of the SAME account — no clearing account anywhere.
     assert [(e.findtext("TR_TYPE"), e.findtext("TRX_AMOUNT")) for e in entries] \
-        == [("1", "100.00"), ("-1", "25.00"), ("-1", "75.00")]
+        == [("1", "100.00"), ("-1", "25.00"), ("-1", "100.00"), ("1", "25.00")]
+    assert all(e.findtext("ACCOUNTNO") == "52200" for e in entries)
     assert entries[0].findtext("DEPARTMENT") == "20"
-    assert entries[0].findtext("PROJECTID") == "P-9"
+    assert entries[0].findtext("LOCATION") == "100"
+    assert entries[0].findtext("PROJECTID") == "P000635"   # already an Intacct id
+    assert entries[2].findtext("DEPARTMENT") is None       # mirrors carry no dims
+
+
+def test_job_number_translates_to_intacct_project_id(monkeypatch, tmp_path):
+    import json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "sage_projects.json").write_text(json.dumps({
+        "P000635": {"name": "Emmaus Church, GA | Building Expansion | 5368 |"},
+        "P000654": {"name": "Grace Community Church, TX | Lighting Upgrade | 5369"},
+    }))
+    assert sage_intacct._intacct_project_id("5368") == "P000635"
+    assert sage_intacct._intacct_project_id("P000654") == "P000654"
+    assert sage_intacct._intacct_project_id("9999") == ""   # unmapped: no id
+    # "53" appears in both names -> ambiguous, safer to post without one.
+    assert sage_intacct._intacct_project_id("53") == ""

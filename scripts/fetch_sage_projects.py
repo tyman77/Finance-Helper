@@ -145,10 +145,31 @@ def build(records: list[dict]) -> dict:
     return out
 
 
+def fetch_projects_xml() -> list[dict]:
+    """PROJECT via the XML gateway — the credential style this company has
+    (the REST token path 401s invalid_client with no registered app)."""
+    from finance_helper.recon.sage_xml import _el, _read_all
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "PROJECT")
+        _el(rbq, "fields", "PROJECTID,NAME,STATUS")
+        _el(rbq, "query", "")
+        _el(rbq, "pagesize", 1000)
+
+    return [{"projectId": r.get("PROJECTID"), "name": r.get("NAME"),
+             "status": r.get("STATUS")} for r in _read_all(q)]
+
+
 def main(argv):
-    token = get_token()
-    print("Authenticated OK.")
-    records = fetch_projects(token)
+    from finance_helper.recon import sage_xml
+    if sage_xml.credentials_present():
+        print("Using the Sage XML gateway (sender credentials).")
+        records = fetch_projects_xml()
+    else:
+        token = get_token()
+        print("Authenticated OK.")
+        records = fetch_projects(token)
     print(f"Fetched {len(records)} project records.")
     if not records:
         print("No records returned — nothing written.")
