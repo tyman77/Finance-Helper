@@ -31,3 +31,28 @@ const selAll = document.getElementById("select-visible");
 const clrAll = document.getElementById("clear-visible");
 if (selAll) selAll.addEventListener("click", () => setVisibleChecks(true));
 if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
+
+// Shift-click range selection: click one checkbox, shift-click another,
+// and every visible row between them takes the second click's state.
+(() => {
+  const boxes = () => Array.from(
+    document.querySelectorAll("tr[data-status]"))
+    .filter((tr) => tr.style.display !== "none")
+    .map((tr) => tr.querySelector('input[type="checkbox"][name^="needs_review_"]'))
+    .filter(Boolean);
+  let last = null;
+  document.addEventListener("click", (ev) => {
+    const box = ev.target;
+    if (!(box instanceof HTMLInputElement) || box.type !== "checkbox"
+        || !box.name.startsWith("needs_review_")) return;
+    const list = boxes();
+    if (ev.shiftKey && last && list.includes(last)) {
+      const a = list.indexOf(last);
+      const b = list.indexOf(box);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+        list[i].checked = box.checked;
+      }
+    }
+    last = box;
+  });
+})();
