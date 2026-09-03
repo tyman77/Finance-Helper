@@ -308,15 +308,26 @@ def refresh_roster():
     try:
         with open(tmap_path, encoding="utf-8") as fh:
             travelers = yaml.safe_load(fh) or {}
-        roster, review = _build_roster.build(travelers)
+        directory = {}
+        try:
+            directory = _build_roster.fetch_directory()
+        except Exception as exc:
+            flash(f"Could not read the Google Workspace directory ({exc}) — "
+                  "falling back to the email-convention guesses.")
+        roster, review = _build_roster.build(travelers, directory)
         with open(_data_path("roster.json"), "w", encoding="utf-8") as fh:
             json.dump(roster, fh, indent=2)
+        confirmed = sum(1 for line in review if "[directory" in line)
         low_confidence = sum(1 for line in review if "[convention" in line)
-        flash(
-            f"Wrote {len(roster)} people to the roster ({low_confidence} matched by "
-            "email convention rather than a confirmed vanity calendar — spot-check "
-            "those in data/roster.json)."
-        )
+        msg = f"Wrote {len(roster)} people to the roster"
+        if directory:
+            msg += (f" ({confirmed} confirmed from the Google Workspace "
+                    f"directory, {low_confidence} guessed by email convention).")
+        else:
+            msg += (f" ({low_confidence} guessed by email convention — set "
+                    "GOOGLE_ADMIN_SUBJECT and domain-wide delegation to pull "
+                    "real addresses from the Google directory).")
+        flash(msg)
     except Exception as exc:
         flash(f"Could not build the roster: {exc}")
     return redirect(url_for("admin.admin_page"))
@@ -364,7 +375,23 @@ def refresh_calendars():
         )
         msg = f"Wrote {len(index)} calendars ({start} to {end})."
         if skipped:
-            msg += f" {len(skipped)} skipped: {', '.join(skipped)}"
+            shown = ", ".join(skipped[:8])
+            more = f" … and {len(skipped) - 8} more" if len(skipped) > 8 else ""
+            msg += f" {len(skipped)} skipped: {shown}{more}."
+        if skipped and not index:
+            if use_dwd:
+                msg += (" USE_DWD is set but Google still refused every calendar — "
+                        "check that the delegation in the Google Admin console uses "
+                        "the service account's CLIENT ID (not its email) and the "
+                        "scope https://www.googleapis.com/auth/calendar.readonly.")
+            else:
+                msg += (" Every calendar was refused — the service account can't "
+                        "read personal calendars on its own. Fix: in Google Admin "
+                        "console → Security → Access and data control → API "
+                        "controls → Domain-wide delegation, authorize the service "
+                        "account's client ID for the scope "
+                        "https://www.googleapis.com/auth/calendar.readonly, then "
+                        "set USE_DWD=1 in Railway and fetch again.")
         flash(msg)
     except Exception as exc:
         flash(f"Could not fetch calendars: {exc}")

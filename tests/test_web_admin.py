@@ -184,3 +184,59 @@ def test_hotel_index_upload_without_file_flashes(client):
     assert resp.status_code == 302
     resp2 = c.get(resp.headers["Location"])
     assert b"Choose a Hotel Engine statement" in resp2.data
+
+
+def test_build_roster_directory_beats_guesses():
+    """A Workspace-directory hit is the confirmed address; vanity and the
+    email convention only fill in when the directory doesn't know the name.
+    (The convention guessed imungia@ for a person whose real address is
+    imunguia@ — exactly the failure the directory pull removes.)"""
+    build = admin_module._build_roster.build
+    travelers = {
+        "A": {"person": "Isaac Mungia"},
+        "B": {"person": "Andrew Starke"},
+        "C": {"person": "Joshua Judy"},
+    }
+    roster, review = build(travelers, {"isaac mungia": "imunguia@summitintegrated.com"})
+    assert roster["Isaac Mungia"] == "imunguia@summitintegrated.com"
+    assert roster["Andrew Starke"] == "andrew@summitintegrated.com"   # vanity
+    assert roster["Joshua Judy"] == "jjudy@summitintegrated.com"      # convention
+    assert any("[directory" in line for line in review)
+
+
+def test_fetch_directory_returns_empty_when_unconfigured(monkeypatch):
+    monkeypatch.delenv("GOOGLE_ADMIN_SUBJECT", raising=False)
+    monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    assert admin_module._build_roster.fetch_directory() == {}
+
+
+def test_roster_route_uses_google_directory(client, tmp_path, monkeypatch):
+    c, data_dir = client
+    csv_path = tmp_path / "hist.csv"
+    _historical_csv(csv_path)
+    with open(csv_path, "rb") as fh:
+        c.post("/admin/traveler-map", data={"file": (fh, "hist.csv")},
+               content_type="multipart/form-data")
+    monkeypatch.setattr(admin_module._build_roster, "fetch_directory",
+                        lambda: {"joshua judy": "josh.judy@summitintegrated.com"})
+    resp = c.post("/admin/roster", follow_redirects=True)
+    roster = json.loads((data_dir / "roster.json").read_text())
+    assert roster["Joshua Judy"] == "josh.judy@summitintegrated.com"
+    assert b"confirmed from the Google Workspace directory" in resp.data
+
+
+def test_calendars_all_skipped_explains_delegation(client, monkeypatch):
+    c, data_dir = client
+    os.makedirs(data_dir, exist_ok=True)
+    (data_dir / "roster.json").write_text(
+        json.dumps({"Joshua Judy": "jjudy@summitintegrated.com"}))
+    monkeypatch.delenv("USE_DWD", raising=False)
+    monkeypatch.setattr(
+        admin_module._fetch_calendar_index, "fetch_all",
+        lambda roster, s, e, dwd, checkpoint_path=None: ({}, sorted(set(roster.values()))))
+    resp = c.post("/admin/calendars",
+                  data={"start": "2026-08-01", "end": "2026-09-03"},
+                  follow_redirects=True)
+    assert b"Domain-wide delegation" in resp.data
+    assert b"USE_DWD=1" in resp.data
