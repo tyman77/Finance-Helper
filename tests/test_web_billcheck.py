@@ -180,3 +180,25 @@ def test_run_error_flashes(client, fakes, monkeypatch):
     resp = client.post("/billcheck/run", data={})
     body = client.get(resp.headers["Location"], follow_redirects=True).data
     assert b"could not run" in body and b"rejected the credentials" in body
+
+
+def test_nightly_schedule_math_and_single_start(monkeypatch):
+    from datetime import datetime
+    from finance_helper.web import billcheck as bc
+
+    # 8:00 UTC target: 6:00 now -> 2h away; 9:00 now -> tomorrow (23h).
+    assert bc._seconds_until(8, datetime(2026, 9, 3, 6, 0)) == 2 * 3600
+    assert bc._seconds_until(8, datetime(2026, 9, 3, 9, 0)) == 23 * 3600
+    assert bc._seconds_until(8, datetime(2026, 9, 3, 8, 0)) == 24 * 3600
+
+    # Disabled via env: never starts. Enabled: starts exactly once.
+    monkeypatch.setattr(bc, "_nightly_started", False)
+    monkeypatch.setenv("BILLCHECK_NIGHTLY", "0")
+    assert bc.start_nightly() is False
+    monkeypatch.setenv("BILLCHECK_NIGHTLY", "1")
+    started = []
+    monkeypatch.setattr(bc.threading, "Thread",
+                        lambda **kw: type("T", (), {"start": lambda self: started.append(1)})())
+    assert bc.start_nightly() is True
+    assert bc.start_nightly() is False          # already running
+    assert started == [1]

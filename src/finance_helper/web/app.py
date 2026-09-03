@@ -380,6 +380,14 @@ def create_app() -> Flask:
     app.register_blueprint(cashproof_bp)
     app.register_blueprint(billcheck_bp)
 
+    # Nightly Bill Check: catches bills entered during the day. The test
+    # suite never has Bill.com creds, and the loop double-checks readiness
+    # at fire time anyway; BILLCHECK_NIGHTLY=0 turns it off.
+    from .. import billdotcom_api
+    if billdotcom_api.credentials_present():
+        from .billcheck import start_nightly
+        start_nightly()
+
     @app.get("/")
     def index():
         # Pull in any saved reviews from disk (survives restarts / other workers)

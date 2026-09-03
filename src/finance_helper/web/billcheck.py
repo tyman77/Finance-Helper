@@ -11,7 +11,7 @@ import io as _io
 import os
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import (Blueprint, Response, current_app, flash, redirect,
                    render_template, request, send_file, session, url_for)
@@ -73,6 +73,51 @@ def _execute(job_id, job, who, limit, force):
     except Exception as exc:
         job["status"] = "error"
         job["error"] = str(exc)
+
+
+# --- nightly schedule -------------------------------------------------------
+# New bills land in Bill.com every day; a nightly pass catches them while
+# the queue is small. In-process timer (one gunicorn worker holds it, same
+# reasoning as JOBS above): BILLCHECK_NIGHTLY=0 disables,
+# BILLCHECK_NIGHTLY_HOUR_UTC picks the hour (default 08 UTC ≈ 2am Denver).
+
+_nightly_started = False
+
+
+def _seconds_until(hour_utc: int, now: datetime) -> float:
+    target = now.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def _nightly_loop():
+    import time
+    hour = int(os.environ.get("BILLCHECK_NIGHTLY_HOUR_UTC") or 8)
+    while True:
+        time.sleep(max(60.0, _seconds_until(hour, datetime.utcnow())))
+        if _running_job():
+            continue                     # someone's manual run is already going
+        ready = _readiness()
+        if not (ready["billdotcom"] and ready["claude"]):
+            continue
+        job_id = "nightly" + uuid.uuid4().hex[:6]
+        job = {"status": "running", "stages": [], "error": None,
+               "started": datetime.now().isoformat(timespec="seconds")}
+        JOBS[job_id] = job
+        try:
+            _execute(job_id, job, "nightly", DEFAULT_LIMIT, False)
+        finally:
+            JOBS.pop(job_id, None)       # the stored run summary is the record
+
+
+def start_nightly():
+    global _nightly_started
+    if _nightly_started or os.environ.get("BILLCHECK_NIGHTLY", "1") == "0":
+        return False
+    _nightly_started = True
+    threading.Thread(target=_nightly_loop, daemon=True).start()
+    return True
 
 
 @billcheck_bp.get("/")
