@@ -694,13 +694,16 @@ def create_app() -> Flask:
         # The approve button submits the whole review form: apply what's on
         # screen first (what you see is what posts), then post ONLY the
         # checked lines — never Wi-Fi/unknown lines nobody selected.
-        if any(f"gl_account_{i}" in request.form for i in range(len(doc.line_items))):
-            _apply_line_edits(doc)
-            selected = [li for i, li in enumerate(doc.line_items)
-                        if request.form.get(f"needs_review_{i}") == "on"]
-        else:
-            # Direct POST without the form (tests, API callers): whole doc.
-            selected = list(doc.line_items)
+        if not any(f"gl_account_{i}" in request.form
+                   for i in range(len(doc.line_items))):
+            # A bare POST means an outdated review page (loaded before a
+            # deploy) — never fall back to posting everything (JE 54222).
+            flash("That looked like an outdated review page — reload the "
+                  "review, tick the lines to post, and try again.")
+            return redirect(url_for("review_page", run_id=run_id))
+        _apply_line_edits(doc)
+        selected = [li for i, li in enumerate(doc.line_items)
+                    if request.form.get(f"needs_review_{i}") == "on"]
         if not selected:
             store.save_run(run_id, run)
             flash("No lines selected — tick the checkbox on each line you want "

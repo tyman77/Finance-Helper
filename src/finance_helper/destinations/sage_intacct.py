@@ -174,16 +174,43 @@ def _mdy(iso_date: str | None) -> str:
 
 
 def _load_projects_index() -> dict:
+    """The job-number -> Intacct-PROJECTID mapping. Self-healing: an empty
+    index fetches the PROJECT list through the XML gateway and caches it —
+    JE 54222 posted with zero projects because nobody had run the fetch."""
     import json
 
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA",
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
+    path = os.path.join(data_dir, "sage_projects.json")
     try:
-        with open(os.path.join(data_dir, "sage_projects.json"), encoding="utf-8") as fh:
-            return json.load(fh)
+        with open(path, encoding="utf-8") as fh:
+            index = json.load(fh)
+        if index:
+            return index
     except (OSError, ValueError):
+        pass
+
+    from ..recon import sage_xml
+    if not sage_xml.credentials_present():
         return {}
+    try:
+        def q(fn):
+            rbq = sage_xml._el(fn, "readByQuery")
+            sage_xml._el(rbq, "object", "PROJECT")
+            sage_xml._el(rbq, "fields", "PROJECTID,NAME,STATUS")
+            sage_xml._el(rbq, "query", "")
+            sage_xml._el(rbq, "pagesize", 1000)
+        index = {str(r.get("PROJECTID")): {"name": r.get("NAME") or "",
+                                           "status": r.get("STATUS")}
+                 for r in sage_xml._read_all(q) if r.get("PROJECTID")}
+    except Exception:
+        return {}
+    if index:
+        os.makedirs(data_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(index, fh, indent=1, default=str)
+    return index
 
 
 def _intacct_project_id(code: str) -> str:
@@ -254,6 +281,14 @@ def _post_via_xml(payload: dict) -> dict:
     import re as _re
 
     from ..recon import sage_xml
+
+    coded = [l for l in payload["lines"] if l.get("project")]
+    if coded and all(not _intacct_project_id(l["project"]) for l in coded):
+        raise RuntimeError(
+            "None of the selected lines' job numbers map to a Sage project — "
+            "the projects index is empty or stale (JE 54222 posted with zero "
+            "projects this way). Run Admin → Fetch Sage projects, then post "
+            "again.")
 
     metas: list[dict] = []
 

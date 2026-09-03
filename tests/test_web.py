@@ -111,9 +111,24 @@ def test_editing_a_line_persists_and_affects_validation(client, monkeypatch, tmp
     assert re.search(r'value="40"[^>]*selected', dept_select)
 
 
+def test_bare_approve_from_stale_page_refuses_to_post_everything(client):
+    # A POST without the review form's fields = a page loaded before a
+    # deploy. JE 54222 taught us: never fall back to posting the whole doc.
+    run_id = _upload(client, "ups", "samples/ups_sample.csv")
+    resp = client.post(f"/review/{run_id}/approve", follow_redirects=True)
+    assert b"outdated review page" in resp.data
+    from finance_helper.web.app import RUNS
+    assert RUNS[run_id].get("posted") is None
+
+
 def test_approve_without_credentials_shows_clean_failure(client):
     run_id = _upload(client, "ups", "samples/ups_sample.csv")
-    resp = client.post(f"/review/{run_id}/approve")
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    data = {f"gl_account_{i}": (li.gl_account or "")
+            for i, li in enumerate(doc.line_items)}
+    data["needs_review_0"] = "on"
+    resp = client.post(f"/review/{run_id}/approve", data=data)
     assert resp.status_code == 302
     body = client.get(f"/review/{run_id}").data.decode()
     assert "Not posted" in body
