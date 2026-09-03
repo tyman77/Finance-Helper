@@ -198,3 +198,17 @@ def test_job_number_translates_to_intacct_project_id(monkeypatch, tmp_path):
     assert sage_intacct._intacct_project_id("9999") == ""   # unmapped: no id
     # "53" appears in both names -> ambiguous, safer to post without one.
     assert sage_intacct._intacct_project_id("53") == ""
+
+
+def test_inactive_projects_never_map(monkeypatch, tmp_path):
+    import json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "sage_projects.json").write_text(json.dumps({
+        "P000158": {"name": "Old Job | 4100", "status": "inactive"},
+        "P000700": {"name": "Live Job | 4200", "status": "active"},
+        "P000701": {"name": "No Status Job | 4300"},
+    }))
+    assert sage_intacct._intacct_project_id("4100") == ""       # closed: skip
+    assert sage_intacct._intacct_project_id("P000158") == ""    # even literal
+    assert sage_intacct._intacct_project_id("4200") == "P000700"
+    assert sage_intacct._intacct_project_id("4300") == "P000701"  # no status = ok

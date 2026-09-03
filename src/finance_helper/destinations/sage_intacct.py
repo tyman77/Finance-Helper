@@ -223,10 +223,16 @@ def _intacct_project_id(code: str) -> str:
     code = str(code or "").strip()
     if not code:
         return ""
+    index = _load_projects_index()
     if re.match(r"^P\d+$", code, re.I):
-        return code
-    hits = [pid for pid, meta in _load_projects_index().items()
-            if code in str((meta or {}).get("name") or "")]
+        # Even a literal P-number must be an active project — Intacct
+        # rejects postings to closed ones ("Project 'P000158' ... not valid").
+        meta = index.get(code) or index.get(code.upper()) or {}
+        status = str(meta.get("status") or "active").lower()
+        return code if status == "active" else ""
+    hits = [pid for pid, meta in index.items()
+            if code in str((meta or {}).get("name") or "")
+            and str((meta or {}).get("status") or "active").lower() == "active"]
     return hits[0] if len(hits) == 1 else ""
 
 
