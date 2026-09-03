@@ -36,11 +36,11 @@ Field rules:
 - vendor: the business issuing the invoice (the "from"/remit-to party), not the customer being billed.
 - invoice_number: exactly as printed.
 - po_number: the customer PO / reference number if printed.
-- subtotal: the product/merchandise subtotal before freight, shipping, and tax, if the document itemizes one. Null otherwise.
-- tax: the sales-tax amount, if itemized. Null otherwise.
-- current_charges: on statements that carry a previous balance or amount-due rollup, the CURRENT period's new charges ("Current Bill", "Current Charges"). Null when the document has no such split.
-- order_number: the vendor's own order / sales-order reference if printed ("S.O. #", "Order No", "Sales Order"); null if absent. Distinct from the customer PO.
-- ship_date: the date goods shipped, if printed (YYYY-MM-DD); some vendors' payment terms run from it. Null if absent.
+- subtotal: the product/merchandise subtotal before freight, shipping, and tax, if the document itemizes one. Empty string otherwise.
+- tax: the sales-tax amount, if itemized. Empty string otherwise.
+- current_charges: on statements that carry a previous balance or amount-due rollup, the CURRENT period's new charges ("Current Bill", "Current Charges"). Empty string when the document has no such split.
+- order_number: the vendor's own order / sales-order reference if printed ("S.O. #", "Order No", "Sales Order"); empty string if absent. Distinct from the customer PO.
+- ship_date: the date goods shipped, if printed (YYYY-MM-DD); some vendors' payment terms run from it. Empty string if absent.
 - is_invoice: false for statements, purchase orders, quotes, receipts, packing slips, credit memos, or anything that is not a bill for payment.
 - confidence: low when the scan is unreadable, fields are hand-written, or several invoices/amounts compete.
 - notes: anything a reviewer should know — multiple invoices in one file, a past-due balance included in the total, hand-written changes, missing pages."""
@@ -61,11 +61,13 @@ class InvoiceFields(BaseModel):
     discount_terms: Optional[str]
     currency: Optional[str]
     po_number: Optional[str]
-    ship_date: Optional[str] = None
-    order_number: Optional[str] = None
-    subtotal: Optional[str] = None
-    tax: Optional[str] = None
-    current_charges: Optional[str] = None
+    # Plain strings ("" = absent), NOT Optional: the structured-output API
+    # caps union-typed fields at 16 and the null-able ones above use them up.
+    ship_date: str = ""
+    order_number: str = ""
+    subtotal: str = ""
+    tax: str = ""
+    current_charges: str = ""
     confidence: Literal["high", "medium", "low"]
     notes: str
 
