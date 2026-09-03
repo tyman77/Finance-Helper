@@ -533,3 +533,27 @@ def test_skip_calendar_env_disables_calendar_coding(monkeypatch):
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project is None
     assert "calendar" not in (john.note or "").lower()
+
+
+def test_club_subscription_is_overhead_never_project(monkeypatch):
+    """The $750 FRIES club subscription kept getting a project from the
+    hotel matcher (and its ORD IAH "route" defeats the destination check) —
+    a membership is 71000 overhead, full stop."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    target = None
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.description = "DOE       /CLUB SUBSCRIPTION ORD IAH"
+            target = li
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "30--Solution Architect",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": ["4570"], "n": 10}}
+    hotel = [{"start": "2026-05-09", "end": "2026-05-12", "project": "4570",
+              "department": "30", "city": "Dallas", "guests": ["John Doe"]}]
+    doc = enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={},
+                               roster={}, registry={}, active_projects=None,
+                               hotel_index=hotel, ramp_index=[], timecard_index={})
+    assert target.gl_account == "71000"
+    assert target.project is None
+    assert target.department == "30"     # traveler's dept still carried
+    assert "United Club membership" in target.note

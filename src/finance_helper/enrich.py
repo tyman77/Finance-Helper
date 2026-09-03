@@ -160,6 +160,17 @@ def enrich_united(
             li.needs_review = True
             li.note = "low-confidence department"
 
+        # A United Club membership is overhead, never project work — without
+        # this rule the hotel/schedule matchers happily pin a project on it
+        # (and its "route" is just the member's home airports).
+        if "CLUB SUBSCRIPTION" in li.description.upper():
+            li.gl_account = "71000"
+            li.project = None
+            li.needs_review = True
+            li.note = (li.note + "; " if li.note else "") + \
+                "United Club membership -> 71000 OH Travel, no project"
+            continue
+
         # 1) Installers: pin project + 52200 COGS from the crew schedule.
         resolved = _resolve_project(li, entry, passenger, schedule_index, calendar_index, roster,
                                     registry, active_projects, timecard_index)
