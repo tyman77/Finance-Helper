@@ -415,3 +415,71 @@ def test_no_match_notes_explain_which_link_broke():
     # No index at all.
     note = run_with([])
     assert "no hotel stays indexed yet" in note
+
+
+def test_route_states_drops_origin_and_return_leg():
+    assert project_resolver.route_states("DEN AUS DEN") == ["TX"]
+    assert project_resolver.route_states("DEN PIT DEN") == ["PA"]
+    assert project_resolver.route_states("ICT DEN") == ["CO"]
+    assert project_resolver.route_states("DEN DFW ATL DEN") == ["TX", "GA"]
+    assert project_resolver.route_states("") == []
+    assert project_resolver.route_states("XXX YYY") == []
+
+
+def test_destination_state_narrows_candidates_to_one():
+    """Two historical candidates; the flight lands in the one's state ->
+    auto-filled with a confirm note."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9,
+                         "projects": ["3495", "4048"], "n": 10}}
+    registry = {"registry": {
+        "3495": {"client": "Rock Point Church, AZ"},
+        "4048": {"client": "Traders Point, IN"},
+    }}
+    # Sample routing "DEN AUS DEN" lands in TX — matches neither candidate,
+    # so nothing is auto-filled from the destination.
+    doc2 = enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={},
+                                roster={}, registry=registry, active_projects=None,
+                                hotel_index=[], ramp_index=[], timecard_index={})
+    john2 = next(li for li in doc2.line_items
+                 if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john2.project is None
+
+    doc3 = sources.load("united", "samples/united_sample.csv")
+    for li in doc3.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "DEN PHX DEN"
+    doc3 = enrich.enrich_united(doc3, tmap, schedule_index={}, calendar_index={},
+                                roster={}, registry=registry, active_projects=None,
+                                hotel_index=[], ramp_index=[], timecard_index={})
+    john3 = next(li for li in doc3.line_items
+                 if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john3.project == "3495"
+    assert john3.gl_account == "52200"
+    assert "flight lands in AZ -> project 3495" in john3.note
+
+
+def test_destination_state_suggests_registry_projects_when_no_history():
+    """No candidate list at all: the active projects in the destination state
+    become the suggestion."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "DEN PHX DEN"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.4, "projects": [], "n": 10}}
+    registry = {"registry": {
+        "3495": {"client": "Rock Point Church, AZ"},
+        "3496": {"client": "Desert Springs, AZ"},
+        "4048": {"client": "Traders Point, IN"},
+    }}
+    doc = enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={},
+                               roster={}, registry=registry, active_projects=None,
+                               hotel_index=[], ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None
+    assert "flight lands in AZ — projects there: 3495, 3496 — pick one" in john.note

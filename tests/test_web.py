@@ -248,8 +248,10 @@ def test_format_note_candidates_with_calendar_events_real_case():
         "Remote (Office); registry: candidate projects 3190, 3458, 4048, 4195, 4211 — pick one"
     )
     got = _format_note(note)
-    assert got["summary"] == "Usually 52200 (39% of trips)"
-    assert "Multiple possible projects — pick one below" in got["details"]
+    # The 39% pattern is weak, so the actionable candidate list leads and the
+    # pattern drops into the details.
+    assert got["summary"] == "Multiple possible projects — pick one below"
+    assert "Usually 52200 (39% of trips)" in got["details"]
     # Both calendar events preserved, not merged/lost by the "; " collision
     # with the registry segment that follows them.
     assert any("Traders Point MLC Commissioning" in d and "Remote (Office)" in d for d in got["details"])
@@ -544,3 +546,28 @@ def test_project_titles_merges_registry_and_sage_names(monkeypatch, tmp_path):
     assert titles["4804"] == "Northview Church"
     # The code itself is stripped from the display name (it's shown alongside).
     assert titles["5368"] == "Emmaus Church, GA | Building Expansion"
+
+
+def test_line_candidates_prefers_the_narrowed_pick_list():
+    note = ("account hint '52200--x' (used 39% of trips) — confirm project/COGS; "
+            "past projects 3495, 4048, 2626 — pick one; "
+            "destination matches projects 3495 — pick one")
+    assert _line_candidates(note) == ["3495"]
+
+
+def test_format_note_demotes_weak_account_pattern():
+    out = _format_note(
+        "account hint '52200--x' (used 39% of trips) — confirm project/COGS; "
+        "destination matches projects 3495 — pick one")
+    assert out["summary"] == "Flight destination matches these projects — pick one below"
+    assert "Usually 52200 (39% of trips)" in out["details"]
+    # A strong pattern keeps the lead.
+    out2 = _format_note(
+        "account hint '52200--x' (used 90% of trips) — confirm project/COGS; "
+        "past projects 3495, 4048 — pick one")
+    assert out2["summary"] == "Usually 52200 (90% of trips)"
+    # A weak pattern with only a warning after it keeps the lead too.
+    out3 = _format_note(
+        "account hint '52200--x' (used 39% of trips) — confirm project/COGS; "
+        "matched by surname only")
+    assert out3["summary"] == "Usually 52200 (39% of trips)"

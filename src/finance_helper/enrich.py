@@ -164,6 +164,8 @@ def enrich_united(
                 li.project = resolved["project"]
             li.needs_review = True  # reviewed to start
             li.note = (li.note + "; " if li.note else "") + resolved["note"]
+            if not li.project:
+                _destination_narrow(li, registry, active_projects)
             continue
 
         # 2) Everyone else falls back to the traveler's usual account, with any
@@ -186,8 +188,56 @@ def enrich_united(
         # cross-reference Hotel Engine bookings on the same dates to narrow them.
         if not li.project:
             _fallback_project(li, entry, hotel_index, ramp_index, active_projects)
+        # Last cross-check: the flight's destination state vs. the state in
+        # project names — narrows candidate lists, and surfaces the projects
+        # in that state when history offers nothing at all.
+        if not li.project:
+            _destination_narrow(li, registry, active_projects)
 
     return doc
+
+
+_PICK_RE = re.compile(
+    r"(?:registry: candidate projects|calendar title codes|past projects"
+    r"|hotel-week projects|hotel-stay projects|ramp-memo projects)"
+    r" ([\d, ]+) — pick one")
+
+
+def _destination_narrow(li, registry, active_projects) -> None:
+    """Match the flight's destination state against the ", XX" in project
+    names. A unique hit among the already-suggested candidates auto-fills the
+    project; several hits reorder the pick; with no candidates at all, the
+    active projects in that state become the suggestion."""
+    routing = next((str(v) for k, v in (li.raw or {}).items()
+                    if k.lower().startswith("routing")), "") or li.description or ""
+    states = project_resolver.route_states(routing)
+    if not states:
+        return
+    matches = project_resolver.projects_in_states(registry or {}, states, active_projects)
+    if not matches:
+        return
+    label = "/".join(states)
+    m = _PICK_RE.search(li.note or "")
+    if m:
+        codes = [c.strip() for c in m.group(1).split(",") if c.strip()]
+        sp = [c for c in codes if c in matches]
+        if len(sp) == 1:
+            li.project = sp[0]
+            li.gl_account = "52200"
+            li.note += (f"; flight lands in {label} -> project {sp[0]} "
+                        f"({matches[sp[0]]}) (confirm)")
+        elif sp:
+            li.note += ("; destination matches projects "
+                        + ", ".join(sp) + " — pick one")
+        return
+    if len(matches) == 1:
+        code, client = next(iter(matches.items()))
+        li.project = code
+        li.gl_account = "52200"
+        li.note += f"; flight lands in {label} -> project {code} ({client}) (confirm)"
+    elif len(matches) <= 4:
+        li.note += (f"; flight lands in {label} — projects there: "
+                    + ", ".join(sorted(matches)) + " — pick one")
 
 
 def _fallback_project(li, entry, hotel_index, ramp_index, active_projects) -> None:

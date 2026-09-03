@@ -61,6 +61,75 @@ def _filter_active(codes: set[str], active_projects: set[str] | None) -> set[str
 
 STAY_WINDOW_DAYS = 12  # departure through the likely length of a trip
 
+# Airport -> state, for matching a flight's destination against the state
+# abbreviations in project names ("Rock Point Church, AZ"). Majors plus the
+# regional fields that show up in the United statements.
+_AIRPORT_STATES = {
+    "ABQ": "NM", "ALB": "NY", "AMA": "TX", "ANC": "AK", "ATL": "GA",
+    "AUS": "TX", "AVL": "NC", "BDL": "CT", "BHM": "AL", "BIL": "MT",
+    "BIS": "ND", "BNA": "TN", "BOI": "ID", "BOS": "MA", "BTR": "LA",
+    "BUF": "NY", "BUR": "CA", "BWI": "MD", "BZN": "MT", "CAK": "OH",
+    "CHA": "TN", "CHS": "SC", "CID": "IA", "CLE": "OH", "CLT": "NC",
+    "CMH": "OH", "COS": "CO", "CRP": "TX", "CVG": "OH", "DAL": "TX",
+    "DAY": "OH", "DCA": "VA", "DEN": "CO", "DFW": "TX", "DSM": "IA",
+    "DTW": "MI", "ELP": "TX", "EUG": "OR", "EWR": "NJ", "FAR": "ND",
+    "FAT": "CA", "FLL": "FL", "FSD": "SD", "FWA": "IN", "GEG": "WA",
+    "GJT": "CO", "GRR": "MI", "GSO": "NC", "GSP": "SC", "HNL": "HI",
+    "HOU": "TX", "HSV": "AL", "IAD": "VA", "IAH": "TX", "ICT": "KS",
+    "IDA": "ID", "IND": "IN", "JAC": "WY", "JAN": "MS", "JAX": "FL",
+    "JFK": "NY", "LAS": "NV", "LAX": "CA", "LBB": "TX", "LEX": "KY",
+    "LGA": "NY", "LIT": "AR", "LNK": "NE", "MCI": "MO", "MCO": "FL",
+    "MDW": "IL", "MEM": "TN", "MFR": "OR", "MIA": "FL", "MKE": "WI",
+    "MSN": "WI", "MSP": "MN", "MSY": "LA", "MYR": "SC", "OAK": "CA",
+    "OKC": "OK", "OMA": "NE", "ONT": "CA", "ORD": "IL", "ORF": "VA",
+    "PBI": "FL", "PDX": "OR", "PHL": "PA", "PHX": "AZ", "PIA": "IL",
+    "PIT": "PA", "PNS": "FL", "PSP": "CA", "PVD": "RI", "RAP": "SD",
+    "RDU": "NC", "RIC": "VA", "RNO": "NV", "ROC": "NY", "RSW": "FL",
+    "SAN": "CA", "SAT": "TX", "SAV": "GA", "SBA": "CA", "SDF": "KY",
+    "SEA": "WA", "SFO": "CA", "SGF": "MO", "SJC": "CA", "SLC": "UT",
+    "SMF": "CA", "SNA": "CA", "SRQ": "FL", "STL": "MO", "SYR": "NY",
+    "TPA": "FL", "TUL": "OK", "TUS": "AZ", "TYS": "TN", "XNA": "AR",
+}
+
+_STATE_IN_NAME = re.compile(r",\s*([A-Z]{2})\b")
+
+
+def route_states(routing: str) -> list[str]:
+    """Destination states from a routing string ("DEN AUS DEN" -> ["TX"]).
+    The first airport is the origin; on a round trip (first == last) the
+    return leg is dropped too, leaving the places actually visited."""
+    codes = [t for t in (routing or "").upper().split()
+             if len(t) == 3 and t.isalpha() and t in _AIRPORT_STATES]
+    if not codes:
+        return []
+    if len(codes) >= 2 and codes[0] == codes[-1]:
+        mids = codes[1:-1]
+    else:
+        mids = codes[1:] or codes
+    states: list[str] = []
+    for c in mids:
+        st = _AIRPORT_STATES[c]
+        if st not in states:
+            states.append(st)
+    return states
+
+
+def projects_in_states(registry: dict, states: list[str],
+                       active_projects: set[str] | None = None) -> dict[str, str]:
+    """{code: client} for projects whose client name carries a matching state
+    abbreviation ("Rock Point Church, AZ")."""
+    if not states:
+        return {}
+    reg = registry.get("registry", registry) or {}
+    out: dict[str, str] = {}
+    for code, info in reg.items():
+        if active_projects is not None and code not in active_projects:
+            continue
+        m = _STATE_IN_NAME.search(info.get("client") or "")
+        if m and m.group(1) in states:
+            out[code] = info.get("client") or ""
+    return out
+
 # Calendar trip purpose -> overhead GL account. Always review-flagged: the
 # calendar tells us why/where, the human confirms new-vs-existing client etc.
 _TRIP_ACCOUNT = [

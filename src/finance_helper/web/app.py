@@ -44,7 +44,8 @@ RUNS: dict[str, dict] = {}
 
 _CANDIDATES_RE = re.compile(
     r"(?:registry: candidate projects|calendar title codes|past projects"
-    r"|hotel-week projects|hotel-stay projects|ramp-memo projects)"
+    r"|hotel-week projects|hotel-stay projects|ramp-memo projects"
+    r"|destination matches projects|projects there:)"
     r" ([\d, ]+) — pick one"
 )
 
@@ -63,10 +64,12 @@ def _line_candidates(note: str | None) -> list[str]:
     """Pull the candidate project codes out of a "— pick one" note, so the UI
     can offer them as one-click buttons instead of making someone retype a
     number out of a wall of text."""
-    m = _CANDIDATES_RE.search(note or "")
-    if not m:
+    hits = _CANDIDATES_RE.findall(note or "")
+    if not hits:
         return []
-    return [c.strip() for c in m.group(1).split(",") if c.strip()]
+    # The last "— pick one" wins: later segments are narrowings of earlier
+    # ones (e.g. the destination-state match trimming the history list).
+    return [c.strip() for c in hits[-1].split(",") if c.strip()]
 
 
 def _line_status(li, candidates: list[str]) -> str:
@@ -142,6 +145,12 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: f"{m.group(1)}'s hotel stay that week → project {m.group(2)} (confirm)"),
     (re.compile(r"^ramp-memo projects .+ — pick one$"),
      lambda m: "Projects from Ramp per-diem memos — pick one below"),
+    (re.compile(r"^flight lands in (\S+) -> project (\S+) \((.+)\) \(confirm\)$"),
+     lambda m: f"Flight lands in {m.group(1)} → {m.group(3)} (confirm)"),
+    (re.compile(r"^destination matches projects .+ — pick one$"),
+     lambda m: "Flight destination matches these projects — pick one below"),
+    (re.compile(r"^flight lands in (\S+) — projects there: .+ — pick one$"),
+     lambda m: f"Flight lands in {m.group(1)} — the projects there are below"),
     (re.compile(r"^ramp per-diem memo -> project (\S+) \+ 52200 COGS \(confirm\)$"),
      lambda m: f"Ramp per-diem memo → project {m.group(1)} (confirm)"),
     (re.compile(r"^timecards: (.+) logged hours to project (\S+) during the stay -> 52200 COGS$"),
@@ -198,6 +207,16 @@ def _format_note(note: str | None) -> dict:
                 break
         else:
             parts.append(segment)
+    # A weak historical account pattern ("Usually 52200 (39% of trips)")
+    # shouldn't headline the row when a real signal (flight destination,
+    # hotel stay, candidate list) follows it — demote it to the details.
+    if len(parts) > 1:
+        m = re.match(r"^Usually \d+ \((\d+)% of trips\)$", parts[0])
+        if m and int(m.group(1)) < 50:
+            alt = next((i for i, p in enumerate(parts[1:], 1)
+                        if not p.startswith("⚠")), None)
+            if alt is not None:
+                parts.insert(0, parts.pop(alt))
     details = parts[1:]
     if calendar_events:
         details.append("Calendar: " + "; ".join(calendar_events))
