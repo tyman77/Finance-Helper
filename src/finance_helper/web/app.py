@@ -27,7 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import config, destinations, insights, pipeline, validate
 from .. import review as proposal_review
-from . import access, store
+from . import access, ledger, store
 from .admin import admin_bp
 from .billcheck import billcheck_bp
 from .cashproof import cashproof_bp
@@ -636,6 +636,10 @@ def create_app() -> Flask:
             tmp_path = tmp.name
         try:
             doc = pipeline.process(source, tmp_path)
+            already = ledger.apply(source, doc)  # same statement uploaded before?
+            if already:
+                flash(f"{already} line(s) on this statement were posted to Sage "
+                      "in an earlier review — they're marked ✔ and can't post twice.")
             with open(tmp_path, "rb") as fh:
                 csv_b64 = base64.b64encode(fh.read()).decode("ascii")
         except Exception as exc:  # surface a friendly error instead of a 500
@@ -676,6 +680,7 @@ def create_app() -> Flask:
         try:
             new_doc = pipeline.process(run["source"], tmp_path)
             carried = _carry_posted_stamps(run["doc"], new_doc)
+            carried += ledger.apply(run["source"], new_doc)
             run["doc"] = new_doc
             run["posted"] = None
             store.save_run(run_id, run)
@@ -686,6 +691,21 @@ def create_app() -> Flask:
             flash(f"Could not re-run: {exc}")
         finally:
             os.unlink(tmp_path)
+        return redirect(url_for("review_page", run_id=run_id))
+
+    @app.post("/review/<run_id>/clear_posted")
+    def clear_posted(run_id):
+        """Start over after deleting the entries in Sage: drop every posted ✔
+        on this review and forget them in the cross-run ledger, so the lines
+        can be posted again."""
+        run = _get_run(run_id)
+        if not run:
+            return redirect(url_for("index"))
+        cleared = ledger.clear(run["source"], run["doc"])
+        run["posted"] = None
+        store.save_run(run_id, run)
+        flash(f"Cleared {cleared} posted mark(s) — these lines can post again. "
+              "Only do this after the matching entries are deleted in Sage.")
         return redirect(url_for("review_page", run_id=run_id))
 
     @app.post("/review/<run_id>/mark_posted")
@@ -725,7 +745,7 @@ def create_app() -> Flask:
                     "used": False} for r in rows]
         doc = run["doc"]
         stamp = f"JE {je} · confirmed in Sage {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        marked = 0
+        marked: list = []
         for li in doc.line_items:
             if getattr(li, "posted_ref", ""):
                 continue
@@ -741,8 +761,11 @@ def create_app() -> Flask:
                         and e["desc"].startswith(memo)):
                     e["used"] = True
                     li.posted_ref = stamp
-                    marked += 1
+                    marked.append(li)
                     break
+        if marked:
+            ledger.record(run["source"], marked, stamp)
+        marked = len(marked)
         store.save_run(run_id, run)
         if marked:
             flash(f"Marked {marked} line(s) as already posted in JE {je} — "
@@ -897,6 +920,7 @@ def create_app() -> Flask:
                 datetime.now().strftime("%Y-%m-%d %H:%M")
             for li in selected:
                 li.posted_ref = stamp
+            ledger.record(run["source"], selected, stamp)
         except (RuntimeError, NotImplementedError) as exc:
             run["posted"] = {"ok": False, "detail": str(exc)}
         store.save_run(run_id, run)

@@ -575,3 +575,59 @@ def test_format_note_demotes_weak_account_pattern():
         "account hint '52200--x' (used 39% of trips) — confirm project/COGS; "
         "matched by surname only")
     assert out3["summary"] == "⚠ surname match only"
+
+
+def test_posted_ref_survives_store_round_trip(client, monkeypatch, tmp_path):
+    """THE duplicate-JE bug: posted_ref wasn't serialized, so every redeploy
+    (which drops the in-memory RUNS) forgot what was already posted."""
+    monkeypatch.setenv("FINANCE_HELPER_OUT_DIR", str(tmp_path))
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper.web import store
+    from finance_helper.web.app import RUNS
+    RUNS[run_id]["doc"].line_items[0].posted_ref = "JE 101728 · 2026-09-03 14:00"
+    store.save_run(run_id, RUNS[run_id])
+
+    RUNS.clear()   # simulate the process restart a deploy causes
+    reloaded = store.load_run(run_id)
+    assert reloaded["doc"].line_items[0].posted_ref == "JE 101728 · 2026-09-03 14:00"
+    assert reloaded["doc"].line_items[1].posted_ref == ""
+
+
+def test_ledger_marks_reuploaded_statement_lines(client, monkeypatch, tmp_path):
+    """Uploading the same statement again as a NEW run used to arrive with no
+    ✔ marks at all — the cross-run ledger now re-stamps posted lines."""
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    monkeypatch.setenv("FINANCE_HELPER_OUT_DIR", str(tmp_path / "out"))
+    from finance_helper.web import ledger as _ledger
+    from finance_helper.web.app import RUNS
+
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    doc = RUNS[run_id]["doc"]
+    doc.line_items[0].posted_ref = "JE 101728 · x"
+    _ledger.record("united", [doc.line_items[0]], "JE 101728 · x")
+
+    run2 = _upload(client, "united", "samples/united_sample.csv")
+    doc2 = RUNS[run2]["doc"]
+    assert doc2.line_items[0].posted_ref == "JE 101728 · x"
+    assert sum(1 for li in doc2.line_items if li.posted_ref) == 1
+
+
+def test_clear_posted_forgets_marks_and_ledger(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    monkeypatch.setenv("FINANCE_HELPER_OUT_DIR", str(tmp_path / "out"))
+    from finance_helper.web import ledger as _ledger
+    from finance_helper.web.app import RUNS
+
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    doc = RUNS[run_id]["doc"]
+    doc.line_items[0].posted_ref = "JE 101728 · x"
+    _ledger.record("united", [doc.line_items[0]], "JE 101728 · x")
+
+    resp = client.post(f"/review/{run_id}/clear_posted", follow_redirects=True)
+    assert b"Cleared 1 posted mark(s)" in resp.data
+    assert doc.line_items[0].posted_ref == ""
+    assert _ledger.load() == {}
+
+    # A fresh upload of the statement now arrives clean too.
+    run2 = _upload(client, "united", "samples/united_sample.csv")
+    assert not any(li.posted_ref for li in RUNS[run2]["doc"].line_items)

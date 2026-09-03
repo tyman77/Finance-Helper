@@ -38,6 +38,9 @@ def _line_to_dict(li: LineItem) -> dict:
         "needs_review": li.needs_review,
         "note": li.note,
         "raw": li.raw,
+        # The duplicate-JE guard. Losing this on a save/load round-trip is
+        # exactly how duplicate entries got posted after a redeploy.
+        "posted_ref": getattr(li, "posted_ref", ""),
     }
 
 
@@ -54,6 +57,7 @@ def _line_from_dict(d: dict) -> LineItem:
         needs_review=d.get("needs_review", False),
         note=d.get("note"),
         raw=d.get("raw", {}),
+        posted_ref=d.get("posted_ref", ""),
     )
 
 

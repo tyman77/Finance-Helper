@@ -175,6 +175,10 @@
     <input type="text" name="je_number" size="7" placeholder="JE #" inputmode="numeric">
     <button type="submit">Mark lines already in this JE</button>
   </form>
+  <form method="post" action="{{ url_for('clear_posted', run_id=run_id) }}"
+        onsubmit="return confirm('Remove ALL posted ✔ marks on this review so the lines can post again? Only do this after deleting the matching journal entries in Sage — otherwise you WILL get duplicates.');">
+    <button type="submit">Clear posted ✔ marks</button>
+  </form>
   {% endif %}
 </div>
 <p class="subtle">"Re-run coding" re-processes the original upload with the current
