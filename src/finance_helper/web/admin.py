@@ -374,8 +374,12 @@ def refresh_calendars():
 @admin_bp.post("/sage-projects")
 def refresh_sage_projects():
     try:
-        token = _fetch_sage_projects.get_token()
-        records = _fetch_sage_projects.fetch_projects(token)
+        from ..recon import sage_xml
+        if sage_xml.credentials_present():
+            records = _fetch_sage_projects.fetch_projects_xml()
+        else:
+            token = _fetch_sage_projects.get_token()
+            records = _fetch_sage_projects.fetch_projects(token)
         out = _fetch_sage_projects.build(records)
         os.makedirs(_data_dir(), exist_ok=True)
         with open(_data_path("sage_projects.json"), "w", encoding="utf-8") as fh:
