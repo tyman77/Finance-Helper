@@ -391,3 +391,45 @@ def test_posted_lines_are_marked_and_never_repost(client, monkeypatch):
                        follow_redirects=True)
     assert len(calls) == 1
     assert b"already posted" in resp.data
+
+
+def test_schedule_public_csv_fallback(monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "fetch_schedule_index", "scripts/fetch_schedule_index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+
+    import requests
+
+    class R:
+        status_code = 200
+        headers = {"Content-Type": "text/csv"}
+        content = ("Crew,8/3,8/4\n"
+                   "Mason Dill,5232,5232\n"
+                   "Zach Kay,HQ,4651\n").encode()
+
+    captured = {}
+
+    def fake_get(url, timeout=0):
+        captured["url"] = url
+        return R()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    values = mod.fetch_values("SHEET123", "'2026'!A1:NZ9")
+    assert "SHEET123/export?format=csv" in captured["url"]
+    index = mod.parse_grid(values, 2026)
+    assert index["Mason Dill"]["2026-08-03"] == "5232"
+    assert index["Zach Kay"]["2026-08-04"] == "4651"
+
+    # An HTML answer (login page) explains both fixes.
+    class H:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        content = b"<html>sign in</html>"
+    monkeypatch.setattr(requests, "get", lambda url, timeout=0: H())
+    with pytest.raises(RuntimeError, match="Anyone with the link"):
+        mod.fetch_values("SHEET123", "x")

@@ -332,7 +332,7 @@ def refresh_schedule():
     rng = os.environ.get("SCHEDULE_SHEET_RANGE", f"'{year}'!A1:NZ1008")
     name_col = os.environ.get("SCHEDULE_NAME_COL")
     try:
-        values = _fetch_schedule_index.fetch(sheet_id, rng)
+        values = _fetch_schedule_index.fetch_values(sheet_id, rng)
         index = _fetch_schedule_index.parse_grid(values, year, int(name_col) if name_col else None)
         os.makedirs(_data_dir(), exist_ok=True)
         with open(_data_path("schedule_index.json"), "w", encoding="utf-8") as fh:

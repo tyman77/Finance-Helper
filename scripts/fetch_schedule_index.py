@@ -103,10 +103,44 @@ def fetch(sheet_id: str, rng: str) -> list:
     return resp.json().get("values", [])
 
 
+def fetch_public_csv(sheet_id: str) -> list:
+    """No-credentials path: a sheet shared as 'Anyone with the link — Viewer'
+    serves a CSV export without any Google Cloud setup. SCHEDULE_SHEET_GID
+    picks the tab — the number after '#gid=' in the tab's URL (0 = first)."""
+    import csv
+    import io
+
+    import requests
+
+    gid = os.environ.get("SCHEDULE_SHEET_GID", "0")
+    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
+           f"?format=csv&gid={gid}")
+    resp = requests.get(url, timeout=60)
+    if resp.status_code != 200 or \
+            "text/html" in (resp.headers.get("Content-Type") or ""):
+        raise RuntimeError(
+            f"The sheet isn't readable without credentials (HTTP {resp.status_code}). "
+            "Two ways to fix: share the sheet as 'Anyone with the link — Viewer' "
+            "(no key needed), or set GOOGLE_SERVICE_ACCOUNT_JSON in Railway for "
+            "private access. If the schedule isn't on the sheet's FIRST tab, also "
+            "set SCHEDULE_SHEET_GID to the number after #gid= in the tab's URL.")
+    text = resp.content.decode("utf-8-sig", errors="replace")
+    return [row for row in csv.reader(io.StringIO(text))]
+
+
+def fetch_values(sheet_id: str, rng: str) -> list:
+    """Service-account API when a key is configured; public CSV export
+    otherwise."""
+    if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or \
+            os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        return fetch(sheet_id, rng)
+    return fetch_public_csv(sheet_id)
+
+
 def main(argv):
     year = int(argv[0]) if argv else date(2026, 1, 1).year
-    values = fetch(os.environ["SCHEDULE_SHEET_ID"],
-                   os.environ.get("SCHEDULE_SHEET_RANGE", "'2026'!A1:NZ1008"))
+    values = fetch_values(os.environ["SCHEDULE_SHEET_ID"],
+                          os.environ.get("SCHEDULE_SHEET_RANGE", "'2026'!A1:NZ1008"))
     name_col = os.environ.get("SCHEDULE_NAME_COL")
     index = parse_grid(values, year, int(name_col) if name_col else None)
     data_dir = os.environ.get("FINANCE_HELPER_DATA", "data")
