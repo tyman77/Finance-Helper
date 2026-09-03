@@ -386,6 +386,23 @@ def _amount_probe(amount: Decimal, around: date, window_days: int) -> list[dict]
             for row in (data if data is not None else [])]
 
 
+def fetch_batch_lines(record_no: str) -> list[dict]:
+    """All GL lines of one posted journal entry (GLBATCH record number),
+    as raw {ACCOUNTNO, TR_TYPE, TRX_AMOUNT, DESCRIPTION} dicts."""
+    record_no = "".join(ch for ch in str(record_no) if ch.isdigit())
+    if not record_no:
+        return []
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "GLDETAIL")
+        _el(rbq, "fields", "ACCOUNTNO,TR_TYPE,TRX_AMOUNT,DESCRIPTION")
+        _el(rbq, "query", f"BATCH_NO = '{record_no}'")
+        _el(rbq, "pagesize", _PAGE_SIZE)
+
+    return _read_all(q)
+
+
 def fetch_account_entries(accounts: list[str], start: date, end: date) -> list[dict]:
     """Signed GLDETAIL entries for arbitrary accounts (e.g. card liability
     accounts): debit positive, credit negative — a payment against a card

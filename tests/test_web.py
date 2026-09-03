@@ -450,3 +450,60 @@ def test_schedule_public_csv_fallback(monkeypatch):
         "1Pznz22qs2HuAq9iWFZTtcxqJGzzx2QksEPuwwldJOcE/edit#gid=555", "x")
     assert "/d/1Pznz22qs2HuAq9iWFZTtcxqJGzzx2QksEPuwwldJOcE/export" \
         in captured["url"]
+
+
+def test_rerun_keeps_posted_stamps(client):
+    """Regression: Re-run coding rebuilt the doc from the original upload and
+    silently dropped the posted ✔ marks — the lines could then be posted into
+    a second journal entry."""
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper.web.app import RUNS
+    RUNS[run_id]["doc"].line_items[0].posted_ref = "JE 54226 · 2026-09-02 14:00"
+
+    resp = client.post(f"/review/{run_id}/rerun", follow_redirects=True)
+    body = resp.data.decode()
+    doc = RUNS[run_id]["doc"]
+    assert doc.line_items[0].posted_ref == "JE 54226 · 2026-09-02 14:00"
+    assert not any(getattr(li, "posted_ref", "") for li in doc.line_items[1:])
+    assert "kept their" in body
+
+
+def test_mark_posted_restamps_lines_from_sage(client, monkeypatch):
+    """The recovery path: read a JE back from Sage and put the ✔ marks on the
+    review lines it contains (a lost-stamp or posted-outside-Scout fixup)."""
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper.recon import sage_xml
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+
+    rows = []
+    for li in doc.line_items[:2]:
+        sign = "1" if li.amount >= 0 else "-1"
+        rows.append({"ACCOUNTNO": (li.gl_account or "").split("--")[0],
+                     "TR_TYPE": sign,
+                     "TRX_AMOUNT": str(abs(li.amount)),
+                     "DESCRIPTION": f"{doc.vendor}: {li.description} | job 5368"})
+        # The mirror (opposite side, same memo) must not claim a line.
+        rows.append({"ACCOUNTNO": (li.gl_account or "").split("--")[0],
+                     "TR_TYPE": "-1" if sign == "1" else "1",
+                     "TRX_AMOUNT": str(abs(li.amount)),
+                     "DESCRIPTION": f"{doc.vendor}: {li.description} | job 5368"})
+    monkeypatch.setattr(sage_xml, "fetch_batch_lines", lambda je: rows)
+
+    resp = client.post(f"/review/{run_id}/mark_posted",
+                       data={"je_number": "54226"}, follow_redirects=True)
+    body = resp.data.decode()
+    assert "Marked 2 line(s) as already posted in JE 54226" in body
+    assert doc.line_items[0].posted_ref.startswith("JE 54226")
+    assert doc.line_items[1].posted_ref.startswith("JE 54226")
+    assert not any(getattr(li, "posted_ref", "") for li in doc.line_items[2:])
+
+    # Stamped lines render as ✔, not as a checkbox.
+    review = client.get(f"/review/{run_id}").data.decode()
+    assert 'name="post_0"' not in review and 'name="post_2"' in review
+
+    # A JE Sage doesn't know: clear message, nothing stamped.
+    monkeypatch.setattr(sage_xml, "fetch_batch_lines", lambda je: [])
+    resp = client.post(f"/review/{run_id}/mark_posted",
+                       data={"je_number": "99999"}, follow_redirects=True)
+    assert b"no lines for JE 99999" in resp.data

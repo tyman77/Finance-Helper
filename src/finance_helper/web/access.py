@@ -40,6 +40,7 @@ _ENDPOINT_SECTIONS = {
     "review_page": "reviews",
     "update_line": "reviews",
     "approve": "reviews",
+    "mark_posted": "reviews",
     "delete_run": "reviews",
     "download": "reviews",
 }

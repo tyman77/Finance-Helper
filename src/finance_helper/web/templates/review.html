@@ -157,7 +157,7 @@
 
 <div class="actions">
   <form method="post" action="{{ url_for('rerun', run_id=run_id) }}"
-        onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review.');">
+        onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review. Lines already posted (✔) keep their mark.');">
     <button type="submit">Re-run coding</button>
   </form>
   <button type="submit" class="approve" form="review-form"
@@ -165,6 +165,13 @@
           onclick="return confirm('Post the CHECKED lines to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Unchecked lines stay out of the entry.');">
     Approve &amp; Post selected</button>
   <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
+  {% if doc.destination == 'sage' %}
+  <form method="post" action="{{ url_for('mark_posted', run_id=run_id) }}"
+        title="Reads that journal entry from Sage and puts the ✔ back on the lines it contains — use if the posted marks were lost (e.g. by Re-run coding) or the entry was posted outside Scout.">
+    <input type="text" name="je_number" size="7" placeholder="JE #" inputmode="numeric">
+    <button type="submit">Mark lines already in this JE</button>
+  </form>
+  {% endif %}
 </div>
 <p class="subtle">"Re-run coding" re-processes the original upload with the current
 data — use it after building the hotel cross-reference or rebuilding the

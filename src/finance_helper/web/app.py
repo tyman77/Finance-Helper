@@ -86,6 +86,27 @@ def _line_status(li, candidates: list[str]) -> str:
     return "review"
 
 
+def _carry_posted_stamps(old_doc, new_doc) -> int:
+    """Re-running coding rebuilds the document from the original upload, which
+    would silently drop the "already in JE ..." markers — and a re-post would
+    then duplicate those lines in Sage. Lines are matched on (date,
+    description, amount); duplicates consume stamps in order."""
+    from collections import defaultdict, deque
+
+    stamps: dict[tuple, deque] = defaultdict(deque)
+    for li in old_doc.line_items:
+        ref = getattr(li, "posted_ref", "")
+        if ref:
+            stamps[(li.date, li.description, li.amount)].append(ref)
+    carried = 0
+    for li in new_doc.line_items:
+        queue = stamps.get((li.date, li.description, li.amount))
+        if queue:
+            li.posted_ref = queue.popleft()
+            carried += 1
+    return carried
+
+
 # --- Human-readable note formatting ----------------------------------------
 #
 # enrich.py builds `li.note` by concatenating several distinct facts with
@@ -596,14 +617,82 @@ def create_app() -> Flask:
             tmp.write(base64.b64decode(csv_b64))
             tmp_path = tmp.name
         try:
-            run["doc"] = pipeline.process(run["source"], tmp_path)
+            new_doc = pipeline.process(run["source"], tmp_path)
+            carried = _carry_posted_stamps(run["doc"], new_doc)
+            run["doc"] = new_doc
             run["posted"] = None
             store.save_run(run_id, run)
-            flash("Re-coded with the latest data.")
+            flash("Re-coded with the latest data."
+                  + (f" {carried} already-posted line(s) kept their ✔ so they "
+                     "won't post twice." if carried else ""))
         except Exception as exc:
             flash(f"Could not re-run: {exc}")
         finally:
             os.unlink(tmp_path)
+        return redirect(url_for("review_page", run_id=run_id))
+
+    @app.post("/review/<run_id>/mark_posted")
+    def mark_posted(run_id):
+        """Recovery: read a journal entry back from Sage and re-stamp the
+        review lines it contains (matched on side + amount + memo), so lines
+        posted before a stamp was lost — or posted outside Scout — show ✔
+        and stay out of future entries."""
+        run = _get_run(run_id)
+        if not run:
+            return redirect(url_for("index"))
+        je = "".join(ch for ch in request.form.get("je_number", "") if ch.isdigit())
+        if not je:
+            flash("Enter the Sage journal entry number (e.g. 54226).")
+            return redirect(url_for("review_page", run_id=run_id))
+        from ..recon import sage_xml
+        try:
+            rows = sage_xml.fetch_batch_lines(je)
+        except Exception as exc:
+            flash(f"Could not read JE {je} from Sage: {exc}")
+            return redirect(url_for("review_page", run_id=run_id))
+        if not rows:
+            flash(f"Sage returned no lines for JE {je} — check the number.")
+            return redirect(url_for("review_page", run_id=run_id))
+
+        from decimal import Decimal, InvalidOperation
+
+        def _amt(raw):
+            try:
+                return Decimal(str(raw or "").replace(",", ""))
+            except InvalidOperation:
+                return None
+
+        entries = [{"sign": -1 if (r.get("TR_TYPE") or "").strip() == "-1" else 1,
+                    "amount": _amt(r.get("TRX_AMOUNT")),
+                    "desc": (r.get("DESCRIPTION") or "").strip(),
+                    "used": False} for r in rows]
+        doc = run["doc"]
+        stamp = f"JE {je} · confirmed in Sage {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        marked = 0
+        for li in doc.line_items:
+            if getattr(li, "posted_ref", ""):
+                continue
+            sign = 1 if li.amount >= 0 else -1
+            memo = f"{doc.vendor}: {li.description}"[:200]
+            for e in entries:
+                # The JE's dimensioned line for this row: same side, same
+                # amount, memo built from this description (a "| job N"
+                # suffix may follow). The mirror is the opposite side, so
+                # it can't double-claim.
+                if (not e["used"] and e["sign"] == sign
+                        and e["amount"] == abs(li.amount)
+                        and e["desc"].startswith(memo)):
+                    e["used"] = True
+                    li.posted_ref = stamp
+                    marked += 1
+                    break
+        store.save_run(run_id, run)
+        if marked:
+            flash(f"Marked {marked} line(s) as already posted in JE {je} — "
+                  "they're now ✔ and can't be posted again.")
+        else:
+            flash(f"JE {je} was read from Sage ({len(entries)} lines) but none "
+                  "matched this review's unposted lines.")
         return redirect(url_for("review_page", run_id=run_id))
 
     def _get_run(run_id):
