@@ -207,16 +207,22 @@ def _format_note(note: str | None) -> dict:
                 break
         else:
             parts.append(segment)
-    # A weak historical account pattern ("Usually 52200 (39% of trips)")
-    # shouldn't headline the row when a real signal (flight destination,
-    # hotel stay, candidate list) follows it — demote it to the details.
-    if len(parts) > 1:
-        m = re.match(r"^Usually \d+ \((\d+)% of trips\)$", parts[0])
-        if m and int(m.group(1)) < 50:
-            alt = next((i for i, p in enumerate(parts[1:], 1)
-                        if not p.startswith("⚠")), None)
-            if alt is not None:
-                parts.insert(0, parts.pop(alt))
+    # The historical account pattern ("Usually 52200 (66% of trips)") never
+    # headlines the row — the account is already prefilled in the GL column,
+    # so the phrase adds nothing at a glance. It lives in "more detail" when
+    # the row has anything else to say, and the cell stays clean otherwise.
+    if parts and re.match(r"^Usually \d+ \(\d+% of trips\)$", parts[0]):
+        usual = parts.pop(0)
+        if not parts and not calendar_events:
+            return {"summary": "", "details": []}
+        if not parts:
+            parts = ["Calendar context below"]
+        parts.append(usual)
+        # Prefer something actionable over a ⚠ warning for the lead.
+        alt = next((i for i, p in enumerate(parts)
+                    if p is not usual and not p.startswith("⚠")), None)
+        if alt:
+            parts.insert(0, parts.pop(alt))
     details = parts[1:]
     if calendar_events:
         details.append("Calendar: " + "; ".join(calendar_events))

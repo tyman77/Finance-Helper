@@ -236,7 +236,9 @@ def test_format_note_account_hint_only():
     got = _format_note(
         "account hint '52200--COGS Travel: Flights / Parking' (used 100% of trips) — confirm project/COGS"
     )
-    assert got["summary"] == "Usually 52200 (100% of trips)"
+    # The account is already prefilled in the GL column, so the pattern phrase
+    # never shows — the Why cell stays clean when it's the only fact.
+    assert got["summary"] == ""
     assert got["details"] == []
 
 
@@ -266,7 +268,7 @@ def test_format_note_calendar_context_no_registry_match():
         "Breakaway INSTALL Kickoff 3138 — confirm client/account"
     )
     got = _format_note(note)
-    assert got["summary"] == "Usually 52200 (100% of trips)"
+    assert got["summary"] == "Calendar context below"
     cal_detail = next(d for d in got["details"] if d.startswith("Calendar:"))
     assert "Happy Hour!" in cal_detail and "Breakaway INSTALL Kickoff 3138" in cal_detail
     assert "confirm client/account" not in cal_detail  # trailing instruction stripped, not shown as an "event"
@@ -276,7 +278,8 @@ def test_format_note_surname_only_caveat_preserved():
     got = _format_note(
         "account hint '52200--x' (used 92% of trips) — confirm project/COGS; matched by surname only"
     )
-    assert any("surname" in d for d in got["details"])
+    assert "surname" in got["summary"]
+    assert any("Usually" in d for d in got["details"])
 
 
 def test_format_note_unrecognized_segment_shown_verbatim():
@@ -561,13 +564,14 @@ def test_format_note_demotes_weak_account_pattern():
         "destination matches projects 3495 — pick one")
     assert out["summary"] == "Flight destination matches these projects — pick one below"
     assert "Usually 52200 (39% of trips)" in out["details"]
-    # A strong pattern keeps the lead.
+    # Even a strong pattern never headlines — the candidates lead.
     out2 = _format_note(
         "account hint '52200--x' (used 90% of trips) — confirm project/COGS; "
         "past projects 3495, 4048 — pick one")
-    assert out2["summary"] == "Usually 52200 (90% of trips)"
-    # A weak pattern with only a warning after it keeps the lead too.
+    assert out2["summary"] == "Past projects (from history) — pick one below"
+    assert "Usually 52200 (90% of trips)" in out2["details"]
+    # With only a warning to say, the warning leads.
     out3 = _format_note(
         "account hint '52200--x' (used 39% of trips) — confirm project/COGS; "
         "matched by surname only")
-    assert out3["summary"] == "Usually 52200 (39% of trips)"
+    assert out3["summary"] == "⚠ surname match only"
