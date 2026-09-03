@@ -662,12 +662,7 @@ def create_app() -> Flask:
             notes=notes,
         )
 
-    @app.post("/review/<run_id>/update")
-    def update_line(run_id):
-        run = _get_run(run_id)
-        if not run:
-            return redirect(url_for("index"))
-        doc = run["doc"]
+    def _apply_line_edits(doc):
         for i, li in enumerate(doc.line_items):
             li.gl_account = (request.form.get(f"gl_account_{i}") or "").strip() or None
             li.department = (request.form.get(f"department_{i}") or "").strip() or None
@@ -675,6 +670,14 @@ def create_app() -> Flask:
             if f"person_{i}" in request.form:
                 li.person = (request.form.get(f"person_{i}") or "").strip() or None
             li.needs_review = request.form.get(f"needs_review_{i}") == "on"
+
+    @app.post("/review/<run_id>/update")
+    def update_line(run_id):
+        run = _get_run(run_id)
+        if not run:
+            return redirect(url_for("index"))
+        doc = run["doc"]
+        _apply_line_edits(doc)
         run["posted"] = None  # edits invalidate a prior post attempt's relevance
         store.save_run(run_id, run)
         flash("Changes saved.")
@@ -682,15 +685,36 @@ def create_app() -> Flask:
 
     @app.post("/review/<run_id>/approve")
     def approve(run_id):
+        from dataclasses import replace as _dc_replace
+
         run = _get_run(run_id)
         if not run:
             return redirect(url_for("index"))
         doc = run["doc"]
-        payload = destinations.build_payload(doc)
-        proposal_review.save_proposal(doc, payload)
+        # The approve button submits the whole review form: apply what's on
+        # screen first (what you see is what posts), then post ONLY the
+        # checked lines — never Wi-Fi/unknown lines nobody selected.
+        if any(f"gl_account_{i}" in request.form for i in range(len(doc.line_items))):
+            _apply_line_edits(doc)
+            selected = [li for i, li in enumerate(doc.line_items)
+                        if request.form.get(f"needs_review_{i}") == "on"]
+        else:
+            # Direct POST without the form (tests, API callers): whole doc.
+            selected = list(doc.line_items)
+        if not selected:
+            store.save_run(run_id, run)
+            flash("No lines selected — tick the checkbox on each line you want "
+                  "in the journal entry, then Approve & Post.")
+            return redirect(url_for("review_page", run_id=run_id))
+        post_doc = _dc_replace(doc, line_items=selected)
+        payload = destinations.build_payload(post_doc)
+        proposal_review.save_proposal(post_doc, payload)
         try:
-            result = destinations.post(doc, payload)
-            run["posted"] = {"ok": True, "detail": str(result)}
+            result = destinations.post(post_doc, payload)
+            run["posted"] = {"ok": True,
+                             "detail": f"{len(selected)} line(s): {result}"}
+            for li in selected:          # posted lines untick — done
+                li.needs_review = False
         except (RuntimeError, NotImplementedError) as exc:
             run["posted"] = {"ok": False, "detail": str(exc)}
         store.save_run(run_id, run)

@@ -54,7 +54,7 @@
   {% for name in travelers %}<option value="{{ name }}"></option>{% endfor %}
 </datalist>
 
-<form method="post" action="{{ url_for('update_line', run_id=run_id) }}">
+<form method="post" id="review-form" action="{{ url_for('update_line', run_id=run_id) }}">
 <div class="table-wrap">
 <table class="review-table">
   <colgroup>
@@ -155,10 +155,10 @@
         onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review.');">
     <button type="submit">Re-run coding</button>
   </form>
-  <form method="post" action="{{ url_for('approve', run_id=run_id) }}"
-        onsubmit="return confirm('Post this to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Save changes first if you edited anything.');">
-    <button type="submit" class="approve">Approve &amp; Post</button>
-  </form>
+  <button type="submit" class="approve" form="review-form"
+          formaction="{{ url_for('approve', run_id=run_id) }}"
+          onclick="return confirm('Post the CHECKED lines to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Unchecked lines stay out of the entry.');">
+    Approve &amp; Post selected</button>
   <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
 </div>
 <p class="subtle">"Re-run coding" re-processes the original upload with the current

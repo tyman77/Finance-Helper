@@ -70,13 +70,21 @@ def build_journal_entry(doc: SourceDocument) -> dict:
         if location:
             line["location"] = str(location).split("--")[0].strip()
         dimensioned.append(line)
-        # The undimensioned mirror on the opposite side, same account.
-        mirrors.append({
+        # The mirror on the opposite side, same account. It carries NO
+        # project (that's the whole point of the reclass) but keeps the
+        # department/location — accounts configured to require a Department
+        # (e.g. 71000 overhead) reject a bare line, and the net per
+        # department is zero either way.
+        mirror = {
             "account_no": li.gl_account,
             "debit": str(credit),
             "credit": str(debit),
             "memo": memo,
-        })
+        }
+        for dim in ("department", "location"):
+            if line.get(dim):
+                mirror[dim] = line[dim]
+        mirrors.append(mirror)
 
     return {
         "journal": _JOURNAL_SYMBOL,
@@ -195,7 +203,7 @@ def _intacct_project_id(code: str) -> str:
     return hits[0] if len(hits) == 1 else ""
 
 
-def _to_xml_batch(payload: dict, fn) -> None:
+def _to_xml_batch(payload: dict, fn) -> list[dict]:
     """Fill the XML gateway <create><GLBATCH> for this journal entry —
     the documented legacy shape, the same gateway every working Sage read
     in this app already uses."""
@@ -211,12 +219,18 @@ def _to_xml_batch(payload: dict, fn) -> None:
     if payload.get("reference_no"):
         _el(batch, "REFERENCENO", str(payload["reference_no"])[:20])
     entries = _el(batch, "ENTRIES")
+    metas: list[dict] = []
     for line in payload["lines"]:
         debit = Decimal(str(line.get("debit") or "0"))
         credit = Decimal(str(line.get("credit") or "0"))
         amount, tr_type = (debit, 1) if debit > 0 else (credit, -1)
         if amount == 0:
             continue
+        metas.append({"account": str(line["account_no"]).split("--")[0].strip(),
+                      "side": "debit" if tr_type == 1 else "credit",
+                      "amount": str(amount),
+                      "memo": line.get("memo") or "",
+                      "department": line.get("department") or ""})
         entry = _el(entries, "GLENTRY")
         _el(entry, "ACCOUNTNO", str(line["account_no"]).split("--")[0].strip())
         _el(entry, "TR_TYPE", tr_type)
@@ -233,12 +247,40 @@ def _to_xml_batch(payload: dict, fn) -> None:
             else:
                 memo = (memo + f" | job {line['project']}")[:1000]
         _el(entry, "DESCRIPTION", memo)
+    return metas
 
 
 def _post_via_xml(payload: dict) -> dict:
+    import re as _re
+
     from ..recon import sage_xml
 
-    root = sage_xml._post(sage_xml._request_xml(lambda fn: _to_xml_batch(payload, fn)))
+    metas: list[dict] = []
+
+    def build(fn):
+        metas.extend(_to_xml_batch(payload, fn))
+
+    try:
+        root = sage_xml._post(sage_xml._request_xml(build))
+    except RuntimeError as exc:
+        # Intacct names offending lines by number ("line no. 127") — say
+        # which actual statement line that is so it can be fixed in the
+        # review instead of counted by hand.
+        m = _re.search(r"line no\.?\s*(\d+)", str(exc), _re.I)
+        if m and metas:
+            n = int(m.group(1))
+            hints = []
+            for idx in dict.fromkeys(i for i in (n - 1, n) if 0 <= i < len(metas)):
+                c = metas[idx]
+                hints.append(f"entry {idx + 1}: {c['side']} {c['amount']} to "
+                             f"{c['account']}"
+                             + (f" (dept {c['department']})" if c["department"]
+                                else " (NO department)")
+                             + f" — {c['memo'][:70]}")
+            raise RuntimeError(
+                f"{exc}\nThat line is one of these:\n  " + "\n  ".join(hints)
+                + "\nFix that line's coding in the review and re-post.") from exc
+        raise
     record_no = ""
     data = root.find(".//result/data")
     if data is not None:

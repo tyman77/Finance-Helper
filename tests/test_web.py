@@ -324,3 +324,32 @@ def test_traveler_column_edits_persist(client):
     assert RUNS[run_id]["doc"].line_items[0].person == "Jeremy McKee"
     # And the name feeds the autocomplete on the next render.
     assert "Jeremy McKee" in client.get(f"/review/{run_id}").data.decode()
+
+
+def test_approve_posts_only_checked_lines(client, monkeypatch):
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    n = len(doc.line_items)
+    posted = {}
+
+    from finance_helper import destinations
+    monkeypatch.setattr(destinations, "post",
+                        lambda d, payload: posted.setdefault("doc", d) or {"ok": 1})
+    # Submit the full form with only line 0 checked.
+    data = {f"gl_account_{i}": (doc.line_items[i].gl_account or "")
+            for i in range(n)}
+    data.update({f"department_{i}": (doc.line_items[i].department or "") for i in range(n)})
+    data.update({f"project_{i}": (doc.line_items[i].project or "") for i in range(n)})
+    data["needs_review_0"] = "on"
+    resp = client.post(f"/review/{run_id}/approve", data=data)
+    assert resp.status_code == 302
+    assert len(posted["doc"].line_items) == 1
+    assert RUNS[run_id]["posted"]["ok"] is True
+    assert "1 line(s)" in RUNS[run_id]["posted"]["detail"]
+
+    # Nothing checked: refuses with guidance, nothing posted.
+    posted.clear()
+    data.pop("needs_review_0")
+    client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
+    assert "doc" not in posted

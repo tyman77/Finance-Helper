@@ -179,7 +179,11 @@ def test_post_prefers_xml_gateway_and_builds_glbatch(monkeypatch):
     assert entries[0].findtext("DEPARTMENT") == "20"
     assert entries[0].findtext("LOCATION") == "100"
     assert entries[0].findtext("PROJECTID") == "P000635"   # already an Intacct id
-    assert entries[2].findtext("DEPARTMENT") is None       # mirrors carry no dims
+    # Mirrors keep dept/location (dept-required accounts like 71000 reject
+    # bare lines; per-dept net is zero either way) but never the project.
+    assert entries[2].findtext("DEPARTMENT") == "20"
+    assert entries[2].findtext("LOCATION") == "100"
+    assert entries[2].findtext("PROJECTID") is None
 
 
 def test_job_number_translates_to_intacct_project_id(monkeypatch, tmp_path):
