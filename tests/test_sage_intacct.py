@@ -179,9 +179,10 @@ def test_post_prefers_xml_gateway_and_builds_glbatch(monkeypatch):
     assert entries[0].findtext("DEPARTMENT") == "20"
     assert entries[0].findtext("LOCATION") == "100"
     assert entries[0].findtext("PROJECTID") == "P000635"   # already an Intacct id
-    # Mirrors keep dept/location (dept-required accounts like 71000 reject
-    # bare lines; per-dept net is zero either way) but never the project.
-    assert entries[2].findtext("DEPARTMENT") == "20"
+    # House style: mirrors drop the department (the entry allocates depts),
+    # keep location, never carry the project. (Dept-required accounts are
+    # covered by test_mirror_department_follows_chart_requirement.)
+    assert entries[2].findtext("DEPARTMENT") is None
     assert entries[2].findtext("LOCATION") == "100"
     assert entries[2].findtext("PROJECTID") is None
 
@@ -212,3 +213,19 @@ def test_inactive_projects_never_map(monkeypatch, tmp_path):
     assert sage_intacct._intacct_project_id("P000158") == ""    # even literal
     assert sage_intacct._intacct_project_id("4200") == "P000700"
     assert sage_intacct._intacct_project_id("4300") == "P000701"  # no status = ok
+
+
+def test_mirror_department_follows_chart_requirement(monkeypatch, tmp_path):
+    import json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "chart_of_accounts.json").write_text(json.dumps(
+        {"71000": {"require_department": True}}))
+    payload = sage_intacct.build_journal_entry(_doc([
+        LineItem(description="OH", amount=Decimal("10"), gl_account="71000",
+                 department="80"),
+        LineItem(description="COGS", amount=Decimal("20"), gl_account="52200",
+                 department="60"),
+    ]))
+    mirrors = payload["lines"][2:]
+    assert mirrors[0].get("department") == "80"   # 71000 rejects bare lines
+    assert "department" not in mirrors[1]         # house style: allocate depts

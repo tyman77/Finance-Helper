@@ -50,6 +50,7 @@ _CANDIDATES_RE = re.compile(
 
 # Human labels for the status pill — order matters for the filter toolbar.
 STATUS_LABELS = {
+    "posted": "Posted ✔",
     "auto": "Auto-coded",
     "pick": "Pick one",
     "review": "Confirm hint",
@@ -72,6 +73,8 @@ def _line_status(li, candidates: list[str]) -> str:
     """Classify a line for the status pill / filter toolbar, purely from
     signals already on the line — no change to the underlying coding logic."""
     note = li.note or ""
+    if getattr(li, "posted_ref", ""):
+        return "posted"          # already in a journal entry — never again
     if "inflight wifi" in note:
         return "wifi"
     if "not found in history" in note:
@@ -705,8 +708,14 @@ def create_app() -> Flask:
                   "review, tick the lines to post, and try again.")
             return redirect(url_for("review_page", run_id=run_id))
         _apply_line_edits(doc)
-        selected = [li for i, li in enumerate(doc.line_items)
-                    if request.form.get(f"post_{i}") == "on"]
+        picked = [i for i in range(len(doc.line_items))
+                  if request.form.get(f"post_{i}") == "on"]
+        already = [i for i in picked
+                   if getattr(doc.line_items[i], "posted_ref", "")]
+        if already:
+            flash(f"{len(already)} selected line(s) were already posted "
+                  "(marked ✔) and were left out — no duplicate entries.")
+        selected = [doc.line_items[i] for i in picked if i not in set(already)]
         if not selected:
             store.save_run(run_id, run)
             flash("No lines selected — tick the checkbox on each line you want "
@@ -719,6 +728,11 @@ def create_app() -> Flask:
             result = destinations.post(post_doc, payload)
             run["posted"] = {"ok": True,
                              "detail": f"{len(selected)} line(s): {result}"}
+            rec = result.get("record_no") if isinstance(result, dict) else ""
+            stamp = (f"JE {rec} · " if rec else "") + \
+                datetime.now().strftime("%Y-%m-%d %H:%M")
+            for li in selected:
+                li.posted_ref = stamp
         except (RuntimeError, NotImplementedError) as exc:
             run["posted"] = {"ok": False, "detail": str(exc)}
         store.save_run(run_id, run)

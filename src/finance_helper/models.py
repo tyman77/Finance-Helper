@@ -27,6 +27,7 @@ class LineItem:
     project: Optional[str] = None
     # Review workflow: set when a human should confirm before posting.
     needs_review: bool = False
+    posted_ref: str = ""        # set once the line lands in a journal entry
     note: Optional[str] = None
     # Original CSV row, kept for audit/debugging.
     raw: dict = field(default_factory=dict)

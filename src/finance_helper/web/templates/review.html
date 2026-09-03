@@ -33,7 +33,7 @@
   <button type="button" class="filter-btn" id="select-visible">☑ Select shown</button>
   <button type="button" class="filter-btn" id="clear-visible">☐ Clear shown</button>
   <button type="button" class="filter-btn active" data-filter="all">All ({{ doc.line_items|length }})</button>
-  {% for key in ["pick", "unknown", "review", "auto", "wifi"] %}
+  {% for key in ["pick", "unknown", "review", "auto", "wifi", "posted"] %}
     {% if status_counts.get(key) %}
     <button type="button" class="filter-btn status-{{ key }}" data-filter="{{ key }}">
       {{ status_labels[key] }} ({{ status_counts[key] }})
@@ -90,7 +90,10 @@
     {% set idx = loop.index0 %}
     {% set status = statuses[idx] %}
     <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}" data-status="{{ status }}">
-      <td class="chk"><input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry"></td>
+      <td class="chk">
+        {% if li.posted_ref %}<span title="{{ li.posted_ref }}">✔</span>
+        {% else %}<input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry">{% endif %}
+      </td>
       <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
       <td class="nowrap">{{ li.date or '' }}</td>
       <td class="desc" title="{{ li.description }}">

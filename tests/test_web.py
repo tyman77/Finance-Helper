@@ -368,3 +368,26 @@ def test_approve_posts_only_checked_lines(client, monkeypatch):
     data.pop("post_0")
     client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
     assert "doc" not in posted
+
+
+def test_posted_lines_are_marked_and_never_repost(client, monkeypatch):
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    doc = RUNS[run_id]["doc"]
+    from finance_helper import destinations
+    calls = []
+    monkeypatch.setattr(destinations, "post",
+                        lambda d, p: calls.append(d) or {"record_no": "54225"})
+    data = {f"gl_account_{i}": (li.gl_account or "")
+            for i, li in enumerate(doc.line_items)}
+    data["post_0"] = "on"
+    client.post(f"/review/{run_id}/approve", data=data)
+    assert len(calls) == 1
+    assert "JE 54225" in doc.line_items[0].posted_ref
+    # The page shows it as Posted with no checkbox for that line.
+    body = client.get(f"/review/{run_id}").data.decode()
+    assert "Posted ✔" in body and 'name="post_0"' not in body
+    # Re-selecting it cannot create a duplicate entry.
+    resp = client.post(f"/review/{run_id}/approve", data=data,
+                       follow_redirects=True)
+    assert len(calls) == 1
+    assert b"already posted" in resp.data
