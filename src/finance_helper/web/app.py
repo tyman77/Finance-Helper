@@ -129,6 +129,8 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: f"Usually {m.group(1)} ({m.group(2)}% of trips)"),
     (re.compile(r"^crew schedule: project (\S+) during stay -> 52200 COGS$"),
      lambda m: f"Crew schedule: project {m.group(1)}"),
+    (re.compile(r"^crew schedule: project (\S+) before this return flight -> 52200 COGS$"),
+     lambda m: f"Crew schedule: project {m.group(1)} (return flight)"),
     (re.compile(r"^calendar title code (\S+) -> 52200 COGS$"),
      lambda m: f"Calendar: project {m.group(1)}"),
     (re.compile(r"^registry: (.+) project (\S+) -> 52200 COGS$"),

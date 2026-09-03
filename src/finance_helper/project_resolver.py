@@ -204,19 +204,54 @@ def email_for(passenger: str, domain: str = "summitintegrated.com") -> str | Non
     return f"{first[0]}{surname}".lower() + "@" + domain
 
 
+def match_person_key(person: str, keys) -> str | None:
+    """Find this traveler among dict keys that may use nickname/short forms
+    (the schedule sheet says "Nick Day"; the traveler map says "Nicholas
+    Day"). Exact first, then same surname + first name agreeing on its first
+    two letters — only when exactly one key fits."""
+    wanted = (person or "").strip().lower()
+    if not wanted:
+        return None
+    by_lower = {k.lower(): k for k in keys}
+    if wanted in by_lower:
+        return by_lower[wanted]
+    parts = wanted.split()
+    if len(parts) < 2:
+        return None
+    first, last = parts[0], parts[-1]
+    hits = []
+    for k in keys:
+        kp = k.lower().split()
+        if len(kp) >= 2 and kp[-1] == last and kp[0][:2] == first[:2]:
+            hits.append(k)
+    return hits[0] if len(hits) == 1 else None
+
+
 def resolve_schedule(
     person: str, dep: date, schedule_index: dict, active_projects: set[str] | None = None
 ) -> dict | None:
     """Most-common numeric project code the installer works during the stay,
-    skipping any code that's archived in Sage (a stale sheet entry)."""
-    rows = schedule_index.get(person)
+    skipping any code that's archived in Sage (a stale sheet entry). Looks
+    forward from departure (an outbound flight); if the days ahead hold no
+    code, looks backward instead — a return flight lands AFTER the work."""
+    key = match_person_key(person, schedule_index.keys())
+    rows = schedule_index.get(key) if key else None
     if not rows:
         return None
-    codes: Counter = Counter()
-    for i in range(STAY_WINDOW_DAYS + 1):
-        cell = (rows.get((dep + timedelta(days=i)).isoformat()) or "").strip()
-        if cell.isdigit() and (active_projects is None or cell in active_projects):
-            codes[cell] += 1
+
+    def _count(days) -> Counter:
+        codes: Counter = Counter()
+        for i in days:
+            cell = (rows.get((dep + timedelta(days=i)).isoformat()) or "").strip()
+            if cell.isdigit() and (active_projects is None or cell in active_projects):
+                codes[cell] += 1
+        return codes
+
+    codes = _count(range(STAY_WINDOW_DAYS + 1))
+    direction = "during stay"
+    if not codes:
+        codes = _count(range(-STAY_WINDOW_DAYS, 0))
+        direction = "before this return flight"
     if not codes:
         return None
     project = codes.most_common(1)[0][0]
@@ -224,7 +259,7 @@ def resolve_schedule(
         "project": project,
         "account": "52200",
         "source": "schedule",
-        "note": f"crew schedule: project {project} during stay -> 52200 COGS",
+        "note": f"crew schedule: project {project} {direction} -> 52200 COGS",
     }
 
 

@@ -589,3 +589,37 @@ def test_state_falls_back_to_sage_project_names(monkeypatch, tmp_path):
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project is None
     assert "project 3642 is in OK but the flight went to WA" in john.note
+
+
+def test_schedule_matches_nickname_person_keys():
+    """The sheet says "Nick Day"; the traveler map resolves to "Nicholas
+    Day" — the schedule row must still be found (unique surname + first-two-
+    letter agreement)."""
+    assert project_resolver.match_person_key(
+        "Nicholas Day", ["Nick Day", "Hal Seefeld"]) == "Nick Day"
+    assert project_resolver.match_person_key(
+        "Christopher Spreng", ["Chris Spreng"]) == "Chris Spreng"
+    # Ambiguous stays unmatched.
+    assert project_resolver.match_person_key(
+        "Nate Kofahl", ["Nathan Kofahl", "Natalie Kofahl"]) is None
+
+    idx = {"Nick Day": {"2026-08-26": "3642", "2026-08-27": "3642"}}
+    got = project_resolver.resolve_schedule("Nicholas Day", date(2026, 8, 25), idx)
+    assert got and got["project"] == "3642"
+
+
+def test_schedule_looks_backward_for_return_flights():
+    """"SEA DEN" on 8/12 ends the trip — the scheduled days are BEFORE the
+    flight, so an empty forward window falls back to the days behind it."""
+    idx = {"James Haynes": {"2026-08-05": "4711", "2026-08-06": "4711",
+                            "2026-08-07": "4711", "2026-08-11": "4711"}}
+    got = project_resolver.resolve_schedule("James Haynes", date(2026, 8, 12), idx)
+    assert got and got["project"] == "4711"
+    assert "before this return flight" in got["note"]
+
+    # Forward days still win when present (an outbound flight).
+    idx2 = {"James Haynes": {"2026-08-05": "4711",
+                             "2026-08-13": "5188", "2026-08-14": "5188"}}
+    got2 = project_resolver.resolve_schedule("James Haynes", date(2026, 8, 12), idx2)
+    assert got2 and got2["project"] == "5188"
+    assert "during stay" in got2["note"]
