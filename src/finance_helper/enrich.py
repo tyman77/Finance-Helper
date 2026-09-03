@@ -110,6 +110,11 @@ def enrich_united(
         schedule_index = _load_json("schedule_index.json") or {}
     if calendar_index is None:
         calendar_index = _load_json("calendar_index.json") or {}
+    # Kill switch for the calendar signal: FINANCE_HELPER_SKIP_CALENDAR=1
+    # codes as if no calendars were fetched, to isolate/rule out calendar
+    # titles as a source of wrong auto-coding.
+    if os.environ.get("FINANCE_HELPER_SKIP_CALENDAR"):
+        calendar_index = {}
     if roster is None:
         roster = _load_json("roster.json") or {}
     if registry is None:
@@ -197,25 +202,32 @@ def enrich_united(
 
 def _destination_pass(li, registry, active_projects) -> None:
     if li.project:
-        _destination_conflict(li, registry)
+        _destination_conflict(li, registry, active_projects)
     else:
         _destination_narrow(li, registry, active_projects)
 
 
-def _destination_conflict(li, registry) -> None:
+def _destination_conflict(li, registry, active_projects) -> None:
     """An auto-filled project whose state contradicts every state the flight
-    touched is suspect (the crew schedule or history pointed elsewhere) —
-    flag it for review instead of letting it sail through as auto-coded."""
+    touched is almost always wrong (a hotel stay or schedule row from a
+    different trip that week) — clear it and offer it as a pick alongside
+    the projects that ARE where the flight went."""
     routing = next((str(v) for k, v in (li.raw or {}).items()
                     if k.lower().startswith("routing")), "") or li.description or ""
     states = project_resolver.route_states(routing)
     pstate = project_resolver.registry_state(registry or {}, li.project)
     if not states or not pstate or pstate in states:
         return
+    old = li.project
+    li.project = None
     li.needs_review = True
+    label = "/".join(states)
     li.note = (li.note or "") + (
-        f"; ⚠ project {li.project} is in {pstate} but the flight went to "
-        f"{'/'.join(states)} — double-check")
+        f"; ⚠ project {old} is in {pstate} but the flight went to {label} "
+        "— double-check")
+    there = project_resolver.projects_in_states(registry or {}, states, active_projects)
+    cands = [old] + sorted(c for c in there if c != old)[:4]
+    li.note += "; registry: candidate projects " + ", ".join(cands) + " — pick one"
 
 
 _PICK_RE = re.compile(

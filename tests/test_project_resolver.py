@@ -498,7 +498,8 @@ def test_auto_coded_project_contradicting_flight_gets_flagged():
     tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
                          "department_confidence": 1.0, "account_hint": "52200--COGS",
                          "account_confidence": 0.9, "projects": [], "n": 10}}
-    registry = {"registry": {"3495": {"client": "Rock Point Church, AZ"}}}
+    registry = {"registry": {"3495": {"client": "Rock Point Church, AZ"},
+                             "4960": {"client": "Grace Chapel, MO"}}}
     schedule = {"John Doe": {"2026-05-10": "3495", "2026-05-11": "3495",
                              "2026-05-12": "3495"}}
     doc = enrich.enrich_united(doc, tmap, schedule_index=schedule,
@@ -507,6 +508,28 @@ def test_auto_coded_project_contradicting_flight_gets_flagged():
                                ramp_index=[], timecard_index={})
     john = next(li for li in doc.line_items
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
-    assert john.project == "3495"          # kept — the human decides
+    assert john.project is None            # cleared — it was almost surely wrong
     assert john.needs_review
     assert "project 3495 is in AZ but the flight went to MO — double-check" in john.note
+    # The old project and the projects actually in MO become the pick list.
+    assert "registry: candidate projects 3495, 4960 — pick one" in john.note
+
+
+def test_skip_calendar_env_disables_calendar_coding(monkeypatch):
+    monkeypatch.setenv("FINANCE_HELPER_SKIP_CALENDAR", "1")
+    doc = sources.load("united", "samples/united_sample.csv")
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": [], "n": 10}}
+    cal = {"jdoe@summitintegrated.com": [
+        {"summary": "5368 Emmaus install", "start": "2026-05-10",
+         "end": "2026-05-12", "location": "Atlanta, GA", "all_day": True,
+         "external": False, "domains": []}]}
+    roster = {"John Doe": "jdoe@summitintegrated.com"}
+    doc = enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index=cal,
+                               roster=roster, registry={}, active_projects=None,
+                               hotel_index=[], ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None
+    assert "calendar" not in (john.note or "").lower()
