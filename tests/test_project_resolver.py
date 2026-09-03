@@ -557,3 +557,35 @@ def test_club_subscription_is_overhead_never_project(monkeypatch):
     assert target.project is None
     assert target.department == "30"     # traveler's dept still carried
     assert "United Club membership" in target.note
+
+
+def test_state_falls_back_to_sage_project_names(monkeypatch, tmp_path):
+    """The August review: registry clients often lack the ", XX" state (it
+    lives in the Sage project name), so the destination conflict never fired
+    and "Crew schedule: 3642 (Life.Church, OK)" survived on Seattle flights."""
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "sage_projects.json").write_text(_json.dumps({
+        "P000700": {"name": "Life.Church, OK YouVersion Bldg | 3642 |",
+                    "status": "active"},
+    }))
+    registry = {"registry": {"3642": {"client": "Life.Church"}}}  # no state
+    assert project_resolver.registry_state(registry, "3642") == "OK"
+
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "SEA DEN"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": [], "n": 10}}
+    schedule = {"John Doe": {"2026-05-10": "3642", "2026-05-11": "3642",
+                             "2026-05-12": "3642"}}
+    doc = enrich.enrich_united(doc, tmap, schedule_index=schedule,
+                               calendar_index={}, roster={}, registry=registry,
+                               active_projects=None, hotel_index=[],
+                               ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None
+    assert "project 3642 is in OK but the flight went to WA" in john.note

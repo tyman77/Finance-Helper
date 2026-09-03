@@ -114,26 +114,71 @@ def route_states(routing: str) -> list[str]:
 
 
 def registry_state(registry: dict, code: str) -> str:
-    """The ", XX" state in a project's client name, or ""."""
+    """The ", XX" state in a project's name (registry client, or the Sage
+    project name when the registry's lacks a state), or ""."""
     reg = registry.get("registry", registry) or {}
-    m = _STATE_IN_NAME.search((reg.get(code) or {}).get("client") or "")
-    return m.group(1) if m else ""
+    for name in ((reg.get(code) or {}).get("client") or "",
+                 _sage_project_names().get(code, "")):
+        m = _STATE_IN_NAME.search(name)
+        if m:
+            return m.group(1)
+    return ""
+
+
+_sage_names_cache: dict = {}
+
+
+def _sage_project_names() -> dict[str, str]:
+    """{job code: Sage project name} from data/sage_projects.json — Sage names
+    carry the ", XX" state ("Life.Church, OK YouVersion Bldg | 3642") that
+    registry client names often lack."""
+    path = os.path.join(os.environ.get("FINANCE_HELPER_DATA", "data"),
+                        "sage_projects.json")
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return {}
+    if _sage_names_cache.get("key") != key:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh) or {}
+        except (OSError, ValueError):
+            data = {}
+        names: dict[str, str] = {}
+        for info in data.values():
+            name = (info.get("name") or "").strip()
+            for code in re.findall(r"\b\d{3,5}\b", name):
+                if len(name) > len(names.get(code, "")):
+                    names[code] = name
+        _sage_names_cache["key"] = key
+        _sage_names_cache["val"] = names
+    return _sage_names_cache["val"]
+
+
+def project_display_names(registry: dict) -> dict[str, str]:
+    """{code: best display name}: the registry's client, upgraded to Sage's
+    project name when Sage says more (states live there)."""
+    reg = registry.get("registry", registry) or {}
+    names = {c: (i.get("client") or "") for c, i in reg.items()}
+    for c, n in _sage_project_names().items():
+        if len(n) > len(names.get(c, "")):
+            names[c] = n
+    return names
 
 
 def projects_in_states(registry: dict, states: list[str],
                        active_projects: set[str] | None = None) -> dict[str, str]:
-    """{code: client} for projects whose client name carries a matching state
+    """{code: name} for projects whose name carries a matching state
     abbreviation ("Rock Point Church, AZ")."""
     if not states:
         return {}
-    reg = registry.get("registry", registry) or {}
     out: dict[str, str] = {}
-    for code, info in reg.items():
+    for code, name in project_display_names(registry).items():
         if active_projects is not None and code not in active_projects:
             continue
-        m = _STATE_IN_NAME.search(info.get("client") or "")
+        m = _STATE_IN_NAME.search(name)
         if m and m.group(1) in states:
-            out[code] = info.get("client") or ""
+            out[code] = name
     return out
 
 # Calendar trip purpose -> overhead GL account. Always review-flagged: the
