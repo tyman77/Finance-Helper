@@ -255,7 +255,15 @@ def _project_titles() -> dict[str, str]:
         for code in re.findall(r"\b\d{3,5}\b", name):
             if len(name) > len(titles.get(code, "")):
                 titles[code] = name
-    return titles
+    # The code is shown next to the name everywhere this map is used, so a
+    # "[5188]" or "| 5188 |" inside the name is just noise — strip it and
+    # tidy the leftover separators.
+    def _clean(name: str, code: str) -> str:
+        name = re.sub(rf"\[\s*{code}\s*\]|(?<![\d-]){code}(?![\d-])", " ", name)
+        name = " | ".join(s for s in (seg.strip() for seg in name.split("|")) if s)
+        return re.sub(r"\s{2,}", " ", name).strip()
+
+    return {code: _clean(name, code) for code, name in titles.items()}
 
 
 def create_app() -> Flask:

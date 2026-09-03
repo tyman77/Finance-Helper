@@ -542,4 +542,5 @@ def test_project_titles_merges_registry_and_sage_names(monkeypatch, tmp_path):
     from finance_helper.web.app import _project_titles
     titles = _project_titles()
     assert titles["4804"] == "Northview Church"
-    assert titles["5368"].startswith("Emmaus Church")
+    # The code itself is stripped from the display name (it's shown alongside).
+    assert titles["5368"] == "Emmaus Church, GA | Building Expansion"

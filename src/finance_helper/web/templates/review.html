@@ -127,7 +127,7 @@
           <div class="candidates">
             {% for code in candidates_by_line[idx] %}
             <button type="button" class="chip" data-fill="project_{{ idx }}" data-value="{{ code }}"
-                    title="{{ project_titles.get(code, '') }}">{{ code }}{% if project_titles.get(code) %}<span class="chip-name">{{ project_titles[code] }}</span>{% endif %}</button>
+                    title="{{ project_titles.get(code, '') }}">{{ code }}{% if project_titles.get(code) %}<span class="chip-name"> · {{ project_titles[code] }}</span>{% endif %}</button>
             {% endfor %}
           </div>
         {% endif %}

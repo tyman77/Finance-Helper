@@ -280,21 +280,19 @@ ul.issues li { margin: 2px 0; }
   background: var(--bg);
   border: 1px solid var(--accent);
   color: var(--accent);
-  border-radius: 999px;
+  border-radius: 10px;
   padding: 2px 9px;
   font-size: 0.76rem;
   cursor: pointer;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .chip:hover { background: var(--accent); color: white; }
 .chip:hover .chip-name { color: white; }
 .chip .chip-name {
-  display: block;
   color: var(--muted);
-  font-size: 0.68rem;
-  text-align: left;
-  max-width: 28ch;
-  white-space: normal;
-  overflow-wrap: break-word;
+  font-size: 0.72rem;
 }
 
 .link-danger {
