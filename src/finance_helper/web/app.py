@@ -168,6 +168,8 @@ _NOTE_RULES: list[tuple[re.Pattern, object]] = [
      lambda m: "No historical match"),
     (re.compile(r"^matched by surname only$"),
      lambda m: "⚠ surname match only"),
+    (re.compile(r"^schedule: (.+)$"),
+     lambda m: f"Schedule: {m.group(1)}"),
     (re.compile(r"^low-confidence department$"),
      lambda m: "⚠ low-confidence department match"),
     (re.compile(r"^HE '(.+)' -> project (\S+) \(COGS Travel: Hotel\)$"),

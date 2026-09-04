@@ -623,3 +623,30 @@ def test_schedule_looks_backward_for_return_flights():
     got2 = project_resolver.resolve_schedule("James Haynes", date(2026, 8, 12), idx2)
     assert got2 and got2["project"] == "5188"
     assert "during stay" in got2["note"]
+
+
+def test_schedule_miss_reason_names_the_broken_link():
+    reason = project_resolver.schedule_miss_reason
+    assert "index is empty" in reason("Joshua Judy", date(2026, 8, 7), {})
+    idx = {"Nick Day": {"2026-08-26": "3642"}}
+    assert "no crew-schedule row matches 'Joshua Judy'" in \
+        reason("Joshua Judy", date(2026, 8, 7), idx)
+    # Nickname rows count as found.
+    got = reason("Nicholas Day", date(2026, 1, 1), idx)
+    assert "no job code within" in got and "Nick Day" in got
+    assert "2026-08-26..2026-08-26" in got
+    assert "no departure date" in reason("Nicholas Day", None, idx)
+
+
+def test_schedule_miss_reason_lands_on_the_review_line():
+    doc = sources.load("united", "samples/united_sample.csv")
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": [], "n": 10}}
+    doc = enrich.enrich_united(doc, tmap, schedule_index={"Zach Kay": {}},
+                               calendar_index={}, roster={}, registry={},
+                               active_projects=None, hotel_index=[],
+                               ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert "schedule: no crew-schedule row matches 'John Doe'" in john.note

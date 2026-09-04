@@ -198,6 +198,14 @@ def enrich_united(
             li.note += "; matched by surname only"
         if context:
             li.note += "; " + context
+        # The schedule is the strongest auto-coder; when it contributed
+        # nothing, say exactly which link broke (index empty, name unmatched,
+        # or no code near this date) instead of failing silently.
+        if li.person:
+            reason = project_resolver.schedule_miss_reason(
+                li.person, _parse_date(li.raw.get("Departure Date")), schedule_index)
+            if reason:
+                li.note += "; schedule: " + reason
         # No live schedule/calendar project match: fall back to the traveler's
         # own past project codes, and — the strongest no-Google signal we have —
         # cross-reference Hotel Engine bookings on the same dates to narrow them.

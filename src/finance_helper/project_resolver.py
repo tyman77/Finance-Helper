@@ -263,6 +263,24 @@ def resolve_schedule(
     }
 
 
+def schedule_miss_reason(person: str, dep: date | None, schedule_index: dict) -> str:
+    """Why resolve_schedule found nothing — surfaced on the review line so a
+    stale index, a name mismatch, or a date gap is diagnosable at a glance."""
+    if not schedule_index:
+        return "crew schedule index is empty — run Admin → Fetch crew schedule"
+    key = match_person_key(person, schedule_index.keys())
+    if not key:
+        return f"no crew-schedule row matches '{person}'"
+    if dep is None:
+        return "line has no departure date to match the schedule against"
+    rows = schedule_index.get(key) or {}
+    dates = sorted(rows)
+    if not dates:
+        return f"schedule row '{key}' is empty"
+    return (f"schedule row '{key}' has no job code within {STAY_WINDOW_DAYS}d "
+            f"of {dep.isoformat()} (sheet covers {dates[0]}..{dates[-1]})")
+
+
 def hotel_projects_in_window(
     hotel_index: list, dep: date, window_days: int = 3,
     department: str | None = None, active_projects: set[str] | None = None,
