@@ -91,6 +91,16 @@ _AIRPORT_STATES = {
     "TPA": "FL", "TUL": "OK", "TUS": "AZ", "TYS": "TN", "XNA": "AR",
 }
 
+# Border-metro airports serve jobs across the state line — MCI (Kansas City,
+# MO) is the airport for Overland Park KS jobs. Without this, a correct KS
+# project on an MCI flight reads as a contradiction and gets cleared.
+_METRO_EXTRA_STATES = {
+    "MCI": ["KS"], "DCA": ["DC", "MD"], "IAD": ["DC", "MD"], "BWI": ["DC", "VA"],
+    "ORD": ["IN"], "MDW": ["IN"], "CVG": ["KY"], "MEM": ["MS", "AR"],
+    "PHL": ["NJ", "DE"], "EWR": ["NY"], "STL": ["IL"], "OMA": ["IA"],
+    "CLT": ["SC"], "PDX": ["WA"], "FAR": ["MN"], "CHA": ["GA"],
+}
+
 _STATE_IN_NAME = re.compile(r",\s*([A-Z]{2})\b")
 
 
@@ -107,9 +117,9 @@ def route_states(routing: str) -> list[str]:
     for c in codes:
         if c in home:
             continue
-        st = _AIRPORT_STATES[c]
-        if st not in states:
-            states.append(st)
+        for st in [_AIRPORT_STATES[c]] + _METRO_EXTRA_STATES.get(c, []):
+            if st not in states:
+                states.append(st)
     return states
 
 

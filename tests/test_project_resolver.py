@@ -510,7 +510,7 @@ def test_auto_coded_project_contradicting_flight_gets_flagged():
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project is None            # cleared — it was almost surely wrong
     assert john.needs_review
-    assert "project 3495 is in AZ but the flight went to MO — double-check" in john.note
+    assert "project 3495 is in AZ but the flight went to MO/KS — double-check" in john.note
     # The old project and the projects actually in MO become the pick list.
     assert "registry: candidate projects 3495, 4960 — pick one" in john.note
 
@@ -650,3 +650,28 @@ def test_schedule_miss_reason_lands_on_the_review_line():
     john = next(li for li in doc.line_items
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert "schedule: no crew-schedule row matches 'John Doe'" in john.note
+
+
+def test_border_metro_airports_count_for_both_states():
+    """August finding: MCI flights for Grace Church, KS (Overland Park) were
+    wrongly cleared — Kansas City's airport is in MO but serves KS jobs."""
+    assert project_resolver.route_states("DEN MCI DEN") == ["MO", "KS"]
+
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "DEN MCI DEN"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9, "projects": [], "n": 10}}
+    registry = {"registry": {"4960": {"client": "Grace Church, KS - North OP Reno"}}}
+    schedule = {"John Doe": {"2026-05-10": "4960", "2026-05-11": "4960",
+                             "2026-05-12": "4960"}}
+    doc = enrich.enrich_united(doc, tmap, schedule_index=schedule,
+                               calendar_index={}, roster={}, registry=registry,
+                               active_projects=None, hotel_index=[],
+                               ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project == "4960"        # kept — KS is where MCI flights go
+    assert "double-check" not in (john.note or "")
