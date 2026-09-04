@@ -306,6 +306,14 @@ def _project_titles() -> dict[str, str]:
     return {code: _clean(name, code) for code, name in titles.items()}
 
 
+def _project_search() -> list[dict]:
+    """[{c: code, n: full display name}] for the custom project autocomplete —
+    the native datalist popup truncates long names and can't be styled."""
+    titles = _project_titles()
+    return [{"c": code, "n": titles.get(code) or client or ""}
+            for code, client in _project_options()]
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     # Railway (and most PaaS hosts) terminate TLS at a proxy and forward over
@@ -832,6 +840,7 @@ def create_app() -> Flask:
             department_options=_department_options(),
             project_options=_project_options(),
             project_titles=_project_titles(),
+            project_search=_project_search(),
             candidates_by_line=candidates_by_line,
             statuses=statuses,
             status_counts=status_counts,

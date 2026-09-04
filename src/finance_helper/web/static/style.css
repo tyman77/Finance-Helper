@@ -414,3 +414,24 @@ ul.issues li { margin: 2px 0; }
   .topbar { flex-wrap: wrap; gap: 10px; }
   .topbar-right { margin-left: 0; width: 100%; justify-content: flex-end; }
 }
+
+/* Custom project autocomplete (native datalist truncates long names). */
+.ac-panel {
+  position: absolute;
+  z-index: 50;
+  max-width: min(560px, 90vw);
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--border, #444);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+}
+.ac-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  overflow-wrap: break-word;
+}
+.ac-item b { margin-right: 2px; }
+.ac-item:hover, .ac-item.active { background: var(--accent); color: white; }

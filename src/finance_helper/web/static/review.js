@@ -56,3 +56,81 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
     last = box;
   });
 })();
+
+// Project autocomplete: the native <datalist> popup truncates long project
+// names and can't be styled, so the project fields get a custom dropdown —
+// full names shown, searchable by code OR name ("amarillo" finds 2339).
+(() => {
+  const el = document.getElementById("projects-data");
+  if (!el) return;
+  let projects = [];
+  try { projects = JSON.parse(el.textContent) || []; } catch (e) { return; }
+  if (!projects.length) return;
+
+  const panel = document.createElement("div");
+  panel.className = "ac-panel";
+  panel.hidden = true;
+  document.body.appendChild(panel);
+  let current = null;   // the input the panel is open for
+  let active = -1;      // keyboard-highlighted row
+
+  function close() { panel.hidden = true; current = null; active = -1; }
+
+  function pick(code) {
+    if (current) {
+      current.value = code;
+      current.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    close();
+  }
+
+  function render(input) {
+    const q = input.value.trim().toLowerCase();
+    const hits = projects.filter((p) =>
+      !q || p.c.startsWith(q) || p.n.toLowerCase().includes(q)).slice(0, 12);
+    if (!hits.length) { close(); return; }
+    panel.textContent = "";
+    hits.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "ac-item";
+      const code = document.createElement("b");
+      code.textContent = p.c;
+      row.appendChild(code);
+      row.appendChild(document.createTextNode(p.n ? " — " + p.n : ""));
+      // mousedown, not click: it fires before the input's blur closes us.
+      row.addEventListener("mousedown", (ev) => { ev.preventDefault(); pick(p.c); });
+      panel.appendChild(row);
+    });
+    const r = input.getBoundingClientRect();
+    panel.style.left = `${r.left + window.scrollX}px`;
+    panel.style.top = `${r.bottom + window.scrollY + 2}px`;
+    panel.style.minWidth = `${Math.max(r.width, 340)}px`;
+    panel.hidden = false;
+    current = input;
+    active = -1;
+  }
+
+  function highlight(delta) {
+    const rows = Array.from(panel.children);
+    if (!rows.length) return;
+    active = (active + delta + rows.length) % rows.length;
+    rows.forEach((row, i) => row.classList.toggle("active", i === active));
+    rows[active].scrollIntoView({ block: "nearest" });
+  }
+
+  document.querySelectorAll("input.project-input").forEach((inp) => {
+    inp.addEventListener("input", () => render(inp));
+    inp.addEventListener("focus", () => render(inp));
+    inp.addEventListener("blur", () => setTimeout(close, 150));
+    inp.addEventListener("keydown", (ev) => {
+      if (panel.hidden) return;
+      if (ev.key === "ArrowDown") { ev.preventDefault(); highlight(1); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); highlight(-1); }
+      else if (ev.key === "Enter" && active >= 0) {
+        ev.preventDefault();
+        const row = panel.children[active];
+        if (row) pick(row.querySelector("b").textContent);
+      } else if (ev.key === "Escape") { close(); }
+    });
+  });
+})();

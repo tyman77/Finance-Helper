@@ -47,11 +47,7 @@
   <option value="{{ code }}">{{ code }} — {{ title }}</option>
   {% endfor %}
 </datalist>
-<datalist id="projects">
-  {% for code, client in project_options %}
-  <option value="{{ code }}">{{ code }} — {{ client }}</option>
-  {% endfor %}
-</datalist>
+<script type="application/json" id="projects-data">{{ project_search|tojson }}</script>
 <datalist id="travelers">
   {% for name in travelers %}<option value="{{ name }}"></option>{% endfor %}
 </datalist>
@@ -119,7 +115,7 @@
         </select>
       </td>
       <td>
-        <input type="text" list="projects" name="project_{{ idx }}" value="{{ li.project or '' }}" size="6">
+        <input type="text" class="project-input" name="project_{{ idx }}" value="{{ li.project or '' }}" size="6" autocomplete="off">
         {% if li.project and project_titles.get(li.project) %}
           <div class="hint">{{ project_titles[li.project] }}</div>
         {% endif %}

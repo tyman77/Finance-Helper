@@ -666,3 +666,17 @@ def test_schedule_api_failure_falls_back_to_public_csv(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda url, timeout=0: H())
     with pytest.raises(RuntimeError, match="Sheets API failed.*403 forbidden"):
         mod.fetch_values("SHEET123", "x")
+
+
+def test_project_autocomplete_data_embedded_with_full_names(client, monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "project_registry.json").write_text(_json.dumps(
+        {"registry": {"2339": {"client": "FBC Amarillo"}}}))
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    # The custom autocomplete replaces the truncating native datalist.
+    assert 'id="projects-data"' in body
+    assert '"c": "2339"' in body and '"n": "FBC Amarillo"' in body
+    assert 'list="projects"' not in body
+    assert 'class="project-input"' in body
