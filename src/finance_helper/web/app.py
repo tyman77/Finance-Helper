@@ -308,10 +308,21 @@ def _project_titles() -> dict[str, str]:
 
 def _project_search() -> list[dict]:
     """[{c: code, n: full display name}] for the custom project autocomplete —
-    the native datalist popup truncates long names and can't be styled."""
+    the native datalist popup truncates long names and can't be styled.
+
+    Union of the registry (historical travel data) and ACTIVE Sage projects:
+    a job nobody has flown for yet exists only in Sage, and it still has to
+    be pickable."""
     titles = _project_titles()
-    return [{"c": code, "n": titles.get(code) or client or ""}
-            for code, client in _project_options()]
+    seen: dict[str, str] = {code: (titles.get(code) or client or "")
+                            for code, client in _project_options()}
+    for info in _load_json_data("sage_projects.json").values():
+        if (info.get("status") or "active").lower() != "active":
+            continue
+        name = (info.get("name") or "").strip()
+        for code in re.findall(r"\b\d{3,5}\b", name):
+            seen.setdefault(code, titles.get(code) or name)
+    return [{"c": c, "n": n} for c, n in sorted(seen.items())]
 
 
 def create_app() -> Flask:

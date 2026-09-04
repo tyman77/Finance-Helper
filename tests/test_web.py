@@ -680,3 +680,22 @@ def test_project_autocomplete_data_embedded_with_full_names(client, monkeypatch,
     assert '"c": "2339"' in body and '"n": "FBC Amarillo"' in body
     assert 'list="projects"' not in body
     assert 'class="project-input"' in body
+
+
+def test_project_autocomplete_includes_sage_only_projects(client, monkeypatch, tmp_path):
+    """A job with no travel history exists only in Sage — it must still be
+    pickable in the project dropdown."""
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "project_registry.json").write_text(_json.dumps(
+        {"registry": {"2339": {"client": "FBC Amarillo"}}}))
+    (tmp_path / "sage_projects.json").write_text(_json.dumps({
+        "P000900": {"name": "Brand New Church, TX | AVL | 5600 |",
+                    "status": "active"},
+        "P000901": {"name": "Old Gone Church | 4100", "status": "inactive"},
+    }))
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    assert '"c": "5600"' in body           # Sage-only, active: offered
+    assert '"c": "2339"' in body           # registry: still offered
+    assert '"c": "4100"' not in body       # inactive: never offered
