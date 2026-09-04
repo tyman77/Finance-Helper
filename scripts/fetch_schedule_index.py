@@ -146,12 +146,24 @@ def normalize_sheet_id(raw: str) -> str:
 
 
 def fetch_values(sheet_id: str, rng: str) -> list:
-    """Service-account API when a key is configured; public CSV export
-    otherwise."""
+    """Service-account API when a key is configured, but never dead-end on
+    it: if the API path fails (sheet not shared with the service account,
+    Sheets API not enabled), the public CSV export is tried before giving
+    up — whichever path works, works."""
     sheet_id = normalize_sheet_id(sheet_id)
     if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or \
             os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-        return fetch(sheet_id, rng)
+        try:
+            return fetch(sheet_id, rng)
+        except Exception as api_err:
+            try:
+                return fetch_public_csv(sheet_id)
+            except Exception as csv_err:
+                raise RuntimeError(
+                    f"Sheets API failed ({api_err}) — likely the sheet isn't "
+                    "shared with the service account's email, or the Google "
+                    "Sheets API isn't enabled in its project. The public CSV "
+                    f"fallback failed too ({csv_err}).") from api_err
     return fetch_public_csv(sheet_id)
 
 

@@ -631,3 +631,38 @@ def test_clear_posted_forgets_marks_and_ledger(client, monkeypatch, tmp_path):
     # A fresh upload of the statement now arrives clean too.
     run2 = _upload(client, "united", "samples/united_sample.csv")
     assert not any(li.posted_ref for li in RUNS[run2]["doc"].line_items)
+
+
+def test_schedule_api_failure_falls_back_to_public_csv(monkeypatch):
+    """With a service-account key configured, an API failure (sheet not
+    shared with the SA, Sheets API disabled) must not dead-end — the public
+    CSV export is tried before giving up."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "fetch_schedule_index2", "scripts/fetch_schedule_index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
+    monkeypatch.setattr(mod, "fetch", lambda sid, rng: (_ for _ in ()).throw(
+        RuntimeError("403 forbidden")))
+
+    import requests
+
+    class R:
+        status_code = 200
+        headers = {"Content-Type": "text/csv"}
+        content = b"Crew,8/3\nMason Dill,5232\n"
+
+    monkeypatch.setattr(requests, "get", lambda url, timeout=0: R())
+    values = mod.fetch_values("SHEET123", "x")
+    assert values == [["Crew", "8/3"], ["Mason Dill", "5232"]]
+
+    # Both paths failing produces one error naming both causes.
+    class H:
+        status_code = 200
+        headers = {"Content-Type": "text/html"}
+        content = b"<html>login</html>"
+    monkeypatch.setattr(requests, "get", lambda url, timeout=0: H())
+    with pytest.raises(RuntimeError, match="Sheets API failed.*403 forbidden"):
+        mod.fetch_values("SHEET123", "x")

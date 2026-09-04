@@ -352,7 +352,13 @@ def refresh_schedule():
         os.makedirs(_data_dir(), exist_ok=True)
         with open(_data_path("schedule_index.json"), "w", encoding="utf-8") as fh:
             json.dump(index, fh, indent=2)
-        flash(f"Wrote {len(index)} people to the crew schedule index for {year}.")
+        sample = ", ".join(sorted(index)[:5])
+        msg = f"Wrote {len(index)} people to the crew schedule index for {year}"
+        msg += f" (including {sample}…)." if sample else "."
+        if len(index) < 10:
+            msg += (" That looks low for a crew sheet — check SCHEDULE_SHEET_GID "
+                    "(the tab) and SCHEDULE_NAME_COL (the crew-name column).")
+        flash(msg)
     except Exception as exc:
         flash(f"Could not fetch the crew schedule: {exc}")
     return redirect(url_for("admin.admin_page"))
