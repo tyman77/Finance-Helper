@@ -125,7 +125,13 @@ def extract_invoice(documents: list[dict], client=None) -> dict:
             resp = client.messages.parse(
                 model=model_name(),
                 max_tokens=8000,
-                system=SYSTEM_PROMPT,
+                # cache_control: the system prompt is identical on every read,
+                # so it's served from prompt cache (~10% of input price) on
+                # every call after the first. The 1h TTL spans a whole nightly
+                # sweep and spaced-out manual checks; only the per-bill
+                # document tokens bill at the full rate.
+                system=[{"type": "text", "text": SYSTEM_PROMPT,
+                         "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
                 output_config={"effort": os.environ.get("BILLCHECK_EFFORT") or "medium"},
                 messages=[{"role": "user", "content": blocks}],
                 output_format=InvoiceFields,
@@ -151,5 +157,9 @@ def extract_invoice(documents: list[dict], client=None) -> dict:
     usage = getattr(resp, "usage", None)
     out["model"] = getattr(resp, "model", None) or model_name()
     out["usage"] = {"input": getattr(usage, "input_tokens", None),
-                    "output": getattr(usage, "output_tokens", None)}
+                    "output": getattr(usage, "output_tokens", None),
+                    # zero cache_read across repeated calls = caching broke
+                    # (e.g. someone made SYSTEM_PROMPT dynamic) — keep visible.
+                    "cache_read": getattr(usage, "cache_read_input_tokens", None),
+                    "cache_write": getattr(usage, "cache_creation_input_tokens", None)}
     return out

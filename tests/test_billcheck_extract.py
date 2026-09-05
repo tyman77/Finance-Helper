@@ -57,12 +57,17 @@ def test_extract_invoice_calls_parse_with_structured_output(monkeypatch):
     client = FakeClient(FakeResp(parsed))
     out = extract.extract_invoice(PDF, client=client)
     assert out["vendor"] == "Acme" and out["terms_days"] == 30
-    assert out["model"] == "claude-test" and out["usage"] == {"input": 1200, "output": 80}
+    assert out["model"] == "claude-test"
+    assert out["usage"] == {"input": 1200, "output": 80,
+                            "cache_read": None, "cache_write": None}
     kw = client.kwargs
     assert kw["model"] == "claude-test"
     assert kw["output_format"] is extract.InvoiceFields
     assert kw["output_config"] == {"effort": "low"}
-    assert kw["system"] == extract.SYSTEM_PROMPT
+    # The stable system prompt is sent as a cache_control block so every
+    # read after the first serves it from prompt cache.
+    assert kw["system"] == [{"type": "text", "text": extract.SYSTEM_PROMPT,
+                             "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
     assert kw["messages"][0]["content"][0]["type"] == "document"
     # The entered Bill.com values never reach the model.
     assert "1500" not in str(kw["messages"])
