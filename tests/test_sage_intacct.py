@@ -229,3 +229,22 @@ def test_mirror_department_follows_chart_requirement(monkeypatch, tmp_path):
     mirrors = payload["lines"][2:]
     assert mirrors[0].get("department") == "80"   # 71000 rejects bare lines
     assert "department" not in mirrors[1]         # house style: allocate depts
+
+
+def test_dept_required_floor_holds_without_chart_file(monkeypatch, tmp_path):
+    """Production regression: the chart file on the volume went missing, so
+    71000 mirrors posted deptless and Sage rejected the JE. The committed
+    config floor keeps the requirement even with no chart fetched."""
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))   # no chart here
+    from finance_helper import validate
+    assert validate.dept_required("71000")
+    assert validate.dept_required("71000--OH - Travel")
+    assert validate.dept_required("71040")
+    assert not validate.dept_required("52200")
+
+    payload = sage_intacct.build_journal_entry(_doc([
+        LineItem(description="OH", amount=Decimal("146.40"), gl_account="71000",
+                 department="40"),
+    ]))
+    mirror = payload["lines"][1]
+    assert mirror.get("department") == "40"   # mirror keeps the dept

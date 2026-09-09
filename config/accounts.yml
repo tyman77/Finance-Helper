@@ -27,6 +27,13 @@ accounts:
   "91000": "Clearing"
   "20000": "Accounts Payable"
 
+# Accounts Sage rejects a line on unless a Department dimension is present.
+# Committed here as the floor — the fetched chart (data/chart_of_accounts.json)
+# can add more, but posting must not depend on that gitignored file existing.
+require_department:
+  - "71000"
+  - "71040"
+
 departments:
   "10": "Sales Team"
   "20": "Marketing Team"

@@ -918,10 +918,8 @@ def create_app() -> Flask:
         # Intacct will reject the whole entry over one such line (the mirror
         # carries the department FROM the line, so a blank can't be papered
         # over) — catch it here instead of a Sage round-trip.
-        chart = validate.load_chart() or {}
         undept = [li for li in selected
-                  if (chart.get((li.gl_account or "").split("--")[0].strip()) or {})
-                  .get("require_department") and not li.department]
+                  if not li.department and validate.dept_required(li.gl_account)]
         if undept:
             store.save_run(run_id, run)
             shown = "; ".join(f"{li.description} ({li.amount} to {li.gl_account})"

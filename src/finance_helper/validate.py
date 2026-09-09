@@ -48,6 +48,21 @@ def load_projects(path: str | None = None) -> dict:
         return json.load(fh)
 
 
+def dept_required(account) -> bool:
+    """Whether Sage rejects a line on this account without a Department.
+    The fetched chart is authoritative when present, but the committed
+    config floor (config/accounts.yml require_department) applies even when
+    the chart file is missing — posting must never depend on a fetched data
+    file existing (a deptless 71000 mirror got a whole JE rejected that way)."""
+    code = str(account or "").split("--")[0].strip()
+    if not code:
+        return False
+    if (load_chart().get(code) or {}).get("require_department"):
+        return True
+    from . import config
+    return code in set(config.accounts().get("require_department") or [])
+
+
 def validate_lines(doc: SourceDocument, chart: dict | None = None, projects: dict | None = None) -> list[dict]:
     """Structured per-line issues: [{"index": i, "message": str}, ...].
 
@@ -72,12 +87,19 @@ def validate_lines(doc: SourceDocument, chart: dict | None = None, projects: dic
                     issues.append({"index": i, "message": f"account {acct} is {info['status']}"})
                 if info.get("disallow_direct_posting"):
                     issues.append({"index": i, "message": f"account {acct} disallows direct posting"})
-                if info.get("require_department") and not li.department:
+                if not li.department and dept_required(acct):
                     issues.append({
                         "index": i,
                         "message": f"account {acct} ({info.get('title', '')}) "
                                    f"requires a department, but none is set",
                     })
+        elif not li.department and dept_required(li.gl_account):
+            # No chart fetched — the committed config floor still applies.
+            acct = str(li.gl_account or "").split("--")[0].strip()
+            issues.append({
+                "index": i,
+                "message": f"account {acct} requires a department, but none is set",
+            })
 
         if projects and li.project:
             proj_info = projects.get(str(li.project))

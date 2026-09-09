@@ -699,3 +699,19 @@ def test_project_autocomplete_includes_sage_only_projects(client, monkeypatch, t
     assert '"c": "5600"' in body           # Sage-only, active: offered
     assert '"c": "2339"' in body           # registry: still offered
     assert '"c": "4100"' not in body       # inactive: never offered
+
+
+def test_approve_dept_guard_holds_without_chart_file(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))   # no chart file
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper import destinations
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    monkeypatch.setattr(destinations, "post",
+                        lambda d, payload: (_ for _ in ()).throw(
+                            AssertionError("should not reach Sage")))
+    data = {f"gl_account_{i}": "71000" for i in range(len(doc.line_items))}
+    data.update({f"department_{i}": "" for i in range(len(doc.line_items))})
+    data["post_0"] = "on"
+    resp = client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
+    assert b"requires a Department" in resp.data

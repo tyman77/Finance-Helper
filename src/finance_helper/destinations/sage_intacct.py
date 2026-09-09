@@ -50,15 +50,9 @@ def build_journal_entry(doc: SourceDocument) -> dict:
     # Their house style: mirrors carry NO department, so the entry allocates
     # departments as well as projects — except on accounts the chart marks
     # department-required (71000), where a bare line is rejected outright.
-    try:
-        from ..validate import load_chart
-        chart = load_chart() or {}
-    except Exception:
-        chart = {}
-
-    def _dept_required(acct) -> bool:
-        info = chart.get(str(acct or "").split("--")[0].strip()) or {}
-        return bool(info.get("require_department"))
+    # Chart + the committed config floor: a deptless 71000 mirror must never
+    # reach Sage just because the fetched chart file is missing on this host.
+    from ..validate import dept_required as _dept_required
 
     dimensioned, mirrors = [], []
     for li in doc.line_items:
