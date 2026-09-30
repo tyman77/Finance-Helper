@@ -345,3 +345,15 @@ def test_roster_includes_directory_people_without_travel_history():
     assert "Justin Tyler Hitch" not in roster        # deduped by email
     assert roster["Benjamin Boozer"] == "bboozer@summitintegrated.com"
     assert any("[directory" in line for line in review)
+
+
+def test_engine_button_loads_guests(client, monkeypatch):
+    c, data_dir = client
+    from finance_helper import engine_api
+    monkeypatch.setattr(engine_api, "fetch_report_rows", lambda: (
+        {"id": "9", "name": "Scout feed"},
+        [{"Invoice Number": "260901001", "Guest Name": "Justin Hitch"}]))
+    resp = c.post("/admin/engine", follow_redirects=True)
+    assert "Scout feed" in resp.data.decode()
+    guests = json.loads((data_dir / "hotel_guests.json").read_text())
+    assert guests["260901001"]["guests"] == ["Justin Hitch"]

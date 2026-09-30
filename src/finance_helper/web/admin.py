@@ -121,6 +121,41 @@ def admin_page():
     )
 
 
+def engine_sync() -> str:
+    """Run the Engine saved report and fold its guests into the guest index
+    (the same store the manual guest-list upload feeds), then rebuild the
+    hotel index so United coding sees the stays. Returns a summary line;
+    raises with a plain reason on failure."""
+    from flask import current_app
+
+    from .. import engine_api, insights
+    chosen, rows = engine_api.fetch_report_rows()
+    os.makedirs(_data_dir(), exist_ok=True)
+    with open(_data_path("engine_report.json"), "w", encoding="utf-8") as fh:
+        json.dump({"report": chosen, "fetched": datetime.now().isoformat(timespec="seconds"),
+                   "rows": rows}, fh, indent=2)
+    if not rows:
+        return f"Engine report “{chosen['name']}” ran but returned no rows."
+    index = insights.build_guest_index(rows)
+    total = insights.save_guest_index(index)
+    refresh = current_app.extensions.get("refresh_hotel_index")
+    if refresh:
+        refresh()
+    named = sum(1 for v in index.values() if v.get("guests"))
+    return (f"Engine report “{chosen['name']}”: {len(rows)} rows, {len(index)} bookings "
+            f"({named} with guest names; {total} bookings on file). Stays and United "
+            "coding now use the real travelers.")
+
+
+@admin_bp.post("/engine")
+def refresh_engine():
+    try:
+        flash(engine_sync())
+    except Exception as exc:
+        flash(f"Could not pull the Engine report: {exc}")
+    return redirect(url_for("admin.admin_page"))
+
+
 @admin_bp.post("/coding-notes")
 def save_coding_notes():
     from .. import travel_coder

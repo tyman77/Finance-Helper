@@ -32,3 +32,4 @@ def _no_live_claude(monkeypatch):
     exercise the coder set the key (and a fake client) themselves."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("FINANCE_HELPER_LLM_CODER", raising=False)
+    monkeypatch.delenv("ENGINE_API_KEY", raising=False)

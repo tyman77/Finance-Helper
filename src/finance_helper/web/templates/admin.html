@@ -86,6 +86,12 @@
   chips, often to a single confident match. Upload each month's statement as
   it comes in; they accumulate.
 </p>
+<p class="subtle"><strong>Engine (API)</strong> — runs your saved Engine report (the one with
+"Scout" in its name, or ENGINE_SAVED_REPORT) and loads its guests, so stays show real
+travelers and United coding sees them. Also runs nightly when ENGINE_API_KEY is set.</p>
+<form method="post" action="{{ url_for('admin.refresh_engine') }}" class="upload-form">
+  <button type="submit">Fetch Engine report</button>
+</form>
 <form method="post" action="{{ url_for('admin.refresh_hotel_index') }}"
       enctype="multipart/form-data" class="upload-form">
   <label>CSV file <input type="file" name="file" accept=".csv" required></label>

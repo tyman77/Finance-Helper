@@ -441,6 +441,37 @@ def _hotels_view(data: dict, detail: dict) -> dict:
     }
 
 
+_engine_nightly_started = False
+
+
+def _start_engine_nightly(app) -> None:
+    """Pull the Engine saved report once a night (ENGINE_NIGHTLY_HOUR_UTC,
+    default 9 = 3am Denver) when a key is configured. ENGINE_NIGHTLY=0 off."""
+    global _engine_nightly_started
+    from .. import engine_api
+    if (_engine_nightly_started or app.config.get("TESTING")
+            or os.environ.get("ENGINE_NIGHTLY", "1") == "0"
+            or not engine_api.credentials_present()):
+        return
+    _engine_nightly_started = True
+    import threading
+    import time
+
+    def loop():
+        from .admin import engine_sync
+        from .billcheck import _seconds_until
+        hour = int(os.environ.get("ENGINE_NIGHTLY_HOUR_UTC") or 9)
+        while True:
+            time.sleep(max(60.0, _seconds_until(hour, datetime.utcnow())))
+            try:
+                with app.app_context():
+                    print("[engine] " + engine_sync(), file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"[engine] nightly pull failed: {exc}", file=sys.stderr, flush=True)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -818,7 +849,9 @@ def create_app() -> Flask:
                 return
             from .. import insights as _ins
             from ..enrich import _HE_DEPARTMENTS
-            detail = _ins.hotels_detail(docs)
+            # Guests (Engine API or uploaded guest list) ride along, so the
+            # flight coder's "hotel stay names this traveler" works.
+            detail = _ins.hotels_detail(docs, guest_index=_ins.load_guest_index())
             records = []
             for b in detail["bookings"]:
                 m = re.search(r"\b(\d{3,5})\b", str(b.get("project") or ""))
@@ -1213,4 +1246,6 @@ def create_app() -> Flask:
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    app.extensions["refresh_hotel_index"] = _refresh_hotel_index
+    _start_engine_nightly(app)
     return app
