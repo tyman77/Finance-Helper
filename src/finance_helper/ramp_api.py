@@ -34,14 +34,14 @@ def credentials_present() -> bool:
     return bool(os.environ.get("RAMP_CLIENT_ID") and os.environ.get("RAMP_CLIENT_SECRET"))
 
 
-def _get_token() -> str:
+def _get_token(scope: str = "reimbursements:read") -> str:
     import requests
 
     try:
         resp = requests.post(
             f"{_API}/token",
             auth=(os.environ["RAMP_CLIENT_ID"].strip(), os.environ["RAMP_CLIENT_SECRET"].strip()),
-            data={"grant_type": "client_credentials", "scope": "reimbursements:read"},
+            data={"grant_type": "client_credentials", "scope": scope},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
         )
@@ -204,7 +204,9 @@ def _airline(merchant: str) -> str | None:
 def fetch_transactions(start: date, end: date) -> list[dict]:
     import requests
 
-    token = _get_token()
+    # Needs its own scope, requested at token time AND enabled on the app
+    # (Ramp -> Settings -> Developer API -> your app -> scopes).
+    token = _get_token("transactions:read")
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{_API}/transactions"
     params = {"from_date": f"{start.isoformat()}T00:00:00Z",
