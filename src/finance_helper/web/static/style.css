@@ -483,3 +483,4 @@ tr.grp-child td:first-child { box-shadow: inset 3px 0 0 var(--accent-soft); }
 details.panel > summary { cursor: pointer; list-style: none; }
 details.panel > summary::before { content: "▸ "; color: var(--muted); }
 details.panel[open] > summary::before { content: "▾ "; }
+.seg-bar.s2 { background: #199e70; } .seg-bar.s3 { background: #c98500; }

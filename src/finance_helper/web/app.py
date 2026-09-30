@@ -399,6 +399,48 @@ def _flights_view(data: dict, detail: dict, ramp_air: dict) -> dict:
     }
 
 
+def _hotels_view(data: dict, detail: dict) -> dict:
+    """View model for the hotels page — same shape of page as flights:
+    work strip, four KPIs, monthly chart, one people table, where-they-stay
+    lists, then the booking log."""
+    from .. import insights as _ins
+
+    comps = dict(detail.get("components") or [])
+    total = float(data.get("total") or 0)
+    room = float(comps.get("Room") or 0)
+    nights = int(detail.get("total_nights") or 0)
+    stays = int(detail.get("booking_count") or 0)
+    group = data.get("group")
+    months = sorted((data.get("by_month_group") or {}).keys())[-12:]
+    monthly = _ins.monthly_chart(
+        months, {m: {"Hotels": float((data["by_month_group"][m] or {}).get(group, 0) or 0)}
+                 for m in months}, ["Hotels"], width=1000, height=230)
+    travelers = [{"person": n, "spend": float(sp), "stays": c}
+                 for n, sp, c in (detail.get("travelers") or [])]
+    top = max((t["spend"] for t in travelers), default=0)
+    hotels = [(n, float(sp), c) for n, sp, c in (detail.get("hotels") or [])][:8]
+    cities = [(n, float(sp), ni) for n, sp, ni in (detail.get("cities") or [])][:8]
+    open_stmt = next((st for st in (data.get("statements") or [])
+                      if not st.get("posted") and st.get("run_id")), None)
+    return {
+        "total": total,
+        "stays": stays,
+        "nights": nights,
+        "avg_nights": (nights / stays) if stays else None,
+        "avg_rate": float(detail.get("avg_rate") or 0) or None,
+        "extras_pct": round((1 - room / total) * 100) if total and room else None,
+        "monthly": monthly,
+        "travelers": travelers,
+        "top_spend": top,
+        "hotels": hotels,
+        "hotels_top": max((h[1] for h in hotels), default=0),
+        "cities": cities,
+        "cities_top": max((c[1] for c in cities), default=0),
+        "open_statement": open_stmt,
+        "names_inferred": stays and not detail.get("guest_bookings"),
+    }
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -699,6 +741,11 @@ def create_app() -> Flask:
                 v=_flights_view(data, detail or {}, _ramp_air_metrics()),
                 projects_chart=insights.hbar_chart(
                     [(plabel(c), v) for c, v in data["projects"][:8]]),
+            )
+        if domain == "hotels":
+            return render_template(
+                "hotels.html", d=data, detail=detail or {},
+                v=_hotels_view(data, detail or {}),
             )
         return render_template(
             "domain.html",

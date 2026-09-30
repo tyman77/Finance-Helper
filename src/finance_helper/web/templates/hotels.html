@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Hotels — Scout{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1><span class="swatch big s{{ d.slot }}"></span> Hotels</h1>
+  <p class="subtle">Hotel Engine stays — spend, nights, who's staying and where.</p>
+</div>
+
+{# Work first, kept apart from the numbers. #}
+<div class="action-strip">
+  {% if d.flagged and v.open_statement %}
+    <span><strong>{{ d.flagged }}</strong> hotel line{{ 's' if d.flagged != 1 }} waiting for review</span>
+    <a class="button" href="{{ url_for('review_page', run_id=v.open_statement.run_id) }}">Open review →</a>
+  {% else %}
+    <span class="subtle">Nothing waiting for review.</span>
+  {% endif %}
+  <a class="button secondary" href="{{ url_for('index', source=d.sources[0]) }}">Upload Hotel Engine CSV</a>
+</div>
+
+{% if not v.total %}
+<div class="panel"><p class="subtle">No hotel data yet — upload a Hotel Engine statement.</p></div>
+{% else %}
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Hotel spend</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(v.total) }}</div>
+    <div class="kpi-sub">{{ v.stays }} stay{{ 's' if v.stays != 1 }}</div></div>
+  <div class="kpi"><div class="kpi-label">Nights</div>
+    <div class="kpi-value">{{ '{:,}'.format(v.nights) }}</div>
+    <div class="kpi-sub">{% if v.avg_nights %}{{ '%.1f'|format(v.avg_nights) }} per stay{% endif %}</div></div>
+  <div class="kpi"><div class="kpi-label">Avg nightly rate</div>
+    <div class="kpi-value">{% if v.avg_rate %}${{ '{:,.0f}'.format(v.avg_rate) }}{% else %}—{% endif %}</div>
+    <div class="kpi-sub">room only, before taxes</div></div>
+  <div class="kpi"><div class="kpi-label">Beyond the room</div>
+    <div class="kpi-value">{% if v.extras_pct is not none %}{{ v.extras_pct }}%{% else %}—{% endif %}</div>
+    <div class="kpi-sub">taxes, fees &amp; incidentals</div></div>
+</div>
+
+{% if v.monthly.columns %}
+<div class="panel">
+  <h2>Monthly hotel spend</h2>
+  <svg viewBox="0 0 {{ v.monthly.width }} {{ v.monthly.height }}" class="chart" role="img"
+       aria-label="Monthly hotel spend">
+    {% for t in v.monthly.ticks %}
+    <line x1="{{ v.monthly.pad_l }}" x2="{{ v.monthly.width - v.monthly.pad_r }}"
+          y1="{{ t.y }}" y2="{{ t.y }}" class="grid"/>
+    <text x="{{ v.monthly.pad_l - 6 }}" y="{{ t.y + 3 }}" class="tick" text-anchor="end">{{ t.label }}</text>
+    {% endfor %}
+    <line x1="{{ v.monthly.pad_l }}" x2="{{ v.monthly.width - v.monthly.pad_r }}"
+          y1="{{ v.monthly.baseline_y }}" y2="{{ v.monthly.baseline_y }}" class="baseline"/>
+    {% for col in v.monthly.columns %}
+      {% for seg in col.segments %}
+      <rect x="{{ seg.x }}" y="{{ seg.y }}" width="{{ seg.w }}" height="{{ seg.h }}"
+            class="seg s{{ d.slot }}" rx="2">
+        <title>{{ col.label }}: ${{ '{:,.0f}'.format(seg.value) }}</title>
+      </rect>
+      {% endfor %}
+      <text x="{{ col.cx }}" y="{{ v.monthly.baseline_y + 14 }}" class="tick" text-anchor="middle">{{ col.label }}</text>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
+
+{% if v.travelers %}
+<div class="panel">
+  <h2>Who's staying</h2>
+  {% if v.names_inferred %}
+  <p class="subtle">Names are <em>inferred</em> from United flights on the same dates — add Hotel
+    Engine's guest list (bottom of the page) for actual guests and occupancy.</p>
+  {% endif %}
+  <div class="tablewrap"><table class="runs travelers-table">
+    <thead><tr><th>Traveler</th><th class="bar-col">Spend</th><th class="amt">Stays</th></tr></thead>
+    <tbody>
+      {% for t in v.travelers[:30] %}
+      <tr>
+        <td>{{ t.person }}</td>
+        <td class="bar-col"><div class="bar-wrap"><div class="inline-bar">
+          <span class="seg-bar s{{ d.slot }}" style="width: {{ (t.spend / v.top_spend * 100) if v.top_spend else 0 }}%"></span>
+          </div><span class="bar-label">${{ '{:,.0f}'.format(t.spend) }}</span></div></td>
+        <td class="amt">{{ t.stays }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if v.travelers|length > 30 %}<p class="subtle">Top 30 of {{ v.travelers|length }} travelers.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if v.hotels or v.cities %}
+<div class="panel-grid">
+  {% if v.hotels %}
+  <div class="panel">
+    <h2>Top hotels</h2>
+    <table class="runs travelers-table">
+      <thead><tr><th>Hotel</th><th class="bar-col">Spend</th><th class="amt">Stays</th></tr></thead>
+      <tbody>
+        {% for name, spend, n in v.hotels %}
+        <tr><td><div class="clamp" title="{{ name }}">{{ name }}</div></td>
+          <td class="bar-col"><div class="bar-wrap"><div class="inline-bar">
+            <span class="seg-bar s{{ d.slot }}" style="width: {{ (spend / v.hotels_top * 100) if v.hotels_top else 0 }}%"></span>
+            </div><span class="bar-label">${{ '{:,.0f}'.format(spend) }}</span></div></td>
+          <td class="amt">{{ n }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if v.cities %}
+  <div class="panel">
+    <h2>Top cities</h2>
+    <table class="runs travelers-table">
+      <thead><tr><th>City</th><th class="bar-col">Spend</th><th class="amt">Nights</th></tr></thead>
+      <tbody>
+        {% for name, spend, n in v.cities %}
+        <tr><td>{{ name }}</td>
+          <td class="bar-col"><div class="bar-wrap"><div class="inline-bar">
+            <span class="seg-bar s{{ d.slot }}" style="width: {{ (spend / v.cities_top * 100) if v.cities_top else 0 }}%"></span>
+            </div><span class="bar-label">${{ '{:,.0f}'.format(spend) }}</span></div></td>
+          <td class="amt">{{ n }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if detail.bookings %}
+<div class="panel">
+  <h2>Recent stays</h2>
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Dates</th><th>Hotel</th><th>Guests</th>
+      <th class="amt">Nights</th><th class="amt">Rate</th><th class="amt">Total</th><th>Project</th><th></th></tr></thead>
+    <tbody>
+      {% for b in detail.bookings[:25] %}
+      <tr>
+        <td class="nowrap">{{ b.start }} → {{ b.end }}</td>
+        <td><div class="clamp" title="{{ b.hotel or b.type }}">{{ b.hotel or b.type }}</div>
+          {% if b.city %}<div class="hint">{{ b.city }}</div>{% endif %}</td>
+        <td>{% if b.guests %}{{ b.guests | join(', ') }}{% if b.occupancy %} <span class="subtle">· {{ b.occupancy }}</span>{% endif %}
+            {% elif b.inferred %}<span class="subtle">{{ b.inferred | join(', ') }} (likely)</span>{% endif %}</td>
+        <td class="amt">{{ b.nights or '' }}</td>
+        <td class="amt">{% if b.rate %}${{ '{:,.0f}'.format(b.rate) }}{% endif %}</td>
+        <td class="amt">${{ '{:,.0f}'.format(b.total) }}</td>
+        <td class="subtle">{{ b.project }}</td>
+        <td>{% if b.flagged %}<span class="status-pill status-review">review</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if detail.booking_count > 25 %}<p class="subtle">The 25 most recent of {{ detail.booking_count }} stays.</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+
+<details class="panel"{% if v.names_inferred %} open{% endif %}>
+  <summary><h2 style="display:inline">Guest list upload</h2></summary>
+  <p class="subtle">The billing statement carries no guest names. Hotel Engine's
+  <strong>trips/guests export</strong> does — upload it and stays gain their actual travelers
+  plus Single / Double occupancy (matched by confirmation or invoice number; uploads accumulate).</p>
+  <form method="post" action="{{ url_for('hotels_guests_upload') }}"
+        enctype="multipart/form-data" class="upload-form">
+    <label>Trips/guests CSV <input type="file" name="file" accept=".csv" required></label>
+    <button type="submit">Add guest list</button>
+  </form>
+</details>
+
+<details class="panel">
+  <summary><h2 style="display:inline">Hotel Engine statements ({{ d.statements|length }})</h2></summary>
+  <table class="runs">
+    <thead><tr><th>Document</th><th>File</th><th class="amt">Total</th><th>Status</th><th>Processed</th><th></th></tr></thead>
+    <tbody>
+      {% for s in d.statements %}
+      <tr>
+        <td>{{ s.document_id }}</td>
+        <td class="subtle">{{ s.filename }}</td>
+        <td class="amt">${{ '{:,.2f}'.format(s.total) }}</td>
+        <td>{% if s.posted %}<span class="status-pill status-auto">Posted</span>
+            {% else %}<span class="status-pill status-review">In progress</span>{% endif %}</td>
+        <td class="subtle">{{ s.created.strftime('%Y-%m-%d %H:%M') if s.created else '' }}</td>
+        <td>{% if s.run_id %}<a href="{{ url_for('review_page', run_id=s.run_id) }}">Open →</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endblock %}

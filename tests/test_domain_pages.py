@@ -92,8 +92,9 @@ def test_hotels_page_renders_booking_report(client):
     _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
     body = client.get("/d/hotels").data
     assert b"Avg nightly rate" in body
-    assert b"What each stay is made of" in body
-    assert b"Bookings (3)" in body
+    assert b"Beyond the room" in body      # cost composition, as a KPI now
+    assert b"Recent stays" in body
+    assert b"3 stays" in body
     assert b"Fairfield Inn Example" in body
     # Flights page must not grow hotel sections.
     assert b"Avg nightly rate" not in client.get("/d/flights").data
