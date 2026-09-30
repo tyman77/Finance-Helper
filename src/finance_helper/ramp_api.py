@@ -96,6 +96,32 @@ def _get(rec: dict, keys: tuple) -> str:
     return ""
 
 
+def _project_from_selections(rec: dict) -> str | None:
+    """The Intacct Project accounting field on the reimbursement — where the
+    coding actually lives (the memo is free text and usually has no code).
+    Handles both the developer API's accounting_field_selections shape and
+    the normalized tracking_category_selections shape; the job number is the
+    trailing numeric token of the option name ("P000288 - Life.Church, CO |
+    PKR Campus Build | 3335" -> "3335")."""
+    sels = (rec.get("accounting_field_selections")
+            or rec.get("tracking_category_selections") or [])
+    for sel in sels:
+        if not isinstance(sel, dict):
+            continue
+        cat = ((sel.get("category_info") or {}).get("name")
+               or sel.get("category_name") or "")
+        if str(cat).strip().lower() != "project":
+            continue
+        opt = sel.get("option_selection") or {}
+        name = str(sel.get("name") or opt.get("option_name")
+                   or opt.get("name") or "")
+        codes = _PROJECT_CODE.findall(name)
+        if codes:
+            return codes[-1]
+        return name.split(" - ")[0].strip() or None   # bare P-number option
+    return None
+
+
 def build_index(records: list[dict]) -> list[dict]:
     """Raw Ramp records -> the compact per-person index enrich consumes."""
     out = []
@@ -109,13 +135,16 @@ def build_index(records: list[dict]) -> list[dict]:
         if not person:
             continue
         memo = _get(rec, _MEMO_KEYS)
-        m = _PROJECT_CODE.search(memo)
+        project = _project_from_selections(rec)
+        if not project:
+            m = _PROJECT_CODE.search(memo)
+            project = m.group(1) if m else None
         out.append({
             "person": person,
             "date": when.isoformat(),
             "amount": str(rec.get("amount") or ""),
             "memo": memo,
-            "project": m.group(1) if m else None,
+            "project": project,
         })
     if records and not out:
         import json

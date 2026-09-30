@@ -103,3 +103,39 @@ def test_admin_fetch_writes_index(tmp_path, monkeypatch):
     idx = json.load(open(tmp_path / "data" / "ramp_reimbursements.json"))
     assert idx[0]["project"] == "4499"
     RUNS.clear()
+
+
+def test_project_read_from_intacct_accounting_field():
+    """The Hopkins case: the memo says "LC PKR Commissioning" (no code) but
+    the Ramp Intacct Project field carries "P000288 - Life.Church, CO | PKR
+    Campus Build | 3335" — the job number comes from the field, not the memo."""
+    recs = [{
+        "user": {"first_name": "Michael", "last_name": "Hopkins"},
+        "transaction_date": "2026-09-10T00:00:00+00:00",
+        "amount": 162.5,
+        "memo": "LC PKR Commissioning",
+        "tracking_category_selections": [
+            {"category_name": "Category", "option_selection": {"option_name": "52410 - Per Diem"}},
+            {"category_name": "Project", "option_selection": {
+                "option_name": "P000288 - Life.Church, CO | PKR Campus Build | 3335"}},
+        ],
+    }, {
+        # Developer-API shape, and an option with no trailing job number.
+        "user": {"first_name": "A", "last_name": "B"},
+        "transaction_date": "2026-09-11T00:00:00+00:00",
+        "amount": 10,
+        "memo": "",
+        "accounting_field_selections": [
+            {"category_info": {"name": "Project"}, "name": "P000700"},
+        ],
+    }, {
+        # No accounting field: memo regex still works as before.
+        "user": {"first_name": "C", "last_name": "D"},
+        "transaction_date": "2026-09-12T00:00:00+00:00",
+        "amount": 10,
+        "memo": "Per diem - Northview 4499",
+    }]
+    idx = ramp_api.build_index(recs)
+    assert idx[0]["project"] == "3335"
+    assert idx[1]["project"] == "P000700"
+    assert idx[2]["project"] == "4499"
