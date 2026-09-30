@@ -759,6 +759,8 @@ def test_posting_records_coder_outcomes(client, monkeypatch, tmp_path):
     li.project, li.gl_account, li.department = "5232", "52200", "60"  # human fixed it
     monkeypatch.setattr(destinations, "post", lambda d, p: {"record_no": "70001"})
     data = {f"gl_account_{i}": (l.gl_account or "") for i, l in enumerate(doc.line_items)}
+    data.update({f"project_{i}": (l.project or "") for i, l in enumerate(doc.line_items)})
+    data.update({f"department_{i}": (l.department or "") for i, l in enumerate(doc.line_items)})
     data["post_0"] = "on"
     client.post(f"/review/{run_id}/approve", data=data)
     _, corrections = travel_coder._feedback()
