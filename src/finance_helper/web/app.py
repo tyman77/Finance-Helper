@@ -1285,13 +1285,17 @@ def create_app() -> Flask:
                              if done else ""))
             run["posted"] = {"ok": False, "detail": detail}
         elif len(done) == 1:
-            run["posted"] = {"ok": True, "detail": f"{done[0][0]} line(s): {done[0][1]}"}
+            n, r, _ = done[0]
+            rec = r.get("record_no") if isinstance(r, dict) else ""
+            run["posted"] = {"ok": True, "detail": (
+                f"{n} line{'s' if n != 1 else ''} posted"
+                + (f" as JE {rec}" if rec else "") + ".")}
         else:
             recs = ", ".join(
                 f"bill {ref} → JE {r.get('record_no') if isinstance(r, dict) else r}"
                 for _, r, ref in done)
             run["posted"] = {"ok": True, "detail": (
-                f"{sum(n for n, _, _ in done)} line(s) in {len(done)} entries: {recs}")}
+                f"{sum(n for n, _, _ in done)} lines posted in {len(done)} entries: {recs}.")}
         store.save_run(run_id, run)
         return redirect(url_for("review_page", run_id=run_id))
 

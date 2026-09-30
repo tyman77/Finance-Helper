@@ -366,7 +366,7 @@ def test_approve_posts_only_checked_lines(client, monkeypatch):
     assert resp.status_code == 302
     assert len(posted["doc"].line_items) == 1
     assert RUNS[run_id]["posted"]["ok"] is True
-    assert "1 line(s)" in RUNS[run_id]["posted"]["detail"]
+    assert "1 line posted" in RUNS[run_id]["posted"]["detail"]
 
     # Nothing checked: refuses with guidance, nothing posted.
     posted.clear()

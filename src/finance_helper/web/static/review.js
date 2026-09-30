@@ -183,3 +183,26 @@ document.querySelectorAll(".bill-check").forEach((box) => {
     });
   });
 });
+
+// Live selection summary in the action bar: how many lines and how much
+// money the next Approve would post.
+(() => {
+  const count = document.getElementById("sel-count");
+  const total = document.getElementById("sel-total");
+  if (!count || !total) return;
+  const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const update = () => {
+    let n = 0, sum = 0;
+    document.querySelectorAll('input[type="checkbox"][name^="post_"]').forEach((b) => {
+      if (!b.checked) return;
+      n += 1;
+      const tr = b.closest("tr");
+      sum += parseFloat((tr && tr.dataset.amount) || "0") || 0;
+    });
+    count.textContent = String(n);
+    total.textContent = fmt.format(sum);
+  };
+  document.addEventListener("change", update);
+  document.addEventListener("click", () => setTimeout(update, 0));
+  update();
+})();

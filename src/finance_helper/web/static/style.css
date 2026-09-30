@@ -485,3 +485,34 @@ details.panel > summary::before { content: "▸ "; color: var(--muted); }
 details.panel[open] > summary::before { content: "▾ "; }
 .seg-bar.s2 { background: #199e70; } .seg-bar.s3 { background: #c98500; }
 tr.bill-head td { background: var(--panel); border-top: 2px solid var(--accent); padding-top: 10px; }
+
+/* Review action bar: pinned to the bottom of the window. */
+.action-bar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 18px -4px 0; padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+.action-bar form { margin: 0; }
+.action-bar .sel-summary { color: var(--muted); font-size: 0.85rem; min-width: 150px; }
+.action-bar .sel-summary strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.action-bar .post-date { color: var(--muted); font-size: 0.85rem; display: inline-flex; gap: 6px; align-items: center; }
+.action-bar .bar-spacer { flex: 1 1 auto; }
+button.secondary, .button.secondary {
+  background: transparent; border: 1px solid var(--border-strong); color: var(--text);
+}
+button.secondary:hover, .button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+.more-menu { position: relative; }
+.more-menu > summary { list-style: none; cursor: pointer; }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-panel {
+  position: absolute; right: 0; bottom: calc(100% + 8px); min-width: 300px;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.more-panel form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.more-panel label { color: var(--muted); font-size: 0.85rem; display: inline-flex; gap: 6px; align-items: center; }
+.danger-link { background: none; border: none; color: var(--err); padding: 0; cursor: pointer; font-size: 0.85rem; }
+.danger-link:hover { text-decoration: underline; }

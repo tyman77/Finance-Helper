@@ -56,13 +56,13 @@
 <div class="table-wrap">
 <table class="review-table">
   <colgroup>
-    <col style="width: 3%">   {# flag checkbox #}
-    <col style="width: 8%">   {# status pill #}
+    <col style="width: 4%">   {# flag checkbox #}
+    <col style="width: 7%">   {# status pill #}
     {% if has_dates %}<col style="width: 6%">{% endif %}   {# date #}
-    <col style="width: {{ 12 if has_dates else 18 }}%">  {# description #}
-    <col style="width: 9%">   {# traveler (editable) #}
+    <col style="width: {{ 11 if has_dates else 17 }}%">  {# description #}
+    <col style="width: 11%">   {# traveler (editable) #}
     <col style="width: 6%">   {# amount #}
-    <col style="width: 10%">  {# GL account + title #}
+    <col style="width: 9%">  {# GL account + title #}
     <col style="width: 11%">  {# department select #}
     <col style="width: 17%">  {# project + candidate chips (wide enough for full names) #}
     <col style="width: 18%">  {# why / context #}
@@ -129,7 +129,7 @@
     </tr>
     {% endif %}
     <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}{% if idx in group_of %} grp-child collapsed{% endif %}"
-        data-status="{{ status }}"{% if idx in group_of %} data-group="{{ group_of[idx] }}"{% endif %}{% if idx in bill_of %} data-bill="{{ bill_of[idx] }}"{% endif %}>
+        data-status="{{ status }}" data-amount="{{ li.amount }}"{% if idx in group_of %} data-group="{{ group_of[idx] }}"{% endif %}{% if idx in bill_of %} data-bill="{{ bill_of[idx] }}"{% endif %}>
       <td class="chk">
         {% if li.posted_ref %}<span title="{{ li.posted_ref }}">✔</span>
         {% else %}<input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry">{% endif %}
@@ -194,40 +194,45 @@
   </tbody>
 </table>
 </div>
-<div class="actions">
-  <button type="submit">Save changes</button>
-</div>
 </form>
 
-<div class="actions">
-  <form method="post" action="{{ url_for('rerun', run_id=run_id) }}"
-        onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review. Lines already posted (✔) keep their mark.');">
-    <button type="submit">Re-run coding</button>
-  </form>
-  <label class="post-date" title="The journal entry's date in Sage. Defaults to the statement date — set it to the first day of the open period when Sage has closed the statement month.">
-    Posting date <input type="date" name="post_date" form="review-form"
-                        value="{{ doc.document_date or '' }}">
+{# One action bar, pinned to the bottom of the window: the posting decision
+   up front, housekeeping tucked into "More". #}
+<div class="action-bar">
+  <div class="sel-summary"><strong id="sel-count">0</strong> selected ·
+    <strong id="sel-total">$0.00</strong></div>
+  <button type="submit" form="review-form" class="secondary">Save changes</button>
+  <label class="post-date" title="The journal entry's date in Sage. Defaults to the statement date — set it to the first open day when Sage has closed the statement's period.">
+    Post dated <input type="date" name="post_date" form="review-form" value="{{ doc.document_date or '' }}">
   </label>
   <button type="submit" class="approve" form="review-form"
           formaction="{{ url_for('approve', run_id=run_id) }}"
-          onclick="return confirm('Post the CHECKED lines to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Unchecked lines stay out of the entry.');">
-    Approve &amp; Post selected</button>
-  <a href="{{ url_for('download', run_id=run_id) }}" class="button">Download proposal JSON</a>
-  {% if doc.destination == 'sage' %}
-  <form method="post" action="{{ url_for('mark_posted', run_id=run_id) }}"
-        title="Reads that journal entry from Sage and puts the ✔ back on the lines it contains — use if the posted marks were lost (e.g. by Re-run coding) or the entry was posted outside Scout.">
-    <input type="text" name="je_number" size="7" placeholder="JE #" inputmode="numeric">
-    <button type="submit">Mark lines already in this JE</button>
+          onclick="return confirm('Post the selected lines to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Unselected lines stay out of the entry.');">
+    Approve &amp; post selected</button>
+  <span class="bar-spacer"></span>
+  <form method="post" action="{{ url_for('rerun', run_id=run_id) }}"
+        onsubmit="return confirm('Re-run coding from the original file with the latest data (traveler map, schedule, hotels, Ramp, Claude)? Manual edits on this review are replaced; lines already posted (✔) keep their mark.');">
+    <button type="submit" class="secondary" title="Re-process the original upload with today's data">Re-run coding</button>
   </form>
-  <form method="post" action="{{ url_for('clear_posted', run_id=run_id) }}"
-        onsubmit="return confirm('Remove ALL posted ✔ marks on this review so the lines can post again? Only do this after deleting the matching journal entries in Sage — otherwise you WILL get duplicates.');">
-    <button type="submit">Clear posted ✔ marks</button>
-  </form>
-  {% endif %}
+  <details class="more-menu">
+    <summary class="button secondary">More ▾</summary>
+    <div class="more-panel">
+      <a href="{{ url_for('download', run_id=run_id) }}">Download proposal JSON</a>
+      {% if doc.destination == 'sage' %}
+      <form method="post" action="{{ url_for('mark_posted', run_id=run_id) }}"
+            title="Reads that journal entry from Sage and puts the ✔ back on the lines it contains.">
+        <label>Mark lines already in JE
+          <input type="text" name="je_number" size="7" placeholder="JE #" inputmode="numeric"></label>
+        <button type="submit" class="secondary">Mark</button>
+      </form>
+      <form method="post" action="{{ url_for('clear_posted', run_id=run_id) }}"
+            onsubmit="return confirm('Remove ALL posted ✔ marks on this review so the lines can post again? Only do this after deleting the matching journal entries in Sage — otherwise you WILL get duplicates.');">
+        <button type="submit" class="danger-link">Clear all posted ✔ marks…</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
 </div>
-<p class="subtle">"Re-run coding" re-processes the original upload with the current
-data — use it after building the hotel cross-reference or rebuilding the
-traveler map so this review picks up the improvements.</p>
 
 <script src="{{ url_for('static', filename='review.js') }}"></script>
 {% endblock %}
