@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from .models import SourceDocument
 
@@ -67,6 +68,25 @@ def dept_required(account) -> bool:
                for p in (cfg.get("require_department_prefixes") or []))
 
 
+def _known_accounts() -> set[str]:
+    from . import config
+    return set((config.accounts().get("accounts") or {}).keys())
+
+
+def account_format_problem(account) -> str | None:
+    """Without the fetched chart Sage's full account list is unknown, but a
+    malformed number (Sage GL accounts here are 5 digits) is certainly wrong —
+    a typed "7100" got a whole JE rejected. Returns the message, or None."""
+    code = str(account or "").split("--")[0].strip()
+    if not code:
+        return "no GL account set"
+    if re.fullmatch(r"\d{5}", code):
+        return None
+    near = sorted(a for a in _known_accounts() if a.startswith(code) or code.startswith(a))
+    hint = f" — did you mean {' or '.join(near[:3])}?" if near else ""
+    return f"account {code!r} isn't a valid GL account (5 digits){hint}"
+
+
 def validate_lines(doc: SourceDocument, chart: dict | None = None, projects: dict | None = None) -> list[dict]:
     """Structured per-line issues: [{"index": i, "message": str}, ...].
 
@@ -97,6 +117,8 @@ def validate_lines(doc: SourceDocument, chart: dict | None = None, projects: dic
                         "message": f"account {acct} ({info.get('title', '')}) "
                                    f"requires a department, but none is set",
                     })
+        elif (problem := account_format_problem(li.gl_account)):
+            issues.append({"index": i, "message": problem})
         elif not li.department and dept_required(li.gl_account):
             # No chart fetched — the committed config floor still applies.
             acct = str(li.gl_account or "").split("--")[0].strip()

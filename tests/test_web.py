@@ -892,3 +892,21 @@ def test_review_fills_hotel_guests_from_engine_on_existing_run(client, monkeypat
     assert 'value="Jake Cody"' in html
     assert all(li.person == "Jake Cody" for li in doc.line_items
                if li.raw["Invoice Number"] == inv)
+
+
+def test_approve_refuses_malformed_gl_account(client, monkeypatch):
+    """A typed '7100' (for 71000) got a whole JE rejected by Sage."""
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    doc = RUNS[run_id]["doc"]
+    from finance_helper import destinations
+    calls = []
+    monkeypatch.setattr(destinations, "post", lambda d, p: calls.append(d) or {"ok": 1})
+    data = {f"gl_account_{i}": (li.gl_account or "") for i, li in enumerate(doc.line_items)}
+    data.update({f"department_{i}": "60" for i in range(len(doc.line_items))})
+    data["gl_account_0"] = "7100"
+    data["post_0"] = "on"
+    html = client.post(f"/review/{run_id}/approve", data=data,
+                       follow_redirects=True).get_data(as_text=True)
+    assert not calls
+    assert "7100" in html and "71000" in html          # did-you-mean
+    assert "Not posted" in html

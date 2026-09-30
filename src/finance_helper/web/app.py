@@ -1217,6 +1217,28 @@ def create_app() -> Flask:
             flash("No lines selected — tick the checkbox on each line you want "
                   "in the journal entry, then Approve & Post.")
             return redirect(url_for("review_page", run_id=run_id))
+        # A bad account number rejects the whole entry in Sage — catch it
+        # here: against the fetched chart when present, else by format.
+        chart = validate.load_chart()
+        bad_acct = []
+        for li in selected:
+            code = str(li.gl_account or "").split("--")[0].strip()
+            if chart:
+                problem = (None if code in chart else
+                           f"account {code!r} isn't in the chart of accounts")
+            else:
+                problem = validate.account_format_problem(li.gl_account)
+            if problem:
+                bad_acct.append((li, problem))
+        if bad_acct:
+            store.save_run(run_id, run)
+            shown = "; ".join(f"{li.description} ({li.amount}): {p}"
+                              for li, p in bad_acct[:4])
+            more = f" … and {len(bad_acct) - 4} more" if len(bad_acct) > 4 else ""
+            flash(f"Not posted — {len(bad_acct)} selected line(s) have a GL account "
+                  f"Sage won't accept: {shown}{more}. Fix the account, Save changes, "
+                  "then Approve & Post again.")
+            return redirect(url_for("review_page", run_id=run_id))
         # Intacct will reject the whole entry over one such line (the mirror
         # carries the department FROM the line, so a blank can't be papered
         # over) — catch it here instead of a Sage round-trip.

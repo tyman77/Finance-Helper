@@ -135,9 +135,12 @@ function codeAutocomplete(dataId, selector) {
       if (panel.hidden) return;
       if (ev.key === "ArrowDown") { ev.preventDefault(); highlight(1); }
       else if (ev.key === "ArrowUp") { ev.preventDefault(); highlight(-1); }
-      else if (ev.key === "Enter" && active >= 0) {
+      else if (ev.key === "Enter" && (active >= 0 ||
+               !projects.some((p) => p.c === inp.value.trim()))) {
+        // Enter with nothing highlighted takes the top match, so a partial
+        // code ("7100") never gets saved as-is.
         ev.preventDefault();
-        const row = panel.children[active];
+        const row = panel.children[Math.max(active, 0)];
         if (row) pick(row.querySelector("b").textContent);
       } else if (ev.key === "Escape") { close(); }
     });

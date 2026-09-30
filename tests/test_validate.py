@@ -82,3 +82,11 @@ def test_chart_and_project_checks_are_independent():
     messages = " ".join(i["message"] for i in issues)
     assert "requires a department" in messages
     assert "Archived" in messages
+
+
+def test_account_format_problem_suggests_the_real_account():
+    from finance_helper import validate
+    assert validate.account_format_problem("71000") is None
+    msg = validate.account_format_problem("7100")
+    assert "7100" in msg and "71000" in msg
+    assert validate.account_format_problem("") == "no GL account set"
