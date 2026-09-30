@@ -631,8 +631,9 @@ def monthly_chart(months: list[str], by_month_group: dict, groups: list[str],
         for m in months
     }
     peak = max((sum(v.values()) for v in net.values()), default=0.0) or 1.0
-    # Round the axis top up to a clean step.
-    step = 10 ** max(len(str(int(peak))) - 1, 1)
+    # Round the axis top up to a clean half-magnitude step (10.5k -> 15k,
+    # not 20k), so the tallest column fills most of the plot.
+    step = max(10 ** max(len(str(int(peak))) - 1, 1) // 2, 10)
     top = ((int(peak) // step) + 1) * step
 
     n = max(len(months), 1)

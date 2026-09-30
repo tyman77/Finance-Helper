@@ -791,8 +791,9 @@ def test_flights_dashboard_shows_ramp_airline_panel(client, monkeypatch, tmp_pat
         {"person": "Chase Donald", "date": "2026-09-04", "airline": "Southwest",
          "amount": "342.50", "memo": ""}]))
     body = client.get("/d/flights").data.decode()
-    assert "Southwest &amp; American (Ramp cards)" in body
-    assert "$342.50" in body
+    # Redesign: Ramp airlines are folded into the unified page, not a panel.
+    assert "Southwest" in body and "Chase Donald" in body
+    assert "$343" in body or "$342" in body
 
 
 def test_hotel_review_groups_lines_by_stay(client):
@@ -817,3 +818,20 @@ def test_united_review_has_no_stay_groups(client):
     run_id = _upload(client, "united", "samples/united_sample.csv")
     body = client.get(f"/review/{run_id}").data.decode()
     assert 'class="grp-head"' not in body
+
+
+def test_flights_page_unifies_airlines(client, monkeypatch, tmp_path):
+    """The redesigned flights page: one spend total across United + Ramp
+    airlines, one traveler table, work kept in an action strip."""
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "ramp_flights.json").write_text(_json.dumps([
+        {"person": "Chase Donald", "date": "2026-09-04", "airline": "Southwest",
+         "amount": "342.50", "memo": ""}]))
+    _upload(client, "united", "samples/united_sample.csv")
+    body = client.get("/d/flights").data.decode()
+    assert "Monthly spend by airline" in body
+    assert "Who&#39;s flying" in body or "Who's flying" in body
+    assert "Chase Donald" in body
+    assert "action-strip" in body
+    assert "Southwest" in body and "United" in body

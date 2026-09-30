@@ -40,7 +40,7 @@ def test_domain_pages_render_and_nav_is_present(client):
 def test_flights_page_shows_united_statement(client):
     _upload(client, "united", "samples/united_sample.csv")
     body = client.get("/d/flights").data
-    assert b"Total spend" in body
+    assert b"Flight spend" in body
     assert b"united_sample.csv" in body
     assert b"Open \xe2\x86\x92" in body          # link to the review screen
     # A hotel-engine statement must NOT appear on the Flights page.
@@ -249,7 +249,6 @@ def test_flights_page_renders_fare_and_lead_report(client):
     _upload(client, "united", "samples/united_sample.csv")
     body = client.get("/d/flights").data
     assert b"Avg round-trip fare" in body
-    assert b"Booking lead time by traveler" in body
-    assert b"Round trips" in body
+    assert b"Booked ahead" in body          # lead-time KPI (per-person in the table)
     # Hotels page keeps its own report, not the flights one.
     assert b"Avg round-trip fare" not in client.get("/d/hotels").data

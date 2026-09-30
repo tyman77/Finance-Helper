@@ -320,6 +320,85 @@ def _stay_groups(doc, statuses) -> list[dict]:
     return groups
 
 
+AIRLINES = ("United", "Southwest", "American Airlines")
+
+
+def _flights_view(data: dict, detail: dict, ramp_air: dict) -> dict:
+    """One view model for the flights page: every airline in one place —
+    United from the statements (coded and posted) plus Southwest/American
+    from Ramp cards (metrics only)."""
+    from .. import insights as _ins
+    from ..project_resolver import match_person_key
+
+    # Spend per airline, and per month per airline.
+    ramp_rows = ramp_air.get("rows") or []
+    by_airline = {a: 0.0 for a in AIRLINES}
+    count = {a: 0 for a in AIRLINES}
+    by_airline["United"] = float(data.get("total") or 0)
+    counts = detail.get("counts") or {}
+    count["United"] = sum(int(counts.get(k) or 0) for k in ("round", "oneway", "multi"))
+    months: dict[str, dict[str, float]] = {}
+    group = data.get("group")
+    for m, groups in (data.get("by_month_group") or {}).items():
+        months.setdefault(m, {})["United"] = float(groups.get(group, 0) or 0)
+    for r in ramp_rows:
+        try:
+            amt = float(r.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        a = r.get("airline") if r.get("airline") in AIRLINES else "American Airlines"
+        by_airline[a] += amt
+        count[a] += 1
+        m = (r.get("date") or "")[:7]
+        if m:
+            months.setdefault(m, {}).setdefault(a, 0.0)
+            months[m][a] += amt
+    month_keys = sorted(months)[-12:]
+    airlines = [a for a in AIRLINES if by_airline[a] or count[a]]
+    monthly = _ins.monthly_chart(month_keys, months, airlines or ["United"],
+                                 width=1000, height=230)
+
+    # One traveler table across airlines.
+    people: dict[str, dict] = {}
+    for p in detail.get("people") or []:
+        people[p["person"]] = {"person": p["person"], "united": float(p.get("spend") or 0),
+                               "ramp": 0.0, "tickets": int(p.get("tickets") or 0),
+                               "avg_fare": p.get("avg_fare"), "avg_lead": p.get("avg_lead")}
+    for r in ramp_rows:
+        name = (r.get("person") or "").strip()
+        if not name:
+            continue
+        key = match_person_key(name, people.keys()) or name
+        row = people.setdefault(key, {"person": key, "united": 0.0, "ramp": 0.0,
+                                      "tickets": 0, "avg_fare": None, "avg_lead": None})
+        try:
+            row["ramp"] += float(r.get("amount") or 0)
+        except (TypeError, ValueError):
+            pass
+        row["tickets"] += 1
+    for row in people.values():
+        row["total"] = row["united"] + row["ramp"]
+        lead = row["avg_lead"]
+        row["short_notice"] = lead is not None and lead <= 7
+    travelers = sorted(people.values(), key=lambda r: -r["total"])
+    top = travelers[0]["total"] if travelers else 0
+
+    # The newest statement still in progress is where review work lives.
+    open_stmt = next((st for st in (data.get("statements") or [])
+                      if not st.get("posted") and st.get("run_id")), None)
+    return {
+        "total": sum(by_airline.values()),
+        "by_airline": [(a, by_airline[a], count[a]) for a in airlines],
+        "trips": sum(count.values()),
+        "monthly": monthly,
+        "airlines": airlines,
+        "travelers": travelers,
+        "top_spend": top,
+        "open_statement": open_stmt,
+        "has_ramp": bool(ramp_rows),
+    }
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -614,11 +693,18 @@ def create_app() -> Flask:
         people = data["people"][:8]
         if detail and detail.get("travelers"):
             people = [(n, s, c) for n, s, c in detail["travelers"][:8]]
+        if domain == "flights":
+            return render_template(
+                "flights.html", d=data, detail=detail or {},
+                v=_flights_view(data, detail or {}, _ramp_air_metrics()),
+                projects_chart=insights.hbar_chart(
+                    [(plabel(c), v) for c, v in data["projects"][:8]]),
+            )
         return render_template(
             "domain.html",
             d=data,
             domain=domain,
-            ramp_air=_ramp_air_metrics() if domain == "flights" else None,
+            ramp_air=None,
             monthly=insights.monthly_chart(data["months"], data["by_month_group"], [data["group"]]),
             projects_chart=insights.hbar_chart([(plabel(c), v) for c, v in data["projects"][:8]]),
             people_chart=insights.hbar_chart([(n, a) for n, a, _ in people]),

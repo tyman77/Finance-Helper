@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Flights — Scout{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1><span class="swatch big s{{ d.slot }}"></span> Flights</h1>
+  <p class="subtle">Every airline in one place — United from the statements you code and post,
+    Southwest &amp; American from Ramp cards (numbers only).</p>
+</div>
+
+{# Work first, kept apart from the numbers: what needs a human right now. #}
+<div class="action-strip">
+  {% if d.flagged and v.open_statement %}
+    <span><strong>{{ d.flagged }}</strong> United line{{ 's' if d.flagged != 1 }} waiting for review</span>
+    <a class="button" href="{{ url_for('review_page', run_id=v.open_statement.run_id) }}">Open review →</a>
+  {% else %}
+    <span class="subtle">Nothing waiting for review.</span>
+  {% endif %}
+  <a class="button secondary" href="{{ url_for('index', source=d.sources[0]) }}">Upload United CSV</a>
+</div>
+
+{% if not v.total %}
+<div class="panel"><p class="subtle">No flight data yet — upload a United statement, or refresh
+  Ramp on the Admin page for Southwest &amp; American.</p></div>
+{% else %}
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Flight spend</div>
+    <div class="kpi-value">${{ '{:,.0f}'.format(v.total) }}</div>
+    <div class="kpi-sub">{% for a, amt, n in v.by_airline %}{{ a.split(' ')[0] }} ${{ '{:,.0f}'.format(amt) }}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>
+  <div class="kpi"><div class="kpi-label">Tickets &amp; charges</div>
+    <div class="kpi-value">{{ v.trips }}</div>
+    <div class="kpi-sub">all airlines</div></div>
+  <div class="kpi"><div class="kpi-label">Avg round-trip fare</div>
+    <div class="kpi-value">{% if detail.avg_round is not none and detail.avg_round is defined %}${{ '{:,.0f}'.format(detail.avg_round) }}{% else %}—{% endif %}</div>
+    <div class="kpi-sub">United tickets</div></div>
+  <div class="kpi"><div class="kpi-label">Booked ahead</div>
+    <div class="kpi-value">{% if detail.avg_lead is not none and detail.avg_lead is defined %}{{ '%.0f'|format(detail.avg_lead) }} days{% else %}—{% endif %}</div>
+    <div class="kpi-sub">{% if detail.short_notice_pct is defined %}{{ detail.short_notice_pct }}% within a week of flying{% endif %}</div></div>
+</div>
+
+<div class="panel">
+  <h2>Monthly spend by airline</h2>
+  {% if v.airlines|length > 1 %}
+  <div class="legend">
+    {% for a in v.airlines %}<span class="legend-item"><span class="swatch s{{ loop.index0 }}"></span>{{ a }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  <svg viewBox="0 0 {{ v.monthly.width }} {{ v.monthly.height }}" class="chart" role="img"
+       aria-label="Monthly flight spend by airline">
+    {% for t in v.monthly.ticks %}
+    <line x1="{{ v.monthly.pad_l }}" x2="{{ v.monthly.width - v.monthly.pad_r }}"
+          y1="{{ t.y }}" y2="{{ t.y }}" class="grid"/>
+    <text x="{{ v.monthly.pad_l - 6 }}" y="{{ t.y + 3 }}" class="tick" text-anchor="end">{{ t.label }}</text>
+    {% endfor %}
+    <line x1="{{ v.monthly.pad_l }}" x2="{{ v.monthly.width - v.monthly.pad_r }}"
+          y1="{{ v.monthly.baseline_y }}" y2="{{ v.monthly.baseline_y }}" class="baseline"/>
+    {% for col in v.monthly.columns %}
+      {% for seg in col.segments %}
+      <rect x="{{ seg.x }}" y="{{ seg.y }}" width="{{ seg.w }}" height="{{ seg.h }}"
+            class="seg s{{ seg.slot }}" rx="2">
+        <title>{{ col.label }} · {{ seg.group }}: ${{ '{:,.0f}'.format(seg.value) }}</title>
+      </rect>
+      {% endfor %}
+      <text x="{{ col.cx }}" y="{{ v.monthly.baseline_y + 14 }}" class="tick" text-anchor="middle">{{ col.label }}</text>
+    {% endfor %}
+  </svg>
+</div>
+
+{% if v.travelers %}
+<div class="panel">
+  <h2>Who's flying</h2>
+  <p class="subtle">One row per person across every airline, highest spend first.
+    <span class="status-pill status-review">≤ 7d</span> marks travelers who book within a week of flying on average.</p>
+  <div class="tablewrap"><table class="runs travelers-table">
+    <thead><tr>
+      <th>Traveler</th><th class="bar-col">Spend</th>
+      <th class="amt">United</th>{% if v.has_ramp %}<th class="amt">SW / AA</th>{% endif %}
+      <th class="amt">Tickets</th><th class="amt">Avg fare</th><th class="amt">Booked ahead</th>
+    </tr></thead>
+    <tbody>
+      {% for p in v.travelers[:30] %}
+      <tr>
+        <td>{{ p.person }}</td>
+        <td class="bar-col"><div class="bar-wrap"><div class="inline-bar">
+          <span class="seg-bar s0" style="width: {{ (p.united / v.top_spend * 100) if v.top_spend else 0 }}%"></span>{% if p.ramp %}<span class="seg-bar s1" style="width: {{ (p.ramp / v.top_spend * 100) if v.top_spend else 0 }}%"></span>{% endif %}
+          </div><span class="bar-label">${{ '{:,.0f}'.format(p.total) }}</span></div></td>
+        <td class="amt">{% if p.united %}${{ '{:,.0f}'.format(p.united) }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+        {% if v.has_ramp %}<td class="amt">{% if p.ramp %}${{ '{:,.0f}'.format(p.ramp) }}{% else %}<span class="subtle">—</span>{% endif %}</td>{% endif %}
+        <td class="amt">{{ p.tickets }}</td>
+        <td class="amt">{% if p.avg_fare is not none %}${{ '{:,.0f}'.format(p.avg_fare) }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+        <td class="amt">{% if p.avg_lead is not none %}{{ '%.0f'|format(p.avg_lead) }}d
+          {% if p.short_notice %}<span class="status-pill status-review">≤ 7d</span>{% endif %}
+          {% else %}<span class="subtle">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if v.travelers|length > 30 %}<p class="subtle">Top 30 of {{ v.travelers|length }} travelers.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if projects_chart.rows %}
+<div class="panel">
+  <h2>Top projects</h2>
+  <p class="subtle">United only — Ramp card flights aren't coded to projects.</p>
+  <svg viewBox="0 0 {{ projects_chart.width }} {{ projects_chart.height }}" class="chart" role="img"
+       aria-label="Top projects by flight spend">
+    {% for r in projects_chart.rows %}
+    <text x="{{ r.x - 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowlabel" text-anchor="end">{{ r.label|truncate(26, True) }}</text>
+    <rect x="{{ r.x }}" y="{{ r.y + 5 }}" width="{{ r.w }}" height="{{ r.h }}" class="seg s0" rx="2">
+      <title>{{ r.label }}: ${{ '{:,.0f}'.format(r.value) }}</title>
+    </rect>
+    <text x="{{ r.x + r.w + 8 }}" y="{{ r.y + r.h/2 + 8 }}" class="rowvalue">${{ '{:,.0f}'.format(r.value) }}</text>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
+
+{% if detail.fees_total is defined %}
+<p class="subtle">United fees (bags, seats, wifi) ${{ '{:,.0f}'.format(detail.fees_total) }} and refunds
+  ${{ '{:,.0f}'.format(detail.refunds_total) }} are included in spend but left out of fare averages.</p>
+{% endif %}
+{% endif %}
+
+<details class="panel">
+  <summary><h2 style="display:inline">United statements ({{ d.statements|length }})</h2></summary>
+  <table class="runs">
+    <thead><tr><th>Document</th><th>File</th><th class="amt">Total</th><th>Status</th><th>Processed</th><th></th></tr></thead>
+    <tbody>
+      {% for s in d.statements %}
+      <tr>
+        <td>{{ s.document_id }}</td>
+        <td class="subtle">{{ s.filename }}</td>
+        <td class="amt">${{ '{:,.2f}'.format(s.total) }}</td>
+        <td>{% if s.posted %}<span class="status-pill status-auto">Posted</span>
+            {% else %}<span class="status-pill status-review">In progress</span>{% endif %}</td>
+        <td class="subtle">{{ s.created.strftime('%Y-%m-%d %H:%M') if s.created else '' }}</td>
+        <td>{% if s.run_id %}<a href="{{ url_for('review_page', run_id=s.run_id) }}">Open →</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endblock %}

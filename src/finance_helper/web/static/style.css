@@ -463,3 +463,23 @@ tr.grp-child td:first-child { box-shadow: inset 3px 0 0 var(--accent-soft); }
   white-space: nowrap;
 }
 .grp-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Flights page. */
+.action-strip {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 16px; margin: 14px 0 4px;
+}
+.action-strip > span { flex: 1 1 auto; }
+.button.secondary { background: transparent; border: 1px solid var(--border-strong); color: var(--text); }
+.button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+.travelers-table .bar-col { width: 32%; }
+.travelers-table .bar-wrap { display: flex; align-items: center; gap: 10px; }
+.inline-bar { flex: 1 1 auto; display: flex; height: 10px; border-radius: 3px; overflow: hidden;
+  background: var(--bg); }
+.seg-bar { display: block; height: 100%; }
+.seg-bar.s0 { background: #3987e5; } .seg-bar.s1 { background: #d95926; }
+.bar-label { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+details.panel > summary { cursor: pointer; list-style: none; }
+details.panel > summary::before { content: "▸ "; color: var(--muted); }
+details.panel[open] > summary::before { content: "▾ "; }
