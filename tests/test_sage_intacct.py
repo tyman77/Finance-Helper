@@ -248,3 +248,15 @@ def test_dept_required_floor_holds_without_chart_file(monkeypatch, tmp_path):
     ]))
     mirror = payload["lines"][1]
     assert mirror.get("department") == "40"   # mirror keeps the dept
+
+
+def test_dept_required_covers_all_overhead_accounts(monkeypatch, tmp_path):
+    """63100 rejected a JE after 71000/71040 already had — Sage requires a
+    Department on every 6xxxx/7xxxx overhead account, so the committed floor
+    covers the prefixes, not a whack-a-mole list."""
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))   # no chart file
+    from finance_helper import validate
+    for acct in ("63100", "64000", "64301", "73060", "71000"):
+        assert validate.dept_required(acct), acct
+    for acct in ("52200", "52600", "51700", "20000", "91000"):
+        assert not validate.dept_required(acct), acct

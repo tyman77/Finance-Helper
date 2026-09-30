@@ -33,6 +33,13 @@ accounts:
 require_department:
   - "71000"
   - "71040"
+  - "63100"
+# Sage requires a Department on every overhead (6xxxx/7xxxx) account —
+# confirmed by rejections on 71000, 71040, and 63100. COGS (5xxxx) posts
+# deptless mirrors fine, so only these prefixes are floored.
+require_department_prefixes:
+  - "6"
+  - "7"
 
 departments:
   "10": "Sales Team"

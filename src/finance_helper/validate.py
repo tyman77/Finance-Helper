@@ -60,7 +60,11 @@ def dept_required(account) -> bool:
     if (load_chart().get(code) or {}).get("require_department"):
         return True
     from . import config
-    return code in set(config.accounts().get("require_department") or [])
+    cfg = config.accounts()
+    if code in set(cfg.get("require_department") or []):
+        return True
+    return any(code.startswith(p)
+               for p in (cfg.get("require_department_prefixes") or []))
 
 
 def validate_lines(doc: SourceDocument, chart: dict | None = None, projects: dict | None = None) -> list[dict]:
