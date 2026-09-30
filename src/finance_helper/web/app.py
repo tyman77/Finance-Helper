@@ -244,6 +244,38 @@ def _format_note(note: str | None) -> dict:
     return {"summary": parts[0] if parts else "", "details": details}
 
 
+def _ramp_air_metrics() -> dict:
+    """Southwest/American flights booked on Ramp cards: metrics only —
+    never coded, never posted to Sage. Shown on both the flights dashboard
+    and the insights page."""
+    ramp_flights = _load_json_data("ramp_flights.json")
+    if not isinstance(ramp_flights, list):
+        ramp_flights = []
+    months: dict[str, dict[str, float]] = {}
+    people: dict[str, float] = {}
+    totals: dict[str, list] = {}
+    for f in ramp_flights:
+        try:
+            amt = float(f.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        airline = f.get("airline") or "Other"
+        month = (f.get("date") or "")[:7]
+        months.setdefault(month, {}).setdefault(airline, 0.0)
+        months[month][airline] += amt
+        person = f.get("person") or "(unknown)"
+        people[person] = people.get(person, 0.0) + amt
+        t = totals.setdefault(airline, [0, 0.0])
+        t[0] += 1
+        t[1] += amt
+    return {
+        "rows": ramp_flights,
+        "months": sorted(months.items(), reverse=True)[:12],
+        "people": sorted(people.items(), key=lambda kv: -kv[1])[:15],
+        "totals": sorted(totals.items()),
+    }
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -542,6 +574,7 @@ def create_app() -> Flask:
             "domain.html",
             d=data,
             domain=domain,
+            ramp_air=_ramp_air_metrics() if domain == "flights" else None,
             monthly=insights.monthly_chart(data["months"], data["by_month_group"], [data["group"]]),
             projects_chart=insights.hbar_chart([(plabel(c), v) for c, v in data["projects"][:8]]),
             people_chart=insights.hbar_chart([(n, a) for n, a, _ in people]),
@@ -584,37 +617,9 @@ def create_app() -> Flask:
         top_people = data["people"][:10]
         monthly = insights.monthly_chart(data["months"], data["by_month_group"], insights.GROUPS)
 
-        # Southwest/American flights booked on Ramp cards: metrics only —
-        # never coded, never posted to Sage.
-        ramp_flights = _load_json_data("ramp_flights.json")
-        if not isinstance(ramp_flights, list):
-            ramp_flights = []
-        rf_months: dict[str, dict[str, float]] = {}
-        rf_people: dict[str, float] = {}
-        rf_totals: dict[str, list] = {}
-        for f in ramp_flights:
-            try:
-                amt = float(f.get("amount") or 0)
-            except (TypeError, ValueError):
-                continue
-            airline = f.get("airline") or "Other"
-            month = (f.get("date") or "")[:7]
-            rf_months.setdefault(month, {}).setdefault(airline, 0.0)
-            rf_months[month][airline] += amt
-            person = f.get("person") or "(unknown)"
-            rf_people[person] = rf_people.get(person, 0.0) + amt
-            t = rf_totals.setdefault(airline, [0, 0.0])
-            t[0] += 1
-            t[1] += amt
-        ramp_air = {
-            "rows": ramp_flights,
-            "months": sorted(rf_months.items(), reverse=True)[:12],
-            "people": sorted(rf_people.items(), key=lambda kv: -kv[1])[:15],
-            "totals": sorted(rf_totals.items()),
-        }
         return render_template(
             "insights.html",
-            ramp_air=ramp_air,
+            ramp_air=_ramp_air_metrics(),
             d=data,
             groups=insights.GROUPS,
             monthly=monthly,

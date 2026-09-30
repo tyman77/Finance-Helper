@@ -782,3 +782,14 @@ def test_insights_shows_ramp_airline_metrics(client, monkeypatch, tmp_path):
     assert "$342.50" in body and "$512.00" in body
     assert "Chase Donald" in body
     assert "never coded" in body
+
+
+def test_flights_dashboard_shows_ramp_airline_panel(client, monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "ramp_flights.json").write_text(_json.dumps([
+        {"person": "Chase Donald", "date": "2026-09-04", "airline": "Southwest",
+         "amount": "342.50", "memo": ""}]))
+    body = client.get("/d/flights").data.decode()
+    assert "Southwest &amp; American (Ramp cards)" in body
+    assert "$342.50" in body
