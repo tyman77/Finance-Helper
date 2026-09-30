@@ -292,7 +292,8 @@ def _bill_rows(doc) -> tuple[dict, dict]:
         if key not in seen:
             seen[key] = i
             heads[i] = {"key": key, "total": Decimal("0"), "lines": 0,
-                        "bookings": set(), "posted": 0}
+                        "bookings": set(), "posted": 0,
+                        "bank": _si.bill_is_bank_paid(doc, key)}
         h = heads[seen[key]]
         h["total"] += li.amount
         h["lines"] += 1
@@ -1229,6 +1230,8 @@ def create_app() -> Flask:
             chosen = {id(li) for li in selected}
             partial = []
             for bill in dict.fromkeys(_si.bill_key(li, doc) for li in selected):
+                if not _si.bill_is_bank_paid(doc, bill):
+                    continue            # card-paid bill: reclass entry, no draft to tie
                 open_lines = [li for li in doc.line_items
                               if _si.bill_key(li, doc) == bill
                               and not getattr(li, "posted_ref", "")]

@@ -428,6 +428,25 @@ def _bill_date(lines, doc) -> str | None:
     return doc.document_date.isoformat() if doc.document_date else None
 
 
+def _statement_order(stmt: str) -> tuple:
+    """474709-2608-2 -> (2608, 2): statements sort by period then sequence."""
+    import re as _re
+    m = _re.search(r"-(\d{4})-(\d+)$", str(stmt or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else ()
+
+
+def bill_is_bank_paid(doc: SourceDocument, bill: str) -> bool:
+    """Whether this bill drafts from the bank (bank-offset entry) or was paid
+    another way (card) and keeps the reclass entry. Governed by the source's
+    bank_offset_from_statement cutoff; no cutoff means every bill."""
+    from .. import config
+    cutoff = config.source_config(doc.source).get("bank_offset_from_statement")
+    if not cutoff:
+        return True
+    have, since = _statement_order(bill), _statement_order(cutoff)
+    return bool(have and since and have >= since)
+
+
 def build_bank_offset_entries(doc: SourceDocument) -> list[tuple[list, dict]]:
     """One journal entry per bill: expense debits split by booking, GL
     account, department, and project (component lines of one booking that
@@ -448,6 +467,14 @@ def build_bank_offset_entries(doc: SourceDocument) -> list[tuple[list, dict]]:
 
     out = []
     for bill, lines in bills.items():
+        if not bill_is_bank_paid(doc, bill):
+            # Paid by card before the switch to bank drafts: the old reclass
+            # entry (dimensioned lines + same-account mirrors), no bank line.
+            from dataclasses import replace as _dc_replace
+            payload = build_journal_entry(_dc_replace(doc, line_items=lines))
+            payload["reference_no"] = bill
+            out.append((lines, payload))
+            continue
         groups: "OrderedDict[tuple, dict]" = OrderedDict()
         for li in lines:
             booking = str((li.raw or {}).get("Invoice Number") or "").strip()

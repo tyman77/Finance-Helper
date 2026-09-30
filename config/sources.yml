@@ -31,7 +31,11 @@ hotel_engine:
   # one credit to the bank for the bill total, so Cash Proof ties it to the
   # draft. (Other sources keep the reclass-mirror style.)
   je_style: bank_offset
-  offset_account: "10700"
+  offset_account: "10700"      # FLATIRONS BANK checking ••9617
+  # Statements before this one were paid on Visa ••5058, not drafted from
+  # the bank — those keep the reclass (mirror) entry. Statement numbers are
+  # <account>-<YYMM>-<n>; 474709-2608-1 was the first bank-paid (Sep 16).
+  bank_offset_from_statement: "474709-2608-1"
   statement_id_column: "Statement Number"
   date_column: "Invoiced On"
   label_columns: ["Hotel Name", "Hotel City"]

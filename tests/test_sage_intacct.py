@@ -267,6 +267,10 @@ def test_hotel_engine_bank_offset_entry_per_bill(monkeypatch):
     expense debits split by booking / GL / project (a booking's components
     with the same coding collapse), and one credit to 10700 for the bill
     total — equal to the bank draft, so Cash Proof ties it."""
+    from finance_helper import config as _cfg
+    _real = _cfg.source_config
+    monkeypatch.setattr(_cfg, "source_config", lambda src: {
+        k: v for k, v in _real(src).items() if k != "bank_offset_from_statement"})
     from finance_helper import pipeline
     monkeypatch.delenv("HOTEL_ENGINE_BANK_ACCOUNT", raising=False)
     doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
@@ -294,8 +298,33 @@ def test_hotel_engine_bank_offset_entry_per_bill(monkeypatch):
 
 
 def test_bank_account_override(monkeypatch):
+    from finance_helper import config as _cfg
+    _real = _cfg.source_config
+    monkeypatch.setattr(_cfg, "source_config", lambda src: {
+        k: v for k, v in _real(src).items() if k != "bank_offset_from_statement"})
     from finance_helper import pipeline
     monkeypatch.setenv("HOTEL_ENGINE_BANK_ACCOUNT", "10705")
     doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
     (_, p), = sage_intacct.build_bank_offset_entries(doc)
     assert p["lines"][-1]["account_no"] == "10705"
+
+
+def test_card_paid_statements_before_cutoff_keep_reclass_entry(monkeypatch):
+    """Only statements from 474709-2608-1 on drafted from the bank; earlier
+    ones were paid on Visa ••5058 and must not credit 10700."""
+    from finance_helper import config, pipeline
+    real = config.source_config
+    monkeypatch.setattr(config, "source_config", lambda src: dict(
+        real(src), bank_offset_from_statement="474709-2608-1"))
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    for li in doc.line_items[:5]:
+        li.raw = dict(li.raw, **{"Statement Number": "474709-2607-2"})   # Visa-paid
+    for li in doc.line_items[5:]:
+        li.raw = dict(li.raw, **{"Statement Number": "474709-2608-2"})   # bank-paid
+    (old_lines, old), (new_lines, new) = sage_intacct.build_bank_offset_entries(doc)
+    assert all(l["account_no"] != "10700" for l in old["lines"])      # reclass mirrors
+    assert old["reference_no"] == "474709-2607-2"
+    assert new["lines"][-1]["account_no"] == "10700"
+    assert sage_intacct.bill_is_bank_paid(doc, "474709-2608-1")
+    assert not sage_intacct.bill_is_bank_paid(doc, "474709-2607-2")
+    assert sage_intacct.bill_is_bank_paid(doc, "474709-2701-1")

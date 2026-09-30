@@ -838,6 +838,10 @@ def test_flights_page_unifies_airlines(client, monkeypatch, tmp_path):
 
 
 def test_hotel_engine_posts_whole_bills_only(client, monkeypatch):
+    from finance_helper import config as _cfg
+    _real = _cfg.source_config
+    monkeypatch.setattr(_cfg, "source_config", lambda src: {
+        k: v for k, v in _real(src).items() if k != "bank_offset_from_statement"})
     run_id = _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
     from finance_helper import destinations
     from finance_helper.web.app import RUNS

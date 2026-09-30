@@ -94,8 +94,9 @@
       <td colspan="{{ 9 if has_dates else 8 }}">
         <strong>Bill {{ b.key }}</strong>
         <span class="subtle"> · {{ b.bookings }} booking{{ 's' if b.bookings != 1 }} · {{ b.lines }} lines ·
-          <strong>${{ '{:,.2f}'.format(b.total) }}</strong> drafted from the bank — posts as one entry
-          (expenses by project &amp; GL, one bank credit){% if b.posted and b.posted < b.lines %} · {{ b.posted }} lines already posted{% endif %}</span>
+          <strong>${{ '{:,.2f}'.format(b.total) }}</strong>
+          {% if b.bank %}drafted from the bank — posts as one entry (expenses by project &amp; GL, one bank credit)
+          {% else %}paid by card before the bank switch — posts as a reclass entry, no bank line{% endif %}{% if b.posted and b.posted < b.lines %} · {{ b.posted }} lines already posted{% endif %}</span>
       </td>
     </tr>
     {% endif %}
