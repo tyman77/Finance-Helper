@@ -955,6 +955,14 @@ def create_app() -> Flask:
             for li in selected:
                 li.posted_ref = stamp
             ledger.record(run["source"], selected, stamp)
+            # The posted coding is ground truth: diff it against what the
+            # Claude coder proposed so next month's run learns from every
+            # correction. Best-effort — never blocks a successful post.
+            try:
+                from ..travel_coder import record_outcomes
+                record_outcomes(selected)
+            except Exception:
+                pass
         except (RuntimeError, NotImplementedError) as exc:
             detail = str(exc)
             if "period that's been closed" in detail or "period that has been closed" in detail:

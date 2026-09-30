@@ -45,6 +45,8 @@ How to weigh evidence:
 - Projects may carry a "location" — the customer's actual city and state. A city-level match between the flight destination and a project's location is the strongest geographic signal; prefer it over a mere state match from the project name.
 - The crew schedule says what job the traveler was assigned around those dates; hotel stays naming the traveler and Ramp per-diem memos corroborate. When signals conflict, prefer the combination consistent with the route and dates, and say why in one short sentence.
 - Historical projects are weak evidence on their own - use them to break ties, not to override the route.
+- coding_notes, when present, are standing instructions from the finance team. They outrank every other heuristic and any pattern you might infer.
+- past_corrections are lines you previously coded wrong, with what you said and the human's correct answer. Never repeat those mistakes, and generalize from them (a corrected traveler/route pattern likely applies to that traveler's similar trips). confirmed_examples are past codings a human verified - trustworthy precedent.
 
 Confidence:
 - high: route, dates, and at least one assignment signal agree.
@@ -158,8 +160,16 @@ def _evidence(doc, schedule_index, hotel_index, ramp_index, registry,
             entry["historical_projects"] = list(hist)[:8]
         lines.append(entry)
         covered.append(i)
-    return ({"projects": projects, "departments": departments, "lines": lines},
-            covered)
+    payload = {"projects": projects, "departments": departments, "lines": lines}
+    notes = coding_notes()
+    if notes:
+        payload["coding_notes"] = notes
+    confirmed, corrections = _feedback()
+    if corrections:
+        payload["past_corrections"] = corrections
+    if confirmed:
+        payload["confirmed_examples"] = confirmed
+    return payload, covered
 
 
 def _iso(raw) -> date:
@@ -167,6 +177,104 @@ def _iso(raw) -> date:
         return date.fromisoformat(str(raw)[:10])
     except ValueError:
         return date(1970, 1, 1)
+
+
+def _data_dir() -> str:
+    return os.environ.get(
+        "FINANCE_HELPER_DATA",
+        os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+
+
+def coding_notes() -> str:
+    """Standing instructions the finance team typed on the Admin page —
+    tribal knowledge no data file carries ("Cody is based in Sacramento, SMF
+    is his home airport"). Injected into every coding call."""
+    try:
+        with open(os.path.join(_data_dir(), "coding_notes.txt"),
+                  encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def save_coding_notes(text: str) -> None:
+    path = os.path.join(_data_dir(), "coding_notes.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write((text or "").strip() + "\n")
+
+
+def _corrections_path() -> str:
+    return os.path.join(_data_dir(), "coding_corrections.json")
+
+
+def _load_corrections() -> list[dict]:
+    import json
+    try:
+        with open(_corrections_path(), encoding="utf-8") as fh:
+            return json.load(fh) or []
+    except (OSError, ValueError):
+        return []
+
+
+def record_outcomes(lines) -> int:
+    """Called at post time with the lines that actually went into the JE.
+    Diffs the human's final coding against what Claude proposed (stamped on
+    the line at coding time) and appends the outcomes — this is the ground
+    truth the next run learns from. Best-effort; returns records written."""
+    import json
+    from datetime import datetime
+
+    records = []
+    for li in lines:
+        prop = (li.raw or {}).get("_claude")
+        if not prop:
+            continue
+        final = {"project": li.project or "", "gl_account": li.gl_account or "",
+                 "department": li.department or ""}
+        proposed = {k: prop.get(k, "") for k in ("project", "gl_account", "department")}
+        records.append({
+            "when": datetime.now().isoformat(timespec="seconds"),
+            "traveler": li.person or "",
+            "route": prop.get("route", ""),
+            "date": prop.get("date", ""),
+            "description": li.description,
+            "final": final,
+            "proposed": proposed,
+            "confidence": prop.get("confidence", ""),
+            "agreed": final == proposed,
+        })
+    if not records:
+        return 0
+    history = _load_corrections()
+    history.extend(records)
+    history = history[-500:]
+    try:
+        path = _corrections_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(history, fh, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        return 0
+    return len(records)
+
+
+def _feedback() -> tuple[list[dict], list[dict]]:
+    """(confirmed examples, corrections) for the prompt — compact rows the
+    model can pattern-match against, mistakes first."""
+    def compact(e, with_proposed):
+        row = {"traveler": e.get("traveler"), "route": e.get("route"),
+               "date": e.get("date"), "correct": e.get("final")}
+        if with_proposed:
+            row["you_said"] = e.get("proposed")
+        return row
+
+    history = _load_corrections()
+    corrections = [compact(e, True) for e in history if not e.get("agreed")][-30:]
+    confirmed = [compact(e, False) for e in history if e.get("agreed")][-20:]
+    return confirmed, corrections
 
 
 def _project_locations() -> dict[str, str]:
@@ -221,11 +329,22 @@ def apply(doc, schedule_index=None, hotel_index=None, ramp_index=None,
         raise RuntimeError("Claude returned no structured coding.")
 
     covered_set = set(covered)
+    ev_by_line = {l["line"]: l for l in payload["lines"]}
     decided = 0
     for c in parsed.lines:
         if c.line not in covered_set:
             continue
         li = doc.line_items[c.line]
+        # Stamp the raw proposal on the line (raw round-trips through the run
+        # store): at post time record_outcomes() diffs it against the human's
+        # final coding — the corrections the next run learns from.
+        ev = ev_by_line.get(c.line, {})
+        li.raw = dict(li.raw or {})
+        li.raw["_claude"] = {
+            "project": c.project.strip(), "gl_account": c.gl_account.strip(),
+            "department": c.department.strip(), "confidence": c.confidence,
+            "route": ev.get("route", ""), "date": ev.get("depart_date", ""),
+        }
         project = c.project.strip()
         confidence = c.confidence
         reason = c.reason.strip()

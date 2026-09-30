@@ -313,3 +313,15 @@ def test_build_roster_matches_nicknames_and_suffixes():
     roster2, review2 = build({"X": {"person": "Nate Kofahl"}}, directory2)
     assert roster2["Nate Kofahl"] == "nkofahl@summitintegrated.com"  # convention
     assert any("[convention" in line for line in review2)
+
+
+def test_coding_notes_saved_from_admin(client):
+    c, data_dir = client
+    resp = c.post("/admin/coding-notes",
+                  data={"notes": "Yevoli travel is usually overhead 71000."},
+                  follow_redirects=True)
+    assert b"Coding notes saved" in resp.data
+    assert (data_dir / "coding_notes.txt").read_text().strip() == \
+        "Yevoli travel is usually overhead 71000."
+    # Round-trips back into the textarea.
+    assert b"Yevoli travel is usually overhead 71000." in c.get("/admin/").data

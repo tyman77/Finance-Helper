@@ -155,4 +155,18 @@
   <button type="submit">Rebuild chart of accounts</button>
 </form>
 
+<h2>Travel coding notes</h2>
+<p class="subtle">Standing instructions for the Claude travel coder — tribal
+knowledge no data file carries ("Cody is based in Sacramento, SMF is his home
+airport"; "Yevoli's travel is usually overhead 71000"). One rule per line;
+they outrank every other signal, and apply from the next Re-run coding.</p>
+<form method="post" action="{{ url_for('admin.save_coding_notes') }}" class="upload-form">
+  <textarea name="notes" rows="8" style="width:100%; max-width:720px;"
+            placeholder="One plain-English rule per line…">{{ coding_notes }}</textarea>
+  <div><button type="submit">Save coding notes</button></div>
+</form>
+<p class="subtle">Learning loop: {{ corrections_count }} posted line(s) recorded
+so far{% if corrections_count %} ({{ corrections_wrong }} were corrections of
+Claude's coding — those are shown back to it on every future run){% endif %}.</p>
+
 {% endblock %}

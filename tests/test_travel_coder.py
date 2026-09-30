@@ -165,3 +165,57 @@ def test_projects_carry_customer_locations(monkeypatch, tmp_path):
     assert grace["location"] == "Overland Park, KS"
     journey = next(p for p in payload["projects"] if p["code"] == "5232")
     assert "location" not in journey
+
+
+def test_coding_notes_round_trip_and_reach_the_prompt(monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    travel_coder.save_coding_notes("Cody is based in Sacramento — SMF is home.")
+    assert travel_coder.coding_notes() == "Cody is based in Sacramento — SMF is home."
+    payload, _ = travel_coder._evidence(_doc(), {}, [], [], REGISTRY, None, {})
+    assert payload["coding_notes"] == "Cody is based in Sacramento — SMF is home."
+
+
+def test_corrections_recorded_and_fed_back(monkeypatch, tmp_path):
+    """The learning loop: apply() stamps the proposal on the line; at post
+    time record_outcomes() diffs it against the human's final coding; the
+    next run's payload carries the corrections."""
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    doc = _doc()
+    parsed = TravelCoding(lines=[
+        LineCoding(line=0, gl_account="52200", department="60", project="4960",
+                   candidates="", confidence="high", reason="schedule week")])
+    travel_coder.apply(doc, registry=REGISTRY, active_projects=None,
+                       client=FakeClient(parsed))
+    li = doc.line_items[0]
+    assert li.raw["_claude"]["project"] == "4960"
+    assert li.raw["_claude"]["route"] == "DEN MCI DEN"
+
+    # Human corrects the project before posting, then posts.
+    li.project = "5232"
+    assert travel_coder.record_outcomes([li]) == 1
+    # And posts an untouched Claude line too: a confirmed example.
+    li2 = doc.line_items[2]
+    li2.raw = dict(li2.raw)
+    li2.raw["_claude"] = {"project": "5232", "gl_account": "52200",
+                          "department": "60", "confidence": "high",
+                          "route": "ICT DEN", "date": "2026-08-07"}
+    li2.project, li2.gl_account, li2.department = "5232", "52200", "60"
+    assert travel_coder.record_outcomes([li2]) == 1
+
+    confirmed, corrections = travel_coder._feedback()
+    assert corrections == [{"traveler": "Mason Dill", "route": "DEN MCI DEN",
+                            "date": "2026-08-07",
+                            "correct": {"project": "5232", "gl_account": "52200",
+                                        "department": "60"},
+                            "you_said": {"project": "4960", "gl_account": "52200",
+                                         "department": "60"}}]
+    assert confirmed[0]["traveler"] == "Carson Yocum"
+    assert "you_said" not in confirmed[0]
+
+    payload, _ = travel_coder._evidence(_doc(), {}, [], [], REGISTRY, None, {})
+    assert payload["past_corrections"] == corrections
+    assert payload["confirmed_examples"] == confirmed
+
+    # Lines Claude never touched record nothing.
+    plain = _doc().line_items[0]
+    assert travel_coder.record_outcomes([plain]) == 0

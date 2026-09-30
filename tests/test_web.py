@@ -743,3 +743,24 @@ def test_approve_posting_date_overrides_je_date(client, monkeypatch):
     resp = client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
     assert b"valid date" in resp.data          # (apostrophes are HTML-escaped)
     assert not captured
+
+
+def test_posting_records_coder_outcomes(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper import destinations, travel_coder
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    li = doc.line_items[0]
+    li.raw = dict(li.raw)
+    li.raw["_claude"] = {"project": "4960", "gl_account": "52200",
+                         "department": "60", "confidence": "high",
+                         "route": "DEN MCI DEN", "date": "2026-05-10"}
+    li.project, li.gl_account, li.department = "5232", "52200", "60"  # human fixed it
+    monkeypatch.setattr(destinations, "post", lambda d, p: {"record_no": "70001"})
+    data = {f"gl_account_{i}": (l.gl_account or "") for i, l in enumerate(doc.line_items)}
+    data["post_0"] = "on"
+    client.post(f"/review/{run_id}/approve", data=data)
+    _, corrections = travel_coder._feedback()
+    assert corrections and corrections[0]["you_said"]["project"] == "4960"
+    assert corrections[0]["correct"]["project"] == "5232"

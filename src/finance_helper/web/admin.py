@@ -108,12 +108,25 @@ def _save_upload(file) -> str:
 
 @admin_bp.get("/")
 def admin_page():
+    from .. import travel_coder
     rows = [(label, filename, note, _describe(filename)) for label, filename, note in _FILES]
+    corrections = travel_coder._load_corrections()
     return render_template(
         "admin.html",
         rows=rows,
         default_year=date.today().year,
+        coding_notes=travel_coder.coding_notes(),
+        corrections_count=len(corrections),
+        corrections_wrong=sum(1 for c in corrections if not c.get("agreed")),
     )
+
+
+@admin_bp.post("/coding-notes")
+def save_coding_notes():
+    from .. import travel_coder
+    travel_coder.save_coding_notes(request.form.get("notes", ""))
+    flash("Coding notes saved — every future travel-coding run reads them.")
+    return redirect(url_for("admin.admin_page"))
 
 
 @admin_bp.post("/traveler-map")
