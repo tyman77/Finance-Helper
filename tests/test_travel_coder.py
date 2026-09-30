@@ -150,3 +150,18 @@ def test_enrich_runs_claude_pass_and_survives_failure(monkeypatch):
     joined = "; ".join(li.note or "" for li in doc2.line_items)
     assert "Claude coder unavailable" in joined
     assert "rules-engine coding kept" in joined
+
+
+def test_projects_carry_customer_locations(monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "sage_projects.json").write_text(_json.dumps({
+        "P000700": {"name": "Grace Church | North OP | 4960", "status": "active",
+                    "location": "Overland Park, KS"},
+    }))
+    payload, _ = travel_coder._evidence(
+        _doc(), {}, [], [], REGISTRY, None, {})
+    grace = next(p for p in payload["projects"] if p["code"] == "4960")
+    assert grace["location"] == "Overland Park, KS"
+    journey = next(p for p in payload["projects"] if p["code"] == "5232")
+    assert "location" not in journey

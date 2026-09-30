@@ -22,7 +22,7 @@ DEFAULT_MODEL = "claude-opus-5"
 MAX_BYTES = 30 * 1024 * 1024          # API request ceiling is 32 MB
 # Bump when InvoiceFields gains something the comparison depends on; reads
 # stored under an older number are refreshed on the next run.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SYSTEM_PROMPT = """You read vendor invoices for an accounts-payable team. Report only what the document actually states; use null for anything not printed on it. Do not guess.
 
@@ -41,6 +41,7 @@ Field rules:
 - current_charges: on statements that carry a previous balance or amount-due rollup, the CURRENT period's new charges ("Current Bill", "Current Charges"). Empty string when the document has no such split.
 - order_number: the vendor's own order / sales-order reference if printed ("S.O. #", "Order No", "Sales Order"); empty string if absent. Distinct from the customer PO.
 - ship_date: the date goods shipped, if printed (YYYY-MM-DD); some vendors' payment terms run from it. Empty string if absent.
+- project_references: customer job/project numbers printed anywhere on the document — per line item, per rental agreement, or in a reference field (typically 3-5 digit codes labeled Job, Project, PO line reference, or similar; on car-rental and travel bills each rental/booking often carries its own). Comma-separated in document order, duplicates kept once; empty string when none appear.
 - is_invoice: false for statements, purchase orders, quotes, receipts, packing slips, credit memos, or anything that is not a bill for payment.
 - confidence: low when the scan is unreadable, fields are hand-written, or several invoices/amounts compete.
 - notes: anything a reviewer should know — multiple invoices in one file, a past-due balance included in the total, hand-written changes, missing pages."""
@@ -68,6 +69,7 @@ class InvoiceFields(BaseModel):
     subtotal: str = ""
     tax: str = ""
     current_charges: str = ""
+    project_references: str = ""
     confidence: Literal["high", "medium", "low"]
     notes: str
 

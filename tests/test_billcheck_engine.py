@@ -237,3 +237,21 @@ def test_vendor_skip_policy_never_fetches_or_reads(monkeypatch, tmp_path):
                                            payload, fakes.fetch, fakes.extract)
     assert payload2 is None and outcome2 == "unchanged"
     assert fakes.fetches == 0
+
+
+def test_project_references_matched_against_sage(monkeypatch, tmp_path):
+    """A National Car Rental bill lists the job each rental was booked for —
+    the refs Claude reads are resolved against Sage and shown on the bill."""
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "sage_projects.json").write_text(_json.dumps({
+        "P000700": {"name": "Journey Church | Auditorium | 5232", "status": "active"},
+        "P000701": {"name": "Old Job | 4100", "status": "inactive"},
+    }))
+    from finance_helper.billcheck import engine
+    got = engine._match_projects({"project_references": "5232, Job #4100, 9999"})
+    assert got[0]["code"] == "5232" and got[0]["active"] is True
+    assert got[1]["code"] == "4100" and got[1]["active"] is False
+    assert got[2]["code"] == "" and got[2]["ref"] == "9999"
+    assert engine._match_projects({"project_references": ""}) == []
+    assert engine._match_projects(None) == []

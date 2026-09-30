@@ -60,6 +60,19 @@
   {% if ex.confidence %}<p class="subtle">Read confidence: {{ ex.confidence }}{% if ex.model %} · {{ ex.model }}{% endif %}</p>{% endif %}
   {% endif %}
 
+  {% if r.projects %}
+  <h2>Projects on this bill</h2>
+  <ul>
+    {% for p in r.projects %}
+    <li>{{ p.ref }} →
+      {% if p.code %}<strong>{{ p.code }}</strong>{% if p.name %} — {{ p.name }}{% endif %}
+        {% if p.active is false %} <span class="status-pill status-unknown">not active in Sage</span>{% endif %}
+      {% else %}<span class="status-pill status-unknown">no matching Sage project</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
   {% if r.duplicates %}
   <div class="flash"><p><strong>Possible duplicate.</strong> Same vendor and invoice number as:
     {% for d in r.duplicates %}{{ d }}{% if not loop.last %}; {% endif %}{% endfor %}</p></div>

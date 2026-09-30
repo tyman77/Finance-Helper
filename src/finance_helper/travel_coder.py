@@ -42,6 +42,7 @@ House rules:
 
 How to weigh evidence:
 - The flight route is ground truth for where the traveler actually went. Match route cities/states against project locations using real geography, including metro areas that cross state lines (e.g. MCI serves the whole Kansas City metro including Overland Park KS; DCA/IAD serve DC/MD/VA).
+- Projects may carry a "location" — the customer's actual city and state. A city-level match between the flight destination and a project's location is the strongest geographic signal; prefer it over a mere state match from the project name.
 - The crew schedule says what job the traveler was assigned around those dates; hotel stays naming the traveler and Ramp per-diem memos corroborate. When signals conflict, prefer the combination consistent with the route and dates, and say why in one short sentence.
 - Historical projects are weak evidence on their own - use them to break ties, not to override the route.
 
@@ -100,9 +101,15 @@ def _evidence(doc, schedule_index, hotel_index, ramp_index, registry,
               active_projects, history) -> tuple[dict, list[int]]:
     """The JSON payload for the model, and which line indexes it covers."""
     names = project_resolver.project_display_names(registry or {})
-    projects = [{"code": c, "name": n}
-                for c, n in sorted(names.items())
-                if active_projects is None or c in active_projects]
+    locations = _project_locations()
+    projects = []
+    for c, n in sorted(names.items()):
+        if active_projects is not None and c not in active_projects:
+            continue
+        entry = {"code": c, "name": n}
+        if locations.get(c):
+            entry["location"] = locations[c]
+        projects.append(entry)
 
     from . import config
     departments = config.accounts().get("departments", {})
@@ -160,6 +167,22 @@ def _iso(raw) -> date:
         return date.fromisoformat(str(raw)[:10])
     except ValueError:
         return date(1970, 1, 1)
+
+
+def _project_locations() -> dict[str, str]:
+    """{job code: "City, ST"} — the customer's address pulled with the Sage
+    projects fetch. City-level ground truth for matching flight destinations,
+    far sharper than the state embedded in a project name."""
+    import re
+    from .validate import load_projects
+    out: dict[str, str] = {}
+    for info in load_projects().values():
+        loc = (info.get("location") or "").strip()
+        if not loc:
+            continue
+        for code in re.findall(r"\b\d{3,5}\b", (info.get("name") or "")):
+            out.setdefault(code, loc)
+    return out
 
 
 def _history_from_note(note) -> list[str]:

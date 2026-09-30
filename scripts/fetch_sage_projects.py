@@ -142,6 +142,36 @@ def build(records: list[dict]) -> dict:
             "status": _get(rec, _STATUS_FIELD_CANDIDATES),
             "raw": rec,
         }
+        if rec.get("location"):
+            out[str(pid)]["location"] = rec["location"]
+    return out
+
+
+def fetch_customer_locations() -> dict:
+    """{CUSTOMERID: "City, ST"} from Sage — the customer's mailing address,
+    used to pin each project to a real city so flight destinations can be
+    matched at city level, not just the state in the project name."""
+    import xml.etree.ElementTree as ET
+
+    from finance_helper.recon.sage_xml import _el, _post, _request_xml
+
+    def q(fn):
+        rbq = _el(fn, "readByQuery")
+        _el(rbq, "object", "CUSTOMER")
+        _el(rbq, "fields", "CUSTOMERID,DISPLAYCONTACT.MAILADDRESS.CITY,"
+                           "DISPLAYCONTACT.MAILADDRESS.STATE")
+        _el(rbq, "query", "")
+        _el(rbq, "pagesize", 1000)
+
+    out: dict[str, str] = {}
+    root = _post(_request_xml(q))
+    data = root.find(".//result/data")
+    for row in (data if data is not None else []):
+        cid = (row.findtext("CUSTOMERID") or "").strip()
+        city = (row.findtext(".//CITY") or "").strip()
+        state = (row.findtext(".//STATE") or "").strip()
+        if cid and (city or state):
+            out[cid] = ", ".join(p for p in (city, state) if p)
     return out
 
 
@@ -153,12 +183,23 @@ def fetch_projects_xml() -> list[dict]:
     def q(fn):
         rbq = _el(fn, "readByQuery")
         _el(rbq, "object", "PROJECT")
-        _el(rbq, "fields", "PROJECTID,NAME,STATUS")
+        _el(rbq, "fields", "PROJECTID,NAME,STATUS,CUSTOMERID")
         _el(rbq, "query", "")
         _el(rbq, "pagesize", 1000)
 
-    return [{"projectId": r.get("PROJECTID"), "name": r.get("NAME"),
-             "status": r.get("STATUS")} for r in _read_all(q)]
+    try:
+        locations = fetch_customer_locations()
+    except Exception:
+        locations = {}          # addresses are an enrichment, never a blocker
+    out = []
+    for r in _read_all(q):
+        rec = {"projectId": r.get("PROJECTID"), "name": r.get("NAME"),
+               "status": r.get("STATUS")}
+        loc = locations.get((r.get("CUSTOMERID") or "").strip())
+        if loc:
+            rec["location"] = loc
+        out.append(rec)
+    return out
 
 
 def main(argv):

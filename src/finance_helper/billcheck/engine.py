@@ -19,6 +19,36 @@ from .extract import SCHEMA_VERSION
 SKIP_STATUSES = ("match", "mismatch", "review", "unreadable")
 
 
+def _match_projects(extracted: dict | None) -> list[dict]:
+    """Resolve the job numbers Claude read off the document against Sage —
+    e.g. each rental on a National Car Rental bill carries the job it was
+    booked for. Never raises: an unmatched ref is shown, not dropped."""
+    refs = [r.strip() for r in
+            ((extracted or {}).get("project_references") or "").split(",") if r.strip()]
+    if not refs:
+        return []
+    try:
+        from ..project_resolver import load_active_projects, project_display_names
+        names = project_display_names({})
+        active = load_active_projects()
+    except Exception:
+        names, active = {}, None
+    out = []
+    for ref in refs:
+        code = ref if ref in names else ""
+        if not code:                        # "Job #5232" style — digits only
+            digits = "".join(ch for ch in ref if ch.isdigit())
+            if digits in names:
+                code = digits
+        out.append({
+            "ref": ref,
+            "code": code,
+            "name": names.get(code, ""),
+            "active": (None if active is None or not code else code in active),
+        })
+    return out
+
+
 def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                force: bool = False, who: str = "", duplicates: list[str] | None = None,
                now: datetime | None = None) -> tuple[dict | None, str]:
@@ -117,6 +147,7 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
         "fingerprint": fp,
         "extracted": extracted,
         "comparison": comparison,
+        "projects": _match_projects(extracted),
         "status": status,
         "severity": severity,
         "error": error,
