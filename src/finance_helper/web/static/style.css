@@ -435,3 +435,20 @@ ul.issues li { margin: 2px 0; }
 }
 .ac-item b { margin-right: 2px; }
 .ac-item:hover, .ac-item.active { background: var(--accent); color: white; }
+
+/* Keep review rows compact: long descriptions (hotel names) clamp to two
+   lines — the full text stays in the cell's hover tooltip. */
+.review-table td.desc .clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-clamp: 2;
+}
+/* Long project/account hints under inputs clamp too. */
+.review-table .hint {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

@@ -93,7 +93,7 @@
       <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
       <td class="nowrap">{{ li.date or '' }}</td>
       <td class="desc" title="{{ li.description }}">
-        {{ li.description }}
+        <div class="clamp">{{ li.description }}</div>
       </td>
       <td>
         <input type="text" list="travelers" name="person_{{ idx }}" value="{{ li.person or '' }}"
