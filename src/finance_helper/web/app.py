@@ -320,7 +320,7 @@ def _stay_groups(doc, statuses) -> list[dict]:
     return groups
 
 
-AIRLINES = ("United", "Southwest", "American Airlines")
+AIRLINES = ("United", "Southwest", "American Airlines", "Delta")
 
 
 def _flights_view(data: dict, detail: dict, ramp_air: dict) -> dict:
@@ -346,7 +346,7 @@ def _flights_view(data: dict, detail: dict, ramp_air: dict) -> dict:
             amt = float(r.get("amount") or 0)
         except (TypeError, ValueError):
             continue
-        a = r.get("airline") if r.get("airline") in AIRLINES else "American Airlines"
+        a = r.get("airline") if r.get("airline") in AIRLINES else "Delta"
         by_airline[a] += amt
         count[a] += 1
         m = (r.get("date") or "")[:7]

@@ -222,7 +222,7 @@ def refresh_ramp():
               "Flights now cross-reference them on re-run.")
     except Exception as exc:
         flash(f"Could not fetch Ramp reimbursements: {exc}")
-    # Southwest/American card flights ride along for the metrics page —
+    # Southwest/American/Delta card flights ride along for the metrics page —
     # never coded, never posted to Sage; a failure here (e.g. a token
     # without transactions scope) must not spoil the reimbursement fetch.
     try:
@@ -230,7 +230,7 @@ def refresh_ramp():
             date.today() - timedelta(days=days), date.today())
         with open(_data_path("ramp_flights.json"), "w", encoding="utf-8") as fh:
             json.dump(flights, fh, indent=2)
-        flash(f"Captured {len(flights)} Southwest/American card flights for "
+        flash(f"Captured {len(flights)} Southwest/American/Delta card flights for "
               "the metrics page (not coded, no Sage entries).")
     except Exception as exc:
         flash(f"Could not fetch Ramp card flights (metrics only): {str(exc)[:300]}")

@@ -190,6 +190,8 @@ _OTHER_AIRLINES = (
     ("american air", "American Airlines"),
     ("americanair", "American Airlines"),
     ("american airlines", "American Airlines"),
+    ("delta air", "Delta"),
+    ("delta.com", "Delta"),
 )
 
 
@@ -229,7 +231,7 @@ def fetch_transactions(start: date, end: date) -> list[dict]:
 
 
 def build_flights_index(records: list[dict]) -> list[dict]:
-    """Card transactions -> the Southwest/American flight rows the metrics
+    """Card transactions -> the Southwest/American/Delta flight rows the metrics
     page shows. Anything that isn't one of those merchants is dropped."""
     out = []
     for rec in records:

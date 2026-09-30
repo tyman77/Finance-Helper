@@ -182,3 +182,16 @@ def test_flights_index_keeps_only_southwest_and_american():
     assert [(r["airline"], r["person"]) for r in idx] == [
         ("Southwest", "Chase Donald"), ("American Airlines", "Mark Yakey")]
     assert idx[0]["date"] == "2026-09-04"
+
+
+def test_flights_index_captures_delta_but_not_delta_lookalikes():
+    recs = [
+        {"merchant_name": "DELTA AIR LINES", "amount": 410.0,
+         "card_holder": {"first_name": "Mark", "last_name": "Yakey"},
+         "user_transaction_time": "2026-09-12T12:00:00Z"},
+        {"merchant_name": "Delta Dental of Colorado", "amount": 90.0,
+         "card_holder": {"first_name": "X", "last_name": "Y"},
+         "user_transaction_time": "2026-09-12T12:00:00Z"},
+    ]
+    idx = ramp_api.build_flights_index(recs)
+    assert [(r["airline"], r["person"]) for r in idx] == [("Delta", "Mark Yakey")]

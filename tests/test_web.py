@@ -778,7 +778,7 @@ def test_insights_shows_ramp_airline_metrics(client, monkeypatch, tmp_path):
          "amount": "512.00", "memo": ""},
     ]))
     body = client.get("/insights").data.decode()
-    assert "Southwest &amp; American (Ramp cards)" in body
+    assert "Southwest, American &amp; Delta (Ramp cards)" in body
     assert "$342.50" in body and "$512.00" in body
     assert "Chase Donald" in body
     assert "never coded" in body

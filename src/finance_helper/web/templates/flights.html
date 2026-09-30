@@ -4,7 +4,7 @@
 <div class="page-head">
   <h1><span class="swatch big s{{ d.slot }}"></span> Flights</h1>
   <p class="subtle">Every airline in one place — United from the statements you code and post,
-    Southwest &amp; American from Ramp cards (numbers only).</p>
+    Southwest, American &amp; Delta from Ramp cards (numbers only).</p>
 </div>
 
 {# Work first, kept apart from the numbers: what needs a human right now. #}
@@ -20,7 +20,7 @@
 
 {% if not v.total %}
 <div class="panel"><p class="subtle">No flight data yet — upload a United statement, or refresh
-  Ramp on the Admin page for Southwest &amp; American.</p></div>
+  Ramp on the Admin page for Southwest, American &amp; Delta.</p></div>
 {% else %}
 
 <div class="kpi-row">
@@ -74,7 +74,7 @@
   <div class="tablewrap"><table class="runs travelers-table">
     <thead><tr>
       <th>Traveler</th><th class="bar-col">Spend</th>
-      <th class="amt">United</th>{% if v.has_ramp %}<th class="amt">SW / AA</th>{% endif %}
+      <th class="amt">United</th>{% if v.has_ramp %}<th class="amt">Ramp cards</th>{% endif %}
       <th class="amt">Tickets</th><th class="amt">Avg fare</th><th class="amt">Booked ahead</th>
     </tr></thead>
     <tbody>
