@@ -82,7 +82,11 @@ def model_name() -> str:
 
 def _client():
     import anthropic
-    return anthropic.Anthropic()
+    # Explicit timeout: with a large max_tokens and the default timeout the
+    # SDK refuses non-streaming calls outright ("Streaming is required for
+    # operations that may take longer than 10 minutes"). One statement's
+    # coding finishes in a few minutes; give it room and keep retries.
+    return anthropic.Anthropic(timeout=900.0)
 
 
 def _parse_date(raw) -> date | None:
