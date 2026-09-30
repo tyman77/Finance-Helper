@@ -154,6 +154,24 @@ def build(travelers: dict, directory: dict | None = None) -> tuple[dict, list]:
             roster[person] = email
             conf = "convention"
         review.append(f"  [{conf:10}] {person:24} -> {roster[person]}")
+
+    # Everyone else in the Workspace directory: staff with no United history
+    # yet (new hires, first-time flyers) still belong on the roster — the
+    # web app resolves "unknown" passengers against these names. One entry
+    # per email, preferring the plain "First Last" key.
+    have_emails = set(roster.values())
+    by_email: dict[str, str] = {}
+    for lname, email in directory.items():
+        if email in have_emails:
+            continue
+        if email not in by_email or len(lname) < len(by_email[email]):
+            by_email[email] = lname
+    for email, lname in sorted(by_email.items(), key=lambda kv: kv[1]):
+        display = " ".join(w.capitalize() for w in lname.split())
+        if display in roster:
+            continue
+        roster[display] = email
+        review.append(f"  [{'directory':10}] {display:24} -> {email}")
     return roster, review
 
 

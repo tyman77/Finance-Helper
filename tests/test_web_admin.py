@@ -325,3 +325,23 @@ def test_coding_notes_saved_from_admin(client):
         "Yevoli travel is usually overhead 71000."
     # Round-trips back into the textarea.
     assert b"Yevoli travel is usually overhead 71000." in c.get("/admin/").data
+
+
+def test_roster_includes_directory_people_without_travel_history():
+    """Hitch/Boozer/Davis are on staff but have never flown — the roster must
+    carry every directory person, not just historical travelers, so the
+    unknown-traveler fallback has a list that actually contains them."""
+    build = admin_module._build_roster.build
+    travelers = {"A": {"person": "Joshua Judy"}}
+    directory = {
+        "joshua judy": "jjudy@summitintegrated.com",
+        "justin hitch": "jhitch@summitintegrated.com",
+        "justin tyler hitch": "jhitch@summitintegrated.com",   # same person
+        "benjamin boozer": "bboozer@summitintegrated.com",
+    }
+    roster, review = build(travelers, directory)
+    assert roster["Joshua Judy"] == "jjudy@summitintegrated.com"
+    assert roster["Justin Hitch"] == "jhitch@summitintegrated.com"
+    assert "Justin Tyler Hitch" not in roster        # deduped by email
+    assert roster["Benjamin Boozer"] == "bboozer@summitintegrated.com"
+    assert any("[directory" in line for line in review)
