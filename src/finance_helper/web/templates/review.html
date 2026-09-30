@@ -58,8 +58,8 @@
   <colgroup>
     <col style="width: 3%">   {# flag checkbox #}
     <col style="width: 8%">   {# status pill #}
-    <col style="width: 6%">   {# date #}
-    <col style="width: 12%">  {# description #}
+    {% if has_dates %}<col style="width: 6%">{% endif %}   {# date #}
+    <col style="width: {{ 12 if has_dates else 18 }}%">  {# description #}
     <col style="width: 9%">   {# traveler (editable) #}
     <col style="width: 6%">   {# amount #}
     <col style="width: 10%">  {# GL account + title #}
@@ -71,7 +71,7 @@
     <tr>
       <th title="Include in the posted journal entry">Post</th>
       <th>Status</th>
-      <th>Date</th>
+      {% if has_dates %}<th>Date</th>{% endif %}
       <th>Description</th>
       <th>Traveler</th>
       <th class="amt">Amount</th>
@@ -85,13 +85,42 @@
     {% for li in doc.line_items %}
     {% set idx = loop.index0 %}
     {% set status = statuses[idx] %}
-    <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}" data-status="{{ status }}">
+    {% if idx in group_heads %}{% set g = group_heads[idx] %}
+    <tr class="grp-head" data-group="{{ g.id }}" data-statuses="{{ g.statuses|join(' ') }}">
+      <td class="chk">
+        {% if g.posted %}<span title="whole stay posted">✔</span>
+        {% else %}<input type="checkbox" class="grp-check" data-group="{{ g.id }}" title="include every line of this stay">{% endif %}
+      </td>
+      <td>
+        <button type="button" class="grp-toggle" data-group="{{ g.id }}" aria-expanded="false">▸ {{ g.count }} lines</button>
+      </td>
+      {% if has_dates %}<td class="nowrap subtle">{{ g.dates }}</td>{% endif %}
+      <td class="desc" title="{{ g.label }}"><div class="clamp"><strong>{{ g.label }}</strong></div>
+        {% if g.dates and not has_dates %}<div class="hint">{{ g.dates }}</div>{% endif %}</td>
+      <td class="subtle">{{ g.person or '' }}</td>
+      <td class="amt"><strong>{{ g.total }}</strong></td>
+      <td><input type="text" list="gl-accounts" class="grp-apply" data-field="gl_account"
+                 data-group="{{ g.id }}" value="{{ g.gl_account }}" size="7"
+                 placeholder="{{ 'mixed' if not g.gl_account else '' }}" title="sets every line of this stay"></td>
+      <td><select class="grp-apply" data-field="department" data-group="{{ g.id }}" title="sets every line of this stay">
+            <option value="">{{ '—' if g.department or g.count == 0 else 'mixed' }}</option>
+            {% for code, name in department_options %}
+            <option value="{{ code }}" {{ 'selected' if code == g.department else '' }}>{{ code }} — {{ name }}</option>
+            {% endfor %}</select></td>
+      <td><input type="text" class="project-input grp-apply" data-field="project" data-group="{{ g.id }}"
+                 value="{{ g.project }}" size="6" autocomplete="off"
+                 placeholder="{{ 'mixed' if not g.project else '' }}" title="sets every line of this stay"></td>
+      <td class="note subtle">One stay — coding here applies to all {{ g.count }} lines.</td>
+    </tr>
+    {% endif %}
+    <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}{% if idx in group_of %} grp-child collapsed{% endif %}"
+        data-status="{{ status }}"{% if idx in group_of %} data-group="{{ group_of[idx] }}"{% endif %}>
       <td class="chk">
         {% if li.posted_ref %}<span title="{{ li.posted_ref }}">✔</span>
         {% else %}<input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry">{% endif %}
       </td>
       <td><span class="status-pill status-{{ status }}">{{ status_labels[status] }}</span></td>
-      <td class="nowrap">{{ li.date or '' }}</td>
+      {% if has_dates %}<td class="nowrap">{{ li.date or '' }}</td>{% endif %}
       <td class="desc" title="{{ li.description }}">
         <div class="clamp">{{ li.description }}</div>
       </td>

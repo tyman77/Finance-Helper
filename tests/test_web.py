@@ -793,3 +793,27 @@ def test_flights_dashboard_shows_ramp_airline_panel(client, monkeypatch, tmp_pat
     body = client.get("/d/flights").data.decode()
     assert "Southwest &amp; American (Ramp cards)" in body
     assert "$342.50" in body
+
+
+def test_hotel_review_groups_lines_by_stay(client):
+    """A Hotel Engine stay splits into room/taxes/fees/credit lines that all
+    take the same coding — the review shows one header row per stay with
+    the components tucked beneath."""
+    run_id = _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    heads = body.count('class="grp-head"')
+    assert heads >= 1
+    # Every line still renders its own submitted fields (posting unchanged).
+    assert body.count('name="gl_account_') == 11
+    assert 'grp-child collapsed' in body
+    assert 'class="grp-check"' in body
+    # Header inputs carry no name — they write into the lines via JS only.
+    import re as _re
+    for tag in _re.findall(r'<input[^>]*grp-apply[^>]*>', body):
+        assert ' name=' not in tag
+
+
+def test_united_review_has_no_stay_groups(client):
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    assert 'class="grp-head"' not in body

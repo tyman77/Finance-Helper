@@ -5,6 +5,11 @@ document.querySelectorAll(".filter-btn").forEach((btn) => {
     btn.classList.add("active");
     const filter = btn.dataset.filter;
     document.querySelectorAll("tbody tr").forEach((tr) => {
+      if (tr.classList.contains("grp-head")) {
+        const sts = (tr.dataset.statuses || "").split(" ");
+        tr.style.display = filter === "all" || sts.includes(filter) ? "" : "none";
+        return;
+      }
       tr.style.display = filter === "all" || tr.dataset.status === filter ? "" : "none";
     });
   });
@@ -132,5 +137,38 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
         if (row) pick(row.querySelector("b").textContent);
       } else if (ev.key === "Escape") { close(); }
     });
+  });
+})();
+
+// Hotel stays: one header per stay. Expand/collapse its component lines;
+// the header checkbox ticks every line; header GL/Dept/Project inputs write
+// straight into every line's own (submitted) fields — one decision per stay.
+(() => {
+  const children = (g) => document.querySelectorAll(`tr.grp-child[data-group="${g}"]`);
+  document.querySelectorAll(".grp-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const open = btn.getAttribute("aria-expanded") !== "true";
+      btn.setAttribute("aria-expanded", String(open));
+      btn.textContent = btn.textContent.replace(/^[▸▾]/, open ? "▾" : "▸");
+      children(btn.dataset.group).forEach((tr) => tr.classList.toggle("collapsed", !open));
+    });
+  });
+  document.querySelectorAll(".grp-check").forEach((box) => {
+    box.addEventListener("change", () => {
+      children(box.dataset.group).forEach((tr) => {
+        const b = tr.querySelector('input[type="checkbox"][name^="post_"]');
+        if (b) b.checked = box.checked;
+      });
+    });
+  });
+  const apply = (el) => {
+    children(el.dataset.group).forEach((tr) => {
+      const target = tr.querySelector(`[name^="${el.dataset.field}_"]`);
+      if (target) target.value = el.value;
+    });
+  };
+  document.querySelectorAll(".grp-apply").forEach((el) => {
+    el.addEventListener("change", () => apply(el));
+    if (el.tagName === "INPUT") el.addEventListener("input", () => apply(el));
   });
 })();

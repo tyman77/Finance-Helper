@@ -276,6 +276,50 @@ def _ramp_air_metrics() -> dict:
     }
 
 
+def _stay_groups(doc, statuses) -> list[dict]:
+    """Hotel statements split one stay into several lines (room charge,
+    taxes and fees, incidentals, booking fee, credits) that always take the
+    same coding. Lines sharing a raw Invoice Number become one group, so the
+    review is one decision per stay instead of per component. Singletons
+    stay plain rows."""
+    from decimal import Decimal
+
+    by_key: dict[str, list[int]] = {}
+    for i, li in enumerate(doc.line_items):
+        key = str((li.raw or {}).get("Invoice Number") or "").strip()
+        if key:
+            by_key.setdefault(key, []).append(i)
+    groups = []
+    for n, (key, idxs) in enumerate(by_key.items()):
+        if len(idxs) < 2:
+            continue
+        lines = [doc.line_items[i] for i in idxs]
+        first = lines[0]
+        label = (first.description or "").split(" — ")[0].strip() or key
+
+        def common(attr):
+            vals = {getattr(li, attr) or "" for li in lines}
+            return vals.pop() if len(vals) == 1 else ""
+
+        raw = first.raw or {}
+        groups.append({
+            "id": f"g{n}",
+            "key": key,
+            "label": label,
+            "indices": idxs,
+            "count": len(idxs),
+            "total": sum((li.amount for li in lines), Decimal("0")),
+            "person": next((li.person for li in lines if li.person), ""),
+            "dates": " – ".join(d for d in (raw.get("Start Date"), raw.get("End Date")) if d),
+            "statuses": sorted({statuses[i] for i in idxs}),
+            "gl_account": common("gl_account"),
+            "department": common("department"),
+            "project": common("project"),
+            "posted": all(getattr(li, "posted_ref", "") for li in lines),
+        })
+    return groups
+
+
 def _load_json_data(name: str) -> dict:
     data_dir = os.environ.get(
         "FINANCE_HELPER_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
@@ -873,8 +917,13 @@ def create_app() -> Flask:
             {v.get("person") for v in tmap.values() if isinstance(v, dict) and v.get("person")}
             | {li.person for li in doc.line_items if li.person})
 
+        groups = _stay_groups(doc, statuses)
         return render_template(
             "review.html",
+            groups=groups,
+            group_of={i: g["id"] for g in groups for i in g["indices"]},
+            group_heads={g["indices"][0]: g for g in groups},
+            has_dates=any(li.date for li in doc.line_items),
             travelers=travelers,
             run_id=run_id,
             run=run,

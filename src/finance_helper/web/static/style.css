@@ -452,3 +452,14 @@ ul.issues li { margin: 2px 0; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Hotel stay groups: a header row per stay, component lines tucked under. */
+tr.grp-child.collapsed { display: none; }
+tr.grp-head td { background: var(--accent-soft); border-top: 1px solid var(--border-strong); }
+tr.grp-child td:first-child { box-shadow: inset 3px 0 0 var(--accent-soft); }
+.grp-toggle {
+  background: none; border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: 999px; padding: 2px 10px; font-size: 0.76rem; cursor: pointer;
+  white-space: nowrap;
+}
+.grp-toggle:hover { border-color: var(--accent); color: var(--accent); }
