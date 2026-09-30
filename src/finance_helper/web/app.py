@@ -901,6 +901,16 @@ def create_app() -> Flask:
             flash("That looked like an outdated review page — reload the "
                   "review, tick the lines to post, and try again.")
             return redirect(url_for("review_page", run_id=run_id))
+        # An entry dated inside a closed Sage period is rejected outright —
+        # the Posting date field re-dates the JE (e.g. to the 1st of the open
+        # month) without touching the statement itself.
+        post_date = (request.form.get("post_date") or "").strip()
+        if post_date:
+            try:
+                datetime.strptime(post_date, "%Y-%m-%d")
+            except ValueError:
+                flash(f"Posting date {post_date!r} isn't a valid date — nothing posted.")
+                return redirect(url_for("review_page", run_id=run_id))
         _apply_line_edits(doc)
         picked = [i for i in range(len(doc.line_items))
                   if request.form.get(f"post_{i}") == "on"]
@@ -932,6 +942,8 @@ def create_app() -> Flask:
             return redirect(url_for("review_page", run_id=run_id))
         post_doc = _dc_replace(doc, line_items=selected)
         payload = destinations.build_payload(post_doc)
+        if post_date:
+            payload["date"] = post_date
         proposal_review.save_proposal(post_doc, payload)
         try:
             result = destinations.post(post_doc, payload)
@@ -944,7 +956,12 @@ def create_app() -> Flask:
                 li.posted_ref = stamp
             ledger.record(run["source"], selected, stamp)
         except (RuntimeError, NotImplementedError) as exc:
-            run["posted"] = {"ok": False, "detail": str(exc)}
+            detail = str(exc)
+            if "period that's been closed" in detail or "period that has been closed" in detail:
+                detail += (" — set the Posting date next to the Approve button "
+                           "to the first day of the open period and post again; "
+                           "the statement itself is unchanged.")
+            run["posted"] = {"ok": False, "detail": detail}
         store.save_run(run_id, run)
         return redirect(url_for("review_page", run_id=run_id))
 

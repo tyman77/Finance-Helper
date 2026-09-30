@@ -160,6 +160,10 @@
         onsubmit="return confirm('Re-run coding from the original file using the latest traveler map / hotel index / project data? This replaces the current coding, including any manual edits on this review. Lines already posted (✔) keep their mark.');">
     <button type="submit">Re-run coding</button>
   </form>
+  <label class="post-date" title="The journal entry's date in Sage. Defaults to the statement date — set it to the first day of the open period when Sage has closed the statement month.">
+    Posting date <input type="date" name="post_date" form="review-form"
+                        value="{{ doc.document_date or '' }}">
+  </label>
   <button type="submit" class="approve" form="review-form"
           formaction="{{ url_for('approve', run_id=run_id) }}"
           onclick="return confirm('Post the CHECKED lines to {{ 'Sage Intacct' if doc.destination == 'sage' else 'Bill.com' }} now? Unchecked lines stay out of the entry.');">

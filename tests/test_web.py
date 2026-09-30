@@ -715,3 +715,31 @@ def test_approve_dept_guard_holds_without_chart_file(client, monkeypatch, tmp_pa
     data["post_0"] = "on"
     resp = client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
     assert b"requires a Department" in resp.data
+
+
+def test_approve_posting_date_overrides_je_date(client, monkeypatch):
+    """A closed Sage period rejects the statement-dated JE — the Posting date
+    field re-dates the entry (e.g. 09/01) without touching the statement."""
+    run_id = _upload(client, "united", "samples/united_sample.csv")
+    from finance_helper import destinations
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    captured = {}
+
+    def fake_post(d, payload):
+        captured["date"] = payload.get("date")
+        return {"record_no": "60001"}
+    monkeypatch.setattr(destinations, "post", fake_post)
+    data = {f"gl_account_{i}": (li.gl_account or "")
+            for i, li in enumerate(doc.line_items)}
+    data["post_0"] = "on"
+    data["post_date"] = "2026-09-01"
+    client.post(f"/review/{run_id}/approve", data=data)
+    assert captured["date"] == "2026-09-01"
+
+    # Garbage date: refused before any posting.
+    captured.clear()
+    data["post_date"] = "not-a-date"
+    resp = client.post(f"/review/{run_id}/approve", data=data, follow_redirects=True)
+    assert b"valid date" in resp.data          # (apostrophes are HTML-escaped)
+    assert not captured
