@@ -276,6 +276,34 @@ def _ramp_air_metrics() -> dict:
     }
 
 
+def _bill_rows(doc) -> tuple[dict, dict]:
+    """For bank-offset sources (bills that draft straight from the bank):
+    ({line idx: bill id}, {first idx of each bill: bill summary}). Each bill
+    posts as one journal entry, so the review marks where bills start."""
+    from decimal import Decimal
+
+    from ..destinations import sage_intacct as _si
+    if doc.destination != "sage" or _si.je_style(doc.source) != "bank_offset":
+        return {}, {}
+    bill_of, heads, seen = {}, {}, {}
+    for i, li in enumerate(doc.line_items):
+        key = _si.bill_key(li, doc)
+        bill_of[i] = key
+        if key not in seen:
+            seen[key] = i
+            heads[i] = {"key": key, "total": Decimal("0"), "lines": 0,
+                        "bookings": set(), "posted": 0}
+        h = heads[seen[key]]
+        h["total"] += li.amount
+        h["lines"] += 1
+        h["bookings"].add(str((li.raw or {}).get("Invoice Number") or i))
+        if getattr(li, "posted_ref", ""):
+            h["posted"] += 1
+    for h in heads.values():
+        h["bookings"] = len(h["bookings"])
+    return bill_of, heads
+
+
 def _stay_groups(doc, statuses) -> list[dict]:
     """Hotel statements split one stay into several lines (room charge,
     taxes and fees, incidentals, booking fee, credits) that always take the
@@ -1084,8 +1112,11 @@ def create_app() -> Flask:
             | {li.person for li in doc.line_items if li.person})
 
         groups = _stay_groups(doc, statuses)
+        bill_of, bill_heads = _bill_rows(doc)
         return render_template(
             "review.html",
+            bill_of=bill_of,
+            bill_heads=bill_heads,
             groups=groups,
             group_of={i: g["id"] for g in groups for i in g["indices"]},
             group_heads={g["indices"][0]: g for g in groups},
@@ -1190,36 +1221,74 @@ def create_app() -> Flask:
                   f"{shown}{more}. Pick a department on those lines, Save "
                   "changes, then Approve & Post again.")
             return redirect(url_for("review_page", run_id=run_id))
+        from ..destinations import sage_intacct as _si
+        if doc.destination == "sage" and _si.je_style(doc.source) == "bank_offset":
+            # Each bill is one bank draft: its entry must carry the whole
+            # bill, or the bank credit won't equal the draft. Refuse partial
+            # bills rather than post an entry that can never tie out.
+            chosen = {id(li) for li in selected}
+            partial = []
+            for bill in dict.fromkeys(_si.bill_key(li, doc) for li in selected):
+                open_lines = [li for li in doc.line_items
+                              if _si.bill_key(li, doc) == bill
+                              and not getattr(li, "posted_ref", "")]
+                missing = [li for li in open_lines if id(li) not in chosen]
+                if missing:
+                    partial.append(f"{bill} ({len(open_lines) - len(missing)} of "
+                                   f"{len(open_lines)} lines)")
+            if partial:
+                store.save_run(run_id, run)
+                flash("Not posted — Hotel Engine bills post whole, so each entry's "
+                      "bank credit equals the draft. Partly selected: "
+                      + "; ".join(partial) + ". Tick every line of those bills "
+                      "(the stay checkboxes do this) and post again.")
+                return redirect(url_for("review_page", run_id=run_id))
         post_doc = _dc_replace(doc, line_items=selected)
-        payload = destinations.build_payload(post_doc)
-        if post_date:
-            payload["date"] = post_date
-        proposal_review.save_proposal(post_doc, payload)
-        try:
-            result = destinations.post(post_doc, payload)
-            run["posted"] = {"ok": True,
-                             "detail": f"{len(selected)} line(s): {result}"}
+        batches = destinations.build_batches(post_doc)
+        proposal_review.save_proposal(post_doc, destinations.build_payload(post_doc))
+        done, failed = [], None
+        for lines, payload in batches:
+            if post_date:
+                payload["date"] = post_date
+            try:
+                result = destinations.post(post_doc, payload)
+            except (RuntimeError, NotImplementedError) as exc:
+                failed = (payload.get("reference_no") or "", str(exc))
+                break
             rec = result.get("record_no") if isinstance(result, dict) else ""
             stamp = (f"JE {rec} · " if rec else "") + \
                 datetime.now().strftime("%Y-%m-%d %H:%M")
-            for li in selected:
+            for li in lines:
                 li.posted_ref = stamp
-            ledger.record(run["source"], selected, stamp)
+            ledger.record(run["source"], lines, stamp)
             # The posted coding is ground truth: diff it against what the
             # Claude coder proposed so next month's run learns from every
             # correction. Best-effort — never blocks a successful post.
             try:
                 from ..travel_coder import record_outcomes
-                record_outcomes(selected)
+                record_outcomes(lines)
             except Exception:
                 pass
-        except (RuntimeError, NotImplementedError) as exc:
-            detail = str(exc)
+            done.append((len(lines), result, payload.get("reference_no") or ""))
+        if failed:
+            detail = failed[1]
             if "period that's been closed" in detail or "period that has been closed" in detail:
                 detail += (" — set the Posting date next to the Approve button "
                            "to the first day of the open period and post again; "
                            "the statement itself is unchanged.")
+            if len(batches) > 1:
+                detail = (f"Bill {failed[0]} failed: {detail}"
+                          + (f" ({len(done)} earlier bill(s) posted fine and are marked ✔.)"
+                             if done else ""))
             run["posted"] = {"ok": False, "detail": detail}
+        elif len(done) == 1:
+            run["posted"] = {"ok": True, "detail": f"{done[0][0]} line(s): {done[0][1]}"}
+        else:
+            recs = ", ".join(
+                f"bill {ref} → JE {r.get('record_no') if isinstance(r, dict) else r}"
+                for _, r, ref in done)
+            run["posted"] = {"ok": True, "detail": (
+                f"{sum(n for n, _, _ in done)} line(s) in {len(done)} entries: {recs}")}
         store.save_run(run_id, run)
         return redirect(url_for("review_page", run_id=run_id))
 

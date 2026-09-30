@@ -260,3 +260,42 @@ def test_dept_required_covers_all_overhead_accounts(monkeypatch, tmp_path):
         assert validate.dept_required(acct), acct
     for acct in ("52200", "52600", "51700", "20000", "91000"):
         assert not validate.dept_required(acct), acct
+
+
+def test_hotel_engine_bank_offset_entry_per_bill(monkeypatch):
+    """Hotel Engine bills draft straight from the bank: one JE per bill,
+    expense debits split by booking / GL / project (a booking's components
+    with the same coding collapse), and one credit to 10700 for the bill
+    total — equal to the bank draft, so Cash Proof ties it."""
+    from finance_helper import pipeline
+    monkeypatch.delenv("HOTEL_ENGINE_BANK_ACCOUNT", raising=False)
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    # Two bills in one upload.
+    for li in doc.line_items[5:]:
+        li.raw = dict(li.raw, **{"Statement Number": "999999-2606-2"})
+    batches = sage_intacct.build_bank_offset_entries(doc)
+    assert [p["reference_no"] for _, p in batches] == ["999999-2606-1", "999999-2606-2"]
+    for lines, p in batches:
+        bank = p["lines"][-1]
+        assert bank["account_no"] == "10700"
+        total = sum(li.amount for li in lines)
+        assert Decimal(bank["credit"]) == total
+        debits = sum(Decimal(l["debit"]) for l in p["lines"])
+        credits = sum(Decimal(l["credit"]) for l in p["lines"])
+        assert debits == credits
+        # No mirrors: every non-bank line is a real expense posting.
+        assert all(l["account_no"] != "10700" for l in p["lines"][:-1])
+    # Components of one booking with the same coding collapse to one line.
+    first_lines, first = batches[0]
+    bookings = {str(li.raw.get("Invoice Number")) for li in first_lines}
+    assert len(first["lines"]) - 1 <= len(first_lines)
+    assert len(first["lines"]) - 1 >= len(bookings)
+    assert first["date"] == "2026-06-15"          # the bill's Invoiced On
+
+
+def test_bank_account_override(monkeypatch):
+    from finance_helper import pipeline
+    monkeypatch.setenv("HOTEL_ENGINE_BANK_ACCOUNT", "10705")
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    (_, p), = sage_intacct.build_bank_offset_entries(doc)
+    assert p["lines"][-1]["account_no"] == "10705"

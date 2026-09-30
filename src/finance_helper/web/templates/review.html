@@ -85,8 +85,22 @@
     {% for li in doc.line_items %}
     {% set idx = loop.index0 %}
     {% set status = statuses[idx] %}
+    {% if idx in bill_heads %}{% set b = bill_heads[idx] %}
+    <tr class="bill-head" data-statuses="all">
+      <td class="chk">
+        {% if b.posted == b.lines %}<span title="bill posted">✔</span>
+        {% else %}<input type="checkbox" class="bill-check" data-bill="{{ b.key }}" title="select this whole bill">{% endif %}
+      </td>
+      <td colspan="{{ 9 if has_dates else 8 }}">
+        <strong>Bill {{ b.key }}</strong>
+        <span class="subtle"> · {{ b.bookings }} booking{{ 's' if b.bookings != 1 }} · {{ b.lines }} lines ·
+          <strong>${{ '{:,.2f}'.format(b.total) }}</strong> drafted from the bank — posts as one entry
+          (expenses by project &amp; GL, one bank credit){% if b.posted and b.posted < b.lines %} · {{ b.posted }} lines already posted{% endif %}</span>
+      </td>
+    </tr>
+    {% endif %}
     {% if idx in group_heads %}{% set g = group_heads[idx] %}
-    <tr class="grp-head" data-group="{{ g.id }}" data-statuses="{{ g.statuses|join(' ') }}">
+    <tr class="grp-head" data-group="{{ g.id }}" data-statuses="{{ g.statuses|join(' ') }}"{% if idx in bill_of %} data-bill="{{ bill_of[idx] }}"{% endif %}>
       <td class="chk">
         {% if g.posted %}<span title="whole stay posted">✔</span>
         {% else %}<input type="checkbox" class="grp-check" data-group="{{ g.id }}" title="include every line of this stay">{% endif %}
@@ -114,7 +128,7 @@
     </tr>
     {% endif %}
     <tr class="{{ 'flagged' if li.needs_review else '' }} {{ 'has-issue' if idx in issues_by_line else '' }}{% if idx in group_of %} grp-child collapsed{% endif %}"
-        data-status="{{ status }}"{% if idx in group_of %} data-group="{{ group_of[idx] }}"{% endif %}>
+        data-status="{{ status }}"{% if idx in group_of %} data-group="{{ group_of[idx] }}"{% endif %}{% if idx in bill_of %} data-bill="{{ bill_of[idx] }}"{% endif %}>
       <td class="chk">
         {% if li.posted_ref %}<span title="{{ li.posted_ref }}">✔</span>
         {% else %}<input type="checkbox" name="post_{{ idx }}" title="include in the posted journal entry">{% endif %}

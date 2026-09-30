@@ -384,3 +384,115 @@ def post_journal_entry(payload: dict) -> dict:
             "mapping; paste this error back to get _to_rest_body() corrected."
         )
     return resp.json()
+
+
+# --- Bank-offset entries (sources whose bills draft straight from the bank) --
+
+def je_style(source: str) -> str:
+    try:
+        from .. import config
+        return config.source_config(source).get("je_style") or "reclass"
+    except Exception:
+        return "reclass"
+
+
+def bill_key(li, doc) -> str:
+    """Which bill (bank draft) a line belongs to: the statement id column
+    from the source config, else the document id."""
+    try:
+        from .. import config
+        col = config.source_config(doc.source).get("statement_id_column") or ""
+    except Exception:
+        col = ""
+    return str((li.raw or {}).get(col) or "").strip() or str(doc.document_id)
+
+
+def _bill_date(lines, doc) -> str | None:
+    from datetime import datetime as _dt
+    try:
+        from .. import config
+        col = config.source_config(doc.source).get("date_column") or ""
+    except Exception:
+        col = ""
+    dates = []
+    for li in lines:
+        raw = str((li.raw or {}).get(col) or "").strip()
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                dates.append(_dt.strptime(raw, fmt).date())
+                break
+            except ValueError:
+                continue
+    if dates:
+        return max(dates).isoformat()
+    return doc.document_date.isoformat() if doc.document_date else None
+
+
+def build_bank_offset_entries(doc: SourceDocument) -> list[tuple[list, dict]]:
+    """One journal entry per bill: expense debits split by booking, GL
+    account, department, and project (component lines of one booking that
+    share a coding collapse into one line), and a single credit to the bank
+    account for the bill total — the amount the bank drafted, so the bank
+    reconciliation ties it one-to-one. Returns [(lines, payload), ...]."""
+    from collections import OrderedDict
+    from decimal import Decimal
+
+    from .. import config
+    offset = str(config.source_config(doc.source).get("offset_account") or "10700")
+    offset = os.environ.get("HOTEL_ENGINE_BANK_ACCOUNT") or offset
+    default_location = os.environ.get("INTACCT_DEFAULT_LOCATION", "")
+
+    bills: "OrderedDict[str, list]" = OrderedDict()
+    for li in doc.line_items:
+        bills.setdefault(bill_key(li, doc), []).append(li)
+
+    out = []
+    for bill, lines in bills.items():
+        groups: "OrderedDict[tuple, dict]" = OrderedDict()
+        for li in lines:
+            booking = str((li.raw or {}).get("Invoice Number") or "").strip()
+            dept = (li.department or "").split("--")[0].strip()
+            loc = str(getattr(li, "location", "") or default_location).split("--")[0].strip()
+            key = (booking, li.gl_account or "", dept, li.project or "", loc)
+            g = groups.setdefault(key, {"amount": Decimal("0"), "label": "",
+                                        "person": li.person or ""})
+            g["amount"] += li.amount
+            if not g["label"]:
+                g["label"] = (li.description or "").split(" — ")[0].strip()
+        entry_lines = []
+        total = Decimal("0")
+        for (booking, acct, dept, project, loc), g in groups.items():
+            amt = g["amount"]
+            if amt == 0:
+                continue
+            total += amt
+            memo = " · ".join(p for p in (f"{doc.vendor} {booking}".strip(),
+                                          g["label"], g["person"]) if p)[:200]
+            line = {"account_no": acct,
+                    "debit": str(amt if amt > 0 else 0),
+                    "credit": str(-amt if amt < 0 else 0),
+                    "memo": memo}
+            if dept:
+                line["department"] = dept
+            if project:
+                line["project"] = project
+            if loc:
+                line["location"] = loc
+            entry_lines.append(line)
+        bank = {"account_no": offset,
+                "debit": str(-total if total < 0 else 0),
+                "credit": str(total if total > 0 else 0),
+                "memo": f"{doc.vendor} bill {bill} — bank draft"[:200]}
+        if default_location:
+            bank["location"] = default_location.split("--")[0].strip()
+        entry_lines.append(bank)
+        payload = {
+            "journal": _JOURNAL_SYMBOL,
+            "date": _bill_date(lines, doc),
+            "reference_no": bill,
+            "description": f"{doc.vendor} bill {bill}"[:80],
+            "currency": doc.currency,
+            "lines": entry_lines,
+        }
+        out.append((lines, payload))
+    return out

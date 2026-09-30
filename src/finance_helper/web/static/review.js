@@ -5,6 +5,7 @@ document.querySelectorAll(".filter-btn").forEach((btn) => {
     btn.classList.add("active");
     const filter = btn.dataset.filter;
     document.querySelectorAll("tbody tr").forEach((tr) => {
+      if (tr.classList.contains("bill-head")) { tr.style.display = ""; return; }
       if (tr.classList.contains("grp-head")) {
         const sts = (tr.dataset.statuses || "").split(" ");
         tr.style.display = filter === "all" || sts.includes(filter) ? "" : "none";
@@ -172,3 +173,13 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
     if (el.tagName === "INPUT") el.addEventListener("input", () => apply(el));
   });
 })();
+
+// Bills (bank-drafted sources): one checkbox selects every line of the bill,
+// stay checkboxes included — a bill posts whole, as one entry.
+document.querySelectorAll(".bill-check").forEach((box) => {
+  box.addEventListener("change", () => {
+    document.querySelectorAll(`tr[data-bill="${box.dataset.bill}"]`).forEach((tr) => {
+      tr.querySelectorAll('input[type="checkbox"]').forEach((b) => { b.checked = box.checked; });
+    });
+  });
+});

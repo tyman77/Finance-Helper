@@ -74,10 +74,10 @@ def test_past_projects_offered_as_candidates_when_no_live_match():
 @pytest.mark.parametrize("source", ["united", "hotel_engine"])
 def test_sage_journal_entry_balances(source):
     doc = pipeline.process(source, SAMPLES[source][0])
-    payload = destinations.build_payload(doc)
-    debits = sum(Decimal(l["debit"]) for l in payload["lines"])
-    credits = sum(Decimal(l["credit"]) for l in payload["lines"])
-    assert debits == credits, "journal entry must balance"
+    for _lines, payload in destinations.build_batches(doc):
+        debits = sum(Decimal(l["debit"]) for l in payload["lines"])
+        credits = sum(Decimal(l["credit"]) for l in payload["lines"])
+        assert debits == credits, "journal entry must balance"
 
 
 def test_sage_lines_carry_department_dimension():

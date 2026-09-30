@@ -835,3 +835,40 @@ def test_flights_page_unifies_airlines(client, monkeypatch, tmp_path):
     assert "Chase Donald" in body
     assert "action-strip" in body
     assert "Southwest" in body and "United" in body
+
+
+def test_hotel_engine_posts_whole_bills_only(client, monkeypatch):
+    run_id = _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    from finance_helper import destinations
+    from finance_helper.web.app import RUNS
+    doc = RUNS[run_id]["doc"]
+    posted = []
+    monkeypatch.setattr(destinations, "post",
+                        lambda d, p: posted.append(p) or {"record_no": "80001"})
+    form = {}
+    for i, li in enumerate(doc.line_items):
+        form[f"gl_account_{i}"] = li.gl_account or "52300"
+        form[f"department_{i}"] = li.department or "60"
+        form[f"project_{i}"] = li.project or ""
+    # Half a bill: refused, nothing posted.
+    partial = dict(form, post_0="on")
+    resp = client.post(f"/review/{run_id}/approve", data=partial, follow_redirects=True)
+    assert b"bills post whole" in resp.data
+    assert not posted
+    # The whole bill: one entry, bank credit = bill total.
+    full = dict(form, **{f"post_{i}": "on" for i in range(len(doc.line_items))})
+    client.post(f"/review/{run_id}/approve", data=full)
+    assert len(posted) == 1
+    assert posted[0]["lines"][-1]["account_no"] == "10700"
+    assert all(li.posted_ref.startswith("JE 80001") for li in doc.line_items)
+
+
+def test_hotel_review_shows_bill_rows(client):
+    run_id = _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    body = client.get(f"/review/{run_id}").data.decode()
+    assert body.count('class="bill-head"') == 1
+    assert "Bill 999999-2606-1" in body
+    assert 'class="bill-check"' in body
+    # United reviews keep the old shape.
+    rid = _upload(client, "united", "samples/united_sample.csv")
+    assert 'bill-head' not in client.get(f"/review/{rid}").data.decode()

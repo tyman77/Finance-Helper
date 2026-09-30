@@ -484,3 +484,4 @@ details.panel > summary { cursor: pointer; list-style: none; }
 details.panel > summary::before { content: "▸ "; color: var(--muted); }
 details.panel[open] > summary::before { content: "▾ "; }
 .seg-bar.s2 { background: #199e70; } .seg-bar.s3 { background: #c98500; }
+tr.bill-head td { background: var(--panel); border-top: 2px solid var(--accent); padding-top: 10px; }
