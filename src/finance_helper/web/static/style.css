@@ -434,6 +434,7 @@ ul.issues li { margin: 2px 0; }
   overflow-wrap: break-word;
 }
 .ac-item b { margin-right: 2px; }
+.review-table .gl-title:empty { display: none; }
 .ac-item:hover, .ac-item.active { background: var(--accent); color: white; }
 
 /* Keep review rows compact: long descriptions (hotel names) clamp to two

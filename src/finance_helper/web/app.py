@@ -1143,6 +1143,7 @@ def create_app() -> Flask:
             project_options=_project_options(),
             project_titles=_project_titles(),
             project_search=_project_search(),
+            account_search=[{"c": c, "n": t} for c, t in account_options],
             candidates_by_line=candidates_by_line,
             statuses=statuses,
             status_counts=status_counts,

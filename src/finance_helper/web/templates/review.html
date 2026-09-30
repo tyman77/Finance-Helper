@@ -42,11 +42,7 @@
   {% endfor %}
 </div>
 
-<datalist id="gl-accounts">
-  {% for code, title in account_options %}
-  <option value="{{ code }}">{{ code }} — {{ title }}</option>
-  {% endfor %}
-</datalist>
+<script type="application/json" id="accounts-data">{{ account_search|tojson }}</script>
 <script type="application/json" id="projects-data">{{ project_search|tojson }}</script>
 <datalist id="travelers">
   {% for name in travelers %}<option value="{{ name }}"></option>{% endfor %}
@@ -116,7 +112,7 @@
                  data-group="{{ g.id }}" value="{{ g.person or '' }}" size="10"
                  placeholder="guest…" title="sets the traveler on every line of this stay"></td>
       <td class="amt"><strong>{{ g.total }}</strong></td>
-      <td><input type="text" list="gl-accounts" class="grp-apply" data-field="gl_account"
+      <td><input type="text" class="gl-input grp-apply" data-field="gl_account" autocomplete="off"
                  data-group="{{ g.id }}" value="{{ g.gl_account }}" size="7"
                  placeholder="{{ 'mixed' if not g.gl_account else '' }}" title="sets every line of this stay"></td>
       <td><select class="grp-apply" data-field="department" data-group="{{ g.id }}" title="sets every line of this stay">
@@ -147,10 +143,9 @@
       </td>
       <td class="amt">{{ li.amount }}</td>
       <td>
-        <input type="text" list="gl-accounts" name="gl_account_{{ idx }}" value="{{ li.gl_account or '' }}" size="7">
-        {% if li.gl_account and account_titles.get(li.gl_account) %}
-          <div class="hint">{{ account_titles[li.gl_account] }}</div>
-        {% endif %}
+        <input type="text" class="gl-input" name="gl_account_{{ idx }}" value="{{ li.gl_account or '' }}"
+               size="7" autocomplete="off">
+        <div class="hint gl-title">{{ account_titles.get(li.gl_account, '') if li.gl_account else '' }}</div>
       </td>
       <td>
         <select name="department_{{ idx }}">

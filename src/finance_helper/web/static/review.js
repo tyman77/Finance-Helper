@@ -63,11 +63,12 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
   });
 })();
 
-// Project autocomplete: the native <datalist> popup truncates long project
-// names and can't be styled, so the project fields get a custom dropdown —
-// full names shown, searchable by code OR name ("amarillo" finds 2339).
-(() => {
-  const el = document.getElementById("projects-data");
+// Project + GL autocomplete: the native <datalist> popup is only as wide as
+// the input and truncates names, so these fields get a custom dropdown —
+// full names shown, searchable by code OR name ("amarillo" finds 2339,
+// "hotel" finds 52300).
+function codeAutocomplete(dataId, selector) {
+  const el = document.getElementById(dataId);
   if (!el) return;
   let projects = [];
   try { projects = JSON.parse(el.textContent) || []; } catch (e) { return; }
@@ -90,10 +91,12 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
     close();
   }
 
-  function render(input) {
-    const q = input.value.trim().toLowerCase();
+  function render(input, onFocus) {
+    let q = input.value.trim().toLowerCase();
+    // Focusing a filled field shows the whole list, not just its own code.
+    if (onFocus && projects.some((p) => p.c.toLowerCase() === q)) q = "";
     const hits = projects.filter((p) =>
-      !q || p.c.startsWith(q) || p.n.toLowerCase().includes(q)).slice(0, 12);
+      !q || p.c.startsWith(q) || p.n.toLowerCase().includes(q)).slice(0, q ? 12 : 60);
     if (!hits.length) { close(); return; }
     panel.textContent = "";
     hits.forEach((p, i) => {
@@ -124,9 +127,9 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
     rows[active].scrollIntoView({ block: "nearest" });
   }
 
-  document.querySelectorAll("input.project-input").forEach((inp) => {
+  document.querySelectorAll(selector).forEach((inp) => {
     inp.addEventListener("input", () => render(inp));
-    inp.addEventListener("focus", () => render(inp));
+    inp.addEventListener("focus", () => render(inp, true));
     inp.addEventListener("blur", () => setTimeout(close, 150));
     inp.addEventListener("keydown", (ev) => {
       if (panel.hidden) return;
@@ -138,6 +141,24 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
         if (row) pick(row.querySelector("b").textContent);
       } else if (ev.key === "Escape") { close(); }
     });
+  });
+}
+codeAutocomplete("projects-data", "input.project-input");
+codeAutocomplete("accounts-data", "input.gl-input");
+
+// The account title under each GL field follows the code as it changes.
+(() => {
+  const el = document.getElementById("accounts-data");
+  if (!el) return;
+  let titles = {};
+  try { (JSON.parse(el.textContent) || []).forEach((a) => { titles[a.c] = a.n; }); }
+  catch (e) { return; }
+  document.querySelectorAll('input.gl-input[name^="gl_account_"]').forEach((inp) => {
+    const hint = inp.parentElement.querySelector(".gl-title");
+    if (!hint) return;
+    const sync = () => { hint.textContent = titles[inp.value.trim()] || ""; };
+    inp.addEventListener("input", sync);
+    inp.addEventListener("change", sync);
   });
 })();
 
@@ -165,7 +186,10 @@ if (clrAll) clrAll.addEventListener("click", () => setVisibleChecks(false));
   const apply = (el) => {
     children(el.dataset.group).forEach((tr) => {
       const target = tr.querySelector(`[name^="${el.dataset.field}_"]`);
-      if (target) target.value = el.value;
+      if (target) {
+        target.value = el.value;
+        target.dispatchEvent(new Event("input"));
+      }
     });
   };
   document.querySelectorAll(".grp-apply").forEach((el) => {
