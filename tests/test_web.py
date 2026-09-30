@@ -876,3 +876,19 @@ def test_hotel_review_shows_bill_rows(client):
     # United reviews keep the old shape.
     rid = _upload(client, "united", "samples/united_sample.csv")
     assert 'bill-head' not in client.get(f"/review/{rid}").data.decode()
+
+
+def test_review_fills_hotel_guests_from_engine_on_existing_run(client, monkeypatch):
+    from finance_helper import insights
+    monkeypatch.setattr(insights, "load_guest_index", lambda: {})
+    run_id = _upload(client, "hotel_engine", "samples/hotel_engine_sample.csv")
+    doc = RUNS[run_id]["doc"]
+    inv = doc.line_items[0].raw["Invoice Number"]
+    assert doc.line_items[0].person is None
+    # Engine sync lands after the statement was coded.
+    monkeypatch.setattr(insights, "load_guest_index",
+                        lambda: {inv: {"guests": ["Jake Cody"]}})
+    html = client.get(f"/review/{run_id}").get_data(as_text=True)
+    assert 'value="Jake Cody"' in html
+    assert all(li.person == "Jake Cody" for li in doc.line_items
+               if li.raw["Invoice Number"] == inv)

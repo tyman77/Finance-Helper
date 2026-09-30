@@ -284,6 +284,36 @@ def build_guest_index(rows: list[dict]) -> dict:
     return index
 
 
+def guest_entry(guest_index: dict, invoice: str, hotel: str = "", city: str = "",
+                start: str = "", end: str = "") -> dict:
+    """The guest-index entry for one statement booking: by booking id, else
+    by property/city + stay dates (Engine's booking number can differ from
+    the statement's Invoice Number)."""
+    if not guest_index:
+        return {}
+    entry = guest_index.get(invoice) if invoice else None
+    if not entry:
+        for key in stay_keys(hotel, city, start, end):
+            if guest_index.get(key):
+                entry = guest_index[key]
+                break
+    return entry or {}
+
+
+def booking_guests(raw: dict, guest_index: dict) -> list[str]:
+    """Guest names for the statement row's booking — any names on the row
+    itself, then the Engine guest index."""
+    names, _, _ = statement_occupants(raw)
+    entry = guest_entry(
+        guest_index, str(raw.get("Invoice Number") or "").strip(),
+        (raw.get("Hotel Name") or "").strip(), (raw.get("Hotel City") or "").strip(),
+        (raw.get("Start Date") or "").strip(), (raw.get("End Date") or "").strip())
+    for g in entry.get("guests", []):
+        if g not in names:
+            names.append(g)
+    return names
+
+
 def occupancy_label(guests: int, rooms: int) -> str:
     if rooms > 1:
         return f"{rooms} rooms"
@@ -406,13 +436,8 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
     guest_index = guest_index or {}
     by_traveler: dict[str, dict] = defaultdict(lambda: {"spend": Decimal("0"), "stays": 0})
     for b in ordered:
-        entry = guest_index.get(b["invoice"])
-        if not entry:
-            for key in stay_keys(b["hotel"], b["city"], b["start"], b["end"]):
-                if guest_index.get(key):
-                    entry = guest_index[key]
-                    break
-        entry = entry or {}
+        entry = guest_entry(guest_index, b["invoice"], b["hotel"], b["city"],
+                            b["start"], b["end"])
         for g in entry.get("guests", []):
             if g not in b["guests"]:
                 b["guests"].append(g)

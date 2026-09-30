@@ -38,3 +38,34 @@ def test_registry_fills_code_for_named_booking():
     # Echo Church row already has an explicit 4804; registry shouldn't override it.
     enrich.enrich_hotel_engine(doc, registry=registry)
     assert all(li.project == "4804" for li in _by_project_name(doc, "Echo Church"))
+
+
+def test_oh_office_travel_codes_to_oh_travel():
+    oh = {"hq": "71000", "oh_sales_new": "64302"}
+    assert enrich._he_overhead_account("OH Office Travel", oh) == "71000"
+    assert enrich._he_overhead_account("OH Travel", oh) == "71000"
+
+
+def test_guests_fill_traveler_from_engine_index():
+    doc = sources.load("hotel_engine", "samples/hotel_engine_sample.csv")
+    first = doc.line_items[0].raw
+    inv = first["Invoice Number"]
+    # One booking by id (shared room), another only by property + dates.
+    other = next(li.raw for li in doc.line_items if li.raw["Invoice Number"] != inv)
+    from finance_helper import insights
+    stay = insights.stay_keys(other["Hotel Name"], other["Hotel City"],
+                              other["Start Date"], other["End Date"])[0]
+    index = {inv: {"guests": ["Jake Cody", "Natalie Brady"]},
+             stay: {"guests": ["Mark Yakey"]}}
+    enrich.enrich_hotel_engine(doc, registry={}, guest_index=index)
+    for li in doc.line_items:
+        if li.raw["Invoice Number"] == inv:
+            assert li.person == "Jake Cody & Natalie Brady"
+        elif li.raw["Invoice Number"] == other["Invoice Number"]:
+            assert li.person == "Mark Yakey"
+
+
+def test_no_guest_data_leaves_traveler_blank():
+    doc = sources.load("hotel_engine", "samples/hotel_engine_sample.csv")
+    enrich.enrich_hotel_engine(doc, registry={}, guest_index={})
+    assert all(li.person is None for li in doc.line_items)

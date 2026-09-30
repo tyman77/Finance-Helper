@@ -480,7 +480,8 @@ def _he_overhead_account(project_name: str, oh: dict) -> str | None:
     t = project_name.lower()
     if "hire" in t or "onboard" in t:
         return oh.get("hiring")                                  # OH - Hiring/Recruiting
-    if "hq" in t or any(w in t for w in ("all staff", "syncup", "sync up", "bbq")):
+    if "hq" in t or any(w in t for w in ("all staff", "syncup", "sync up", "bbq",
+                                         "office travel", "oh travel", "oh - travel")):
         return oh.get("hq")                                      # OH - Travel
     if "not project" in t or "tour" in t or "intro" in t:
         return oh.get("oh_sales_not_project")
@@ -491,8 +492,16 @@ def _he_overhead_account(project_name: str, oh: dict) -> str | None:
     return None
 
 
+def fill_hotel_guest(raw: dict, guest_index: dict) -> str | None:
+    """Traveler text for a Hotel Engine line: its booking's guests joined
+    ("A & B" for a shared room), or None when Engine has no names yet."""
+    from .insights import booking_guests
+    return " & ".join(booking_guests(raw, guest_index)) or None
+
+
 def enrich_hotel_engine(
-    doc: SourceDocument, registry: dict | None = None, active_projects=_UNSET
+    doc: SourceDocument, registry: dict | None = None, active_projects=_UNSET,
+    guest_index: dict | None = None,
 ) -> SourceDocument:
     """Code each Hotel Engine booking to ONE trip account + set dimensions.
 
@@ -509,9 +518,15 @@ def enrich_hotel_engine(
     he_cfg = config.accounts().get("hotel_engine", {})
     cogs_hotel = he_cfg.get("cogs_travel_hotel", "COGS-TRAVEL-HOTEL")
     oh_map = he_cfg.get("overhead", {})
+    if guest_index is None:
+        from .insights import load_guest_index
+        guest_index = load_guest_index()
 
     for li in doc.line_items:
         raw = li.raw
+        if not li.person:
+            # The statement carries no guest names; the Engine report does.
+            li.person = fill_hotel_guest(raw, guest_index)
         dn = (raw.get("Department Name") or "").strip().lower()
         for key, dept_id in _HE_DEPARTMENTS.items():
             if key in dn:

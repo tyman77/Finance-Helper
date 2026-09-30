@@ -1088,6 +1088,15 @@ def create_app() -> Flask:
         if not run:
             return redirect(url_for("index"))
         doc = run["doc"]
+        if run.get("source") == "hotel_engine" and any(not li.person for li in doc.line_items):
+            # Runs coded before Engine's guest data landed: fill blanks now
+            # (never overwrites a name the reviewer typed).
+            from .. import enrich as _enrich_he, insights as _ins_he
+            gidx = _ins_he.load_guest_index()
+            if gidx:
+                for li in doc.line_items:
+                    if not li.person:
+                        li.person = _enrich_he.fill_hotel_guest(li.raw or {}, gidx)
         issues_by_line: dict[int, list[str]] = {}
         for issue in validate.validate_lines(doc):
             issues_by_line.setdefault(issue["index"], []).append(issue["message"])

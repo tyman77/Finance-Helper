@@ -112,7 +112,9 @@
       {% if has_dates %}<td class="nowrap subtle">{{ g.dates }}</td>{% endif %}
       <td class="desc" title="{{ g.label }}"><div class="clamp"><strong>{{ g.label }}</strong></div>
         {% if g.dates and not has_dates %}<div class="hint">{{ g.dates }}</div>{% endif %}</td>
-      <td class="subtle">{{ g.person or '' }}</td>
+      <td><input type="text" list="travelers" class="grp-apply" data-field="person"
+                 data-group="{{ g.id }}" value="{{ g.person or '' }}" size="10"
+                 placeholder="guest…" title="sets the traveler on every line of this stay"></td>
       <td class="amt"><strong>{{ g.total }}</strong></td>
       <td><input type="text" list="gl-accounts" class="grp-apply" data-field="gl_account"
                  data-group="{{ g.id }}" value="{{ g.gl_account }}" size="7"
