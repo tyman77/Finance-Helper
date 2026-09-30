@@ -23,3 +23,12 @@ def _isolate_posted_ledger(tmp_path, monkeypatch):
     from finance_helper.web import ledger
     monkeypatch.setattr(ledger, "_path",
                         lambda: str(tmp_path / "posted_ledger.json"))
+
+
+@pytest.fixture(autouse=True)
+def _no_live_claude(monkeypatch):
+    """The travel coder activates on ANTHROPIC_API_KEY — never let a key in
+    the developer's environment make tests call the real API. Tests that
+    exercise the coder set the key (and a fake client) themselves."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("FINANCE_HELPER_LLM_CODER", raising=False)

@@ -216,7 +216,38 @@ def enrich_united(
         # everywhere the flight actually went.
         _destination_pass(li, registry, active_projects)
 
+    # With an API key configured, Claude re-codes the flights from the same
+    # evidence the rules used — it weighs conflicting signals and knows
+    # geography, where the ladder above can only pattern-match. The rules
+    # result stays wherever Claude is unsure or the call fails.
+    _claude_pass(doc, tmap, schedule_index, hotel_index, ramp_index,
+                 registry, active_projects)
+
     return doc
+
+
+def _claude_pass(doc, tmap, schedule_index, hotel_index, ramp_index,
+                 registry, active_projects) -> None:
+    from . import travel_coder
+    if not travel_coder.enabled():
+        return
+    history = {}
+    for entry in (tmap or {}).values():
+        person = (entry.get("person") or "").strip()
+        if person and entry.get("projects"):
+            history.setdefault(person, entry["projects"])
+    try:
+        travel_coder.apply(doc, schedule_index=schedule_index,
+                           hotel_index=hotel_index, ramp_index=ramp_index,
+                           registry=registry, active_projects=active_projects,
+                           history=history)
+    except Exception as exc:
+        for li in doc.line_items:
+            if li.person and not getattr(li, "posted_ref", ""):
+                li.note = (li.note or "") + (
+                    f"; Claude coder unavailable ({type(exc).__name__}: "
+                    f"{str(exc)[:120]}) — rules-engine coding kept")
+                break
 
 
 def _destination_pass(li, registry, active_projects) -> None:
