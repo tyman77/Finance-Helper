@@ -381,8 +381,13 @@ def _fallback_project(li, entry, hotel_index, ramp_index, active_projects) -> No
             li.note += "; ramp-memo projects " + ", ".join(codes) + " — pick one"
             return
         if hits:
-            li.note += (f"; per diem paid to {li.person} on {hits[0]['date']}"
-                        " — trip corroborated, but no project in the memo")
+            gl = hits[0].get("gl_category") or ""
+            if gl.startswith("71040") or gl.lower().startswith("oh"):
+                li.note += (f"; per diem paid to {li.person} on {hits[0]['date']}"
+                            f" coded {gl} — overhead trip, no project (likely 71000)")
+            else:
+                li.note += (f"; per diem paid to {li.person} on {hits[0]['date']}"
+                            " — trip corroborated, but no project on it")
     hotel = (
         project_resolver.hotel_projects_in_window(
             hotel_index, dep, department=li.department, active_projects=active_projects

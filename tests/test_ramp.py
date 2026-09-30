@@ -139,3 +139,25 @@ def test_project_read_from_intacct_accounting_field():
     assert idx[0]["project"] == "3335"
     assert idx[1]["project"] == "P000700"
     assert idx[2]["project"] == "4499"
+
+
+def test_gl_category_and_department_captured():
+    """John Clark's per-diems carry no Project field but ARE coded — 71040
+    OH per diem, Sales dept. That coding is a signal (overhead trip), so the
+    index keeps it."""
+    recs = [{
+        "user": {"first_name": "John", "last_name": "Clark"},
+        "transaction_date": "2026-09-29T00:00:00+00:00",
+        "amount": 97.5,
+        "memo": "Timberlake trip",
+        "tracking_category_selections": [
+            {"category_name": "Category",
+             "option_selection": {"option_name": "71040 - OH - Meals / Per Diem"}},
+            {"category_name": "Department",
+             "option_selection": {"option_name": "10 - Sales Team"}},
+        ],
+    }]
+    idx = ramp_api.build_index(recs)
+    assert idx[0]["project"] is None
+    assert idx[0]["gl_category"] == "71040 - OH - Meals / Per Diem"
+    assert idx[0]["department"] == "10 - Sales Team"

@@ -43,7 +43,7 @@ House rules:
 How to weigh evidence:
 - The flight route is ground truth for where the traveler actually went. Match route cities/states against project locations using real geography, including metro areas that cross state lines (e.g. MCI serves the whole Kansas City metro including Overland Park KS; DCA/IAD serve DC/MD/VA).
 - Projects may carry a "location" — the customer's actual city and state. A city-level match between the flight destination and a project's location is the strongest geographic signal; prefer it over a mere state match from the project name.
-- The crew schedule says what job the traveler was assigned around those dates; hotel stays naming the traveler and Ramp per-diem memos corroborate. When signals conflict, prefer the combination consistent with the route and dates, and say why in one short sentence.
+- The crew schedule says what job the traveler was assigned around those dates; hotel stays naming the traveler and Ramp per-diems corroborate. A per-diem's own accounting coding is strong evidence: one carrying a project pins the trip's job, and one coded to an overhead GL category (71040 OH - Meals / Per Diem) with no project says the trip was overhead (sales/HQ), not project work — code the flight 71000 with the traveler's department. When signals conflict, prefer the combination consistent with the route and dates, and say why in one short sentence.
 - Historical projects are weak evidence on their own - use them to break ties, not to override the route.
 - coding_notes, when present, are standing instructions from the finance team. They outrank every other heuristic and any pattern you might infer.
 - past_corrections are lines you previously coded wrong, with what you said and the human's correct answer. Never repeat those mistakes, and generalize from them (a corrected traveler/route pattern likely applies to that traveler's similar trips). confirmed_examples are past codings a human verified - trustworthy precedent.
@@ -154,7 +154,10 @@ def _evidence(doc, schedule_index, hotel_index, ramp_index, registry,
                     if project_resolver.same_person(r.get("person", ""), li.person or "")
                     and r.get("date") and abs((_iso(r["date"]) - dep).days) <= 21]
             if hits:
-                entry["per_diem_memos"] = [r.get("memo") or r.get("date") for r in hits[:4]]
+                entry["per_diems"] = [
+                    {k: r[k] for k in ("date", "memo", "project",
+                                       "gl_category", "department")
+                     if r.get(k)} for r in hits[:4]]
         hist = (history or {}).get(li.person) or _history_from_note(li.note)
         if hist:
             entry["historical_projects"] = list(hist)[:8]

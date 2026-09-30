@@ -96,13 +96,11 @@ def _get(rec: dict, keys: tuple) -> str:
     return ""
 
 
-def _project_from_selections(rec: dict) -> str | None:
-    """The Intacct Project accounting field on the reimbursement — where the
-    coding actually lives (the memo is free text and usually has no code).
-    Handles both the developer API's accounting_field_selections shape and
-    the normalized tracking_category_selections shape; the job number is the
-    trailing numeric token of the option name ("P000288 - Life.Church, CO |
-    PKR Campus Build | 3335" -> "3335")."""
+def _selection(rec: dict, category: str) -> str:
+    """One accounting-field selection's option name by category ("Project",
+    "Category", "Department") — handles both the developer API's
+    accounting_field_selections shape and the normalized
+    tracking_category_selections shape."""
     sels = (rec.get("accounting_field_selections")
             or rec.get("tracking_category_selections") or [])
     for sel in sels:
@@ -110,16 +108,26 @@ def _project_from_selections(rec: dict) -> str | None:
             continue
         cat = ((sel.get("category_info") or {}).get("name")
                or sel.get("category_name") or "")
-        if str(cat).strip().lower() != "project":
+        if str(cat).strip().lower() != category.lower():
             continue
         opt = sel.get("option_selection") or {}
-        name = str(sel.get("name") or opt.get("option_name")
+        return str(sel.get("name") or opt.get("option_name")
                    or opt.get("name") or "")
-        codes = _PROJECT_CODE.findall(name)
-        if codes:
-            return codes[-1]
-        return name.split(" - ")[0].strip() or None   # bare P-number option
-    return None
+    return ""
+
+
+def _project_from_selections(rec: dict) -> str | None:
+    """The Intacct Project accounting field on the reimbursement — where the
+    coding actually lives (the memo is free text and usually has no code).
+    The job number is the trailing numeric token of the option name
+    ("P000288 - Life.Church, CO | PKR Campus Build | 3335" -> "3335")."""
+    name = _selection(rec, "Project")
+    if not name:
+        return None
+    codes = _PROJECT_CODE.findall(name)
+    if codes:
+        return codes[-1]
+    return name.split(" - ")[0].strip() or None       # bare P-number option
 
 
 def build_index(records: list[dict]) -> list[dict]:
@@ -139,13 +147,22 @@ def build_index(records: list[dict]) -> list[dict]:
         if not project:
             m = _PROJECT_CODE.search(memo)
             project = m.group(1) if m else None
-        out.append({
+        entry = {
             "person": person,
             "date": when.isoformat(),
             "amount": str(rec.get("amount") or ""),
             "memo": memo,
             "project": project,
-        })
+        }
+        # The Ramp GL coding is a signal in its own right: a per-diem coded
+        # 71040 OH (no project) says the trip was overhead, not project work.
+        gl = _selection(rec, "Category")
+        if gl:
+            entry["gl_category"] = gl
+        dept = _selection(rec, "Department")
+        if dept:
+            entry["department"] = dept
+        out.append(entry)
     if records and not out:
         import json
         raise RuntimeError(
