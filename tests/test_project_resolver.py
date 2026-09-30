@@ -713,3 +713,31 @@ def test_enrich_uses_roster_for_historyless_travelers():
     assert "not found in history" not in hitch.note
     # And the schedule can now code them like anyone else.
     assert hitch.project == "5043"
+
+
+def test_destination_overrides_offbase_candidate_chips():
+    """The Hitch case: hotel-week candidates were all TX/OK/IN but the
+    flight went to CID (Iowa) — the chips must become the Iowa projects,
+    not the geographically impossible list."""
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Routing (Origin To To To To )"] = "DEN CID DEN"
+    tmap = {"DOE/JOHN": {"person": "John Doe", "department": "60--Install",
+                         "department_confidence": 1.0, "account_hint": "52200--COGS",
+                         "account_confidence": 0.9,
+                         "projects": ["5056", "4651"], "n": 10}}
+    registry = {"registry": {
+        "5056": {"client": "Fellowship of Montgomery, TX"},
+        "4651": {"client": "Battlecreek Church, OK"},
+        "5610": {"client": "Veritas Church, IA"},
+    }}
+    doc = enrich.enrich_united(doc, tmap, schedule_index={}, calendar_index={},
+                               roster={}, registry=registry, active_projects=None,
+                               hotel_index=[], ramp_index=[], timecard_index={})
+    john = next(li for li in doc.line_items
+                if li.raw.get("Passenger Name") == "DOE/JOHN")
+    assert john.project is None
+    assert "projects there: 5610 — pick one" in john.note
+    from finance_helper.web.app import _line_candidates
+    assert _line_candidates(john.note) == ["5610"]

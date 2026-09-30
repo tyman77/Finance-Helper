@@ -322,6 +322,13 @@ def _destination_narrow(li, registry, active_projects) -> None:
         elif sp:
             li.note += ("; destination matches projects "
                         + ", ".join(sp) + " — pick one")
+        elif len(matches) <= 6:
+            # None of the suggested candidates is where the flight went —
+            # offer the projects that ARE there instead (the last pick-one
+            # list wins in the UI, so these become the chips).
+            li.note += (f"; none of those are in {label} — flight lands in "
+                        f"{label}; projects there: "
+                        + ", ".join(sorted(matches)) + " — pick one")
         return
     if len(matches) == 1:
         code, client = next(iter(matches.items()))
