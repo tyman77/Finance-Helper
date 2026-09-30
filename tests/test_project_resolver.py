@@ -675,3 +675,41 @@ def test_border_metro_airports_count_for_both_states():
                 if li.raw.get("Passenger Name") == "DOE/JOHN")
     assert john.project == "4960"        # kept — KS is where MCI flights go
     assert "double-check" not in (john.note or "")
+
+
+def test_unknown_travelers_fall_back_to_staff_roster():
+    """HITCH/JUSTINTYLER etc. are on staff (roster/schedule) but have no
+    United history — they must resolve to people, not "Unknown traveler"."""
+    fb = enrich._staff_fallback
+    staff = ["Justin Hitch", "Benjamin Boozer", "James Davis", "William Smith"]
+    assert fb("HITCH/JUSTINTYLER DEN CID DEN", staff) == "Justin Hitch"
+    assert fb("BOOZER/BENJAMIN DFW IAH ICT IAH DFW", staff) == "Benjamin Boozer"
+    assert fb("DAVIS/JAMESW OKC DEN OKC", staff) == "James Davis"
+    # Padded fee line: unique surname is enough.
+    assert fb("HITCH     /PREFERRED ZONE DEN CID", staff) == "Justin Hitch"
+    # Unpadded with a non-matching first name: never surname-guess.
+    assert fb("SMITH/ROBERT DEN AUS", staff) is None
+    # Ambiguous surnames stay unknown.
+    two = ["Nathan Kofahl", "Noah Kofahl"]
+    assert fb("KOFAHL/NATHANIEL DEN DFW", two) is None or \
+        fb("KOFAHL/NATHANIEL DEN DFW", two) == "Nathan Kofahl"
+    assert fb("KOFAHL     /INFLIGHT LIQUOR", two) is None
+
+
+def test_enrich_uses_roster_for_historyless_travelers():
+    doc = sources.load("united", "samples/united_sample.csv")
+    for li in doc.line_items:
+        if li.raw.get("Passenger Name") == "DOE/JOHN":
+            li.raw["Passenger Name"] = "HITCH/JUSTINTYLER"
+    doc = enrich.enrich_united(doc, {"OTHER/PERSON": {"person": "Other Person"}},
+                               schedule_index={"Justin Hitch": {"2026-05-10": "5043"}},
+                               calendar_index={}, roster={"Justin Hitch": "jhitch@x.com"},
+                               registry={}, active_projects=None,
+                               hotel_index=[], ramp_index=[], timecard_index={})
+    hitch = next(li for li in doc.line_items
+                 if li.raw.get("Passenger Name") == "HITCH/JUSTINTYLER")
+    assert hitch.person == "Justin Hitch"
+    assert "matched to staff list: Justin Hitch" in hitch.note
+    assert "not found in history" not in hitch.note
+    # And the schedule can now code them like anyone else.
+    assert hitch.project == "5043"

@@ -146,9 +146,19 @@ def enrich_united(
             continue
         entry, exact = _lookup(passenger, tmap, surname_index)
         if not entry:
-            li.needs_review = True
-            li.note = "traveler not found in history — assign department & account"
-            continue
+            # Not in the historical traveler map — but "no United history"
+            # isn't "not on staff": new hires and first-time flyers are in
+            # the roster (Google directory) and on the crew schedule.
+            person = _staff_fallback(passenger,
+                                     list((roster or {}).keys())
+                                     + list((schedule_index or {}).keys()))
+            if person:
+                entry, exact = {"person": person, "projects": []}, True
+                li.note = f"new traveler — matched to staff list: {person}"
+            else:
+                li.needs_review = True
+                li.note = "traveler not found in history — assign department & account"
+                continue
 
         li.person = entry.get("person") or None
         dept = entry.get("department") or None
@@ -158,7 +168,7 @@ def enrich_united(
         li.department = dept.split("--")[0].strip() if dept else None
         if not (dept and entry.get("department_confidence", 0) >= _DEPT_CONF_MIN):
             li.needs_review = True
-            li.note = "low-confidence department"
+            li.note = (li.note + "; " if li.note else "") + "low-confidence department"
 
         # A United Club membership is overhead, never project work — without
         # this rule the hotel/schedule matchers happily pin a project on it
@@ -321,6 +331,40 @@ def _destination_narrow(li, registry, active_projects) -> None:
     elif len(matches) <= 4:
         li.note += (f"; flight lands in {label} — projects there: "
                     + ", ".join(sorted(matches)) + " — pick one")
+
+
+def _staff_fallback(passenger: str, candidates: list[str]) -> str | None:
+    """"HITCH/JUSTINTYLER DEN CID DEN" -> "Justin Hitch" when exactly one
+    staff name fits: same surname, and the ticket's run-together first/middle
+    block starts with the person's first name (or a fee line's bare surname
+    is unique on staff). Ambiguity returns None — better unknown than
+    guessed onto the wrong employee."""
+    if "/" not in passenger:
+        return None
+    sur_raw, _, rest = passenger.partition("/")
+    # United pads fee lines ("HITCH     /PREFERRED ZONE...") — only that
+    # format may match on surname alone; "SMITH/ROBERT" must match a first
+    # name too, or someone else's Robert lands on William Smith.
+    fee_line = sur_raw != sur_raw.rstrip()
+    sur = sur_raw.strip().lower()
+    if not sur:
+        return None
+    first_token = re.split(r"[^A-Za-z]", rest.strip() or "")[0].lower()
+    full_hits, sur_hits = set(), set()
+    for person in candidates:
+        parts = (person or "").strip().split()
+        if len(parts) < 2 or parts[-1].lower() != sur:
+            continue
+        sur_hits.add(person)
+        pfirst = parts[0].lower()
+        if len(first_token) >= 3 and len(pfirst) >= 3 and (
+                first_token.startswith(pfirst) or pfirst.startswith(first_token)):
+            full_hits.add(person)
+    if len(full_hits) == 1:
+        return next(iter(full_hits))
+    if fee_line and len(sur_hits) == 1:
+        return next(iter(sur_hits))
+    return None
 
 
 def _fallback_project(li, entry, hotel_index, ramp_index, active_projects) -> None:
@@ -592,7 +636,9 @@ def _resolve_project(li, entry, passenger, schedule_index, calendar_index, roste
     # Installers are on the crew schedule; try it first, but fall through to
     # their calendar if they're not on the sheet (e.g. not current crew) or the
     # sheet has no code for that stay — don't give up just because dept == 60.
-    if dept.startswith("60") and schedule_index:
+    # Unknown department (a roster-matched new hire) also tries the sheet —
+    # new installers are exactly who the history knows nothing about.
+    if schedule_index and (dept.startswith("60") or not dept):
         result = project_resolver.resolve_schedule(entry.get("person", ""), dep, schedule_index, active_projects)
         if result:
             return result
