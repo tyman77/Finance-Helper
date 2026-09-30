@@ -104,8 +104,24 @@ def pick_saved_report(reports: list[dict], wanted: str | None = None) -> dict:
           "ENGINE_SAVED_REPORT in Railway to its id or name.")
 
 
+def _filters() -> dict:
+    """Engine requires a date window and basis on every run (422
+    invalid_filters otherwise). Stays starting from ENGINE_REPORT_DAYS back
+    (default 180 — covers the statements still being coded) through 60 days
+    ahead, by start of booking so a stay lands on the dates it happened."""
+    from datetime import date, timedelta
+    back = int(os.environ.get("ENGINE_REPORT_DAYS") or 180)
+    today = date.today()
+    return {"filters": {
+        "date_range_start": (today - timedelta(days=back)).isoformat(),
+        "date_range_end": (today + timedelta(days=60)).isoformat(),
+        "date_based_on": os.environ.get("ENGINE_DATE_BASED_ON") or "start_of_booking",
+    }}
+
+
 def generate(saved_id: str) -> str:
-    resp = _request("POST", f"{_PREFIX}/saved_reports/{saved_id}/generate")
+    resp = _request("POST", f"{_PREFIX}/saved_reports/{saved_id}/generate",
+                    json=_filters())
     if resp.status_code not in (200, 201, 202):
         raise _fail("generate report", resp)
     try:

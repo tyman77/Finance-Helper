@@ -92,3 +92,20 @@ def test_generate_reads_several_id_shapes(monkeypatch):
 def test_missing_key_is_a_plain_error():
     with pytest.raises(RuntimeError, match="ENGINE_API_KEY isn't set"):
         engine_api.fetch_report_rows()
+
+
+def test_generate_sends_required_filters(monkeypatch):
+    """Engine 422s without filters.date_range_start/end and date_based_on."""
+    import requests
+    monkeypatch.setenv("ENGINE_API_KEY", "k")
+    sent = {}
+
+    def request(method, url, headers=None, timeout=0, **kw):
+        sent.update(kw)
+        return R(200, {"id": "r1"})
+    monkeypatch.setattr(requests, "request", request)
+    assert engine_api.generate("9") == "r1"
+    f = sent["json"]["filters"]
+    assert f["date_based_on"] == "start_of_booking"
+    assert f["date_range_start"] < f["date_range_end"]
+    assert len(f["date_range_start"]) == 10          # YYYY-MM-DD
