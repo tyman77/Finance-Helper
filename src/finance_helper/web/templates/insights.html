@@ -100,4 +100,41 @@
 </div>
 
 {% endif %}
+
+{% if ramp_air and ramp_air.rows %}
+<div class="panel">
+  <h2>Southwest &amp; American (Ramp cards)</h2>
+  <p class="subtle">Booked on Ramp cards and synced by Ramp — shown for the
+    numbers only; these are never coded here and get no Sage entries.</p>
+  <p>
+    {% for airline, t in ramp_air.totals %}
+      <strong>{{ airline }}</strong>: {{ t[0] }} charge{{ 's' if t[0] != 1 }},
+      ${{ '{:,.2f}'.format(t[1]) }}{% if not loop.last %} &nbsp;·&nbsp; {% endif %}
+    {% endfor %}
+  </p>
+  <div class="tablewrap"><table class="runs">
+    <thead><tr><th>Month</th>
+      {% for airline, _ in ramp_air.totals %}<th class="amt">{{ airline }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+      {% for month, by_air in ramp_air.months %}
+      <tr><td>{{ month }}</td>
+        {% for airline, _ in ramp_air.totals %}
+        <td class="amt">{{ '${:,.2f}'.format(by_air.get(airline, 0)) if by_air.get(airline) else '—' }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <h3>Top travelers</h3>
+  <table class="runs">
+    <thead><tr><th>Traveler</th><th class="amt">Spend</th></tr></thead>
+    <tbody>
+      {% for name, amount in ramp_air.people %}
+      <tr><td>{{ name }}</td><td class="amt">${{ '{:,.2f}'.format(amount) }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

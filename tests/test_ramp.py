@@ -161,3 +161,24 @@ def test_gl_category_and_department_captured():
     assert idx[0]["project"] is None
     assert idx[0]["gl_category"] == "71040 - OH - Meals / Per Diem"
     assert idx[0]["department"] == "10 - Sales Team"
+
+
+def test_flights_index_keeps_only_southwest_and_american():
+    recs = [
+        {"merchant_name": "SOUTHWEST AIRLINES", "amount": 342.5,
+         "card_holder": {"first_name": "Chase", "last_name": "Donald"},
+         "user_transaction_time": "2026-09-04T12:00:00Z", "memo": "PHX trip"},
+        {"merchant_name": "AmericanAir 0012345", "amount": 512.0,
+         "card_holder": {"first_name": "Mark", "last_name": "Yakey"},
+         "user_transaction_time": "2026-09-06T12:00:00Z"},
+        {"merchant_name": "UNITED AIRLINES", "amount": 100.0,
+         "card_holder": {"first_name": "X", "last_name": "Y"},
+         "user_transaction_time": "2026-09-07T12:00:00Z"},
+        {"merchant_name": "Chipotle", "amount": 12.0,
+         "card_holder": {"first_name": "X", "last_name": "Y"},
+         "user_transaction_time": "2026-09-07T12:00:00Z"},
+    ]
+    idx = ramp_api.build_flights_index(recs)
+    assert [(r["airline"], r["person"]) for r in idx] == [
+        ("Southwest", "Chase Donald"), ("American Airlines", "Mark Yakey")]
+    assert idx[0]["date"] == "2026-09-04"

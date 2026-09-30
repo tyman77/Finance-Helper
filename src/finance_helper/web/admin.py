@@ -218,10 +218,22 @@ def refresh_ramp():
         with open(_data_path("ramp_reimbursements.json"), "w", encoding="utf-8") as fh:
             json.dump(idx, fh, indent=2)
         coded = sum(1 for r in idx if r.get("project"))
-        flash(f"Fetched {len(idx)} Ramp reimbursements — {coded} carry a project "
-              "number in the memo. Flights now cross-reference them on re-run.")
+        flash(f"Fetched {len(idx)} Ramp reimbursements — {coded} carry a project. "
+              "Flights now cross-reference them on re-run.")
     except Exception as exc:
         flash(f"Could not fetch Ramp reimbursements: {exc}")
+    # Southwest/American card flights ride along for the metrics page —
+    # never coded, never posted to Sage; a failure here (e.g. a token
+    # without transactions scope) must not spoil the reimbursement fetch.
+    try:
+        flights = ramp_api.fetch_flights_index(
+            date.today() - timedelta(days=days), date.today())
+        with open(_data_path("ramp_flights.json"), "w", encoding="utf-8") as fh:
+            json.dump(flights, fh, indent=2)
+        flash(f"Captured {len(flights)} Southwest/American card flights for "
+              "the metrics page (not coded, no Sage entries).")
+    except Exception as exc:
+        flash(f"Could not fetch Ramp card flights (metrics only): {str(exc)[:300]}")
     return redirect(url_for("admin.admin_page"))
 
 

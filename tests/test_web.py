@@ -766,3 +766,19 @@ def test_posting_records_coder_outcomes(client, monkeypatch, tmp_path):
     _, corrections = travel_coder._feedback()
     assert corrections and corrections[0]["you_said"]["project"] == "4960"
     assert corrections[0]["correct"]["project"] == "5232"
+
+
+def test_insights_shows_ramp_airline_metrics(client, monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path))
+    (tmp_path / "ramp_flights.json").write_text(_json.dumps([
+        {"person": "Chase Donald", "date": "2026-09-04", "airline": "Southwest",
+         "amount": "342.50", "memo": ""},
+        {"person": "Mark Yakey", "date": "2026-08-14", "airline": "American Airlines",
+         "amount": "512.00", "memo": ""},
+    ]))
+    body = client.get("/insights").data.decode()
+    assert "Southwest &amp; American (Ramp cards)" in body
+    assert "$342.50" in body and "$512.00" in body
+    assert "Chase Donald" in body
+    assert "never coded" in body

@@ -176,3 +176,85 @@ def fetch_index(start: date, end: date) -> list[dict]:
         raise RuntimeError("Ramp credentials missing: set RAMP_CLIENT_ID and "
                            "RAMP_CLIENT_SECRET (Ramp -> Settings -> Developer API).")
     return build_index(fetch_reimbursements(start, end))
+
+
+# --- Card transactions: Southwest / American Airlines metrics ---------------
+#
+# These airlines are booked on Ramp cards and Ramp's ERP sync books them —
+# Scout never codes them or posts Sage entries for them. They're captured
+# purely for the travel metrics page, so airline spend is visible in one
+# place alongside the United statements.
+
+_OTHER_AIRLINES = (
+    ("southwest", "Southwest"),
+    ("american air", "American Airlines"),
+    ("americanair", "American Airlines"),
+    ("american airlines", "American Airlines"),
+)
+
+
+def _airline(merchant: str) -> str | None:
+    m = (merchant or "").lower()
+    for needle, label in _OTHER_AIRLINES:
+        if needle in m:
+            return label
+    return None
+
+
+def fetch_transactions(start: date, end: date) -> list[dict]:
+    import requests
+
+    token = _get_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{_API}/transactions"
+    params = {"from_date": f"{start.isoformat()}T00:00:00Z",
+              "to_date": f"{end.isoformat()}T23:59:59Z",
+              "page_size": 100}
+    records: list[dict] = []
+    for _page in range(300):
+        resp = requests.get(url, headers=headers, params=params, timeout=60)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Ramp transactions request failed: HTTP {resp.status_code}\n{resp.text[:800]}")
+        data = resp.json()
+        records.extend(data.get("data") or [])
+        next_url = ((data.get("page") or {}).get("next")
+                    or data.get("next") or (data.get("meta") or {}).get("next_page"))
+        if not next_url:
+            break
+        url, params = next_url, None
+    return records
+
+
+def build_flights_index(records: list[dict]) -> list[dict]:
+    """Card transactions -> the Southwest/American flight rows the metrics
+    page shows. Anything that isn't one of those merchants is dropped."""
+    out = []
+    for rec in records:
+        airline = _airline(str(rec.get("merchant_name") or ""))
+        if not airline:
+            continue
+        holder = rec.get("card_holder") or rec.get("user") or {}
+        person = " ".join(str(holder.get(k) or "")
+                          for k in ("first_name", "last_name")).strip() \
+            or _get(rec, _NAME_KEYS)
+        raw_date = _get(rec, _DATE_KEYS)[:10]
+        try:
+            when = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        out.append({
+            "person": person,
+            "date": when.isoformat(),
+            "airline": airline,
+            "amount": str(rec.get("amount") or ""),
+            "memo": str(rec.get("memo") or ""),
+        })
+    return out
+
+
+def fetch_flights_index(start: date, end: date) -> list[dict]:
+    if not credentials_present():
+        raise RuntimeError("Ramp credentials missing: set RAMP_CLIENT_ID and "
+                           "RAMP_CLIENT_SECRET (Ramp -> Settings -> Developer API).")
+    return build_flights_index(fetch_transactions(start, end))

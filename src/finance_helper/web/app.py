@@ -583,8 +583,38 @@ def create_app() -> Flask:
         top_projects = [(plabel(c), v) for c, v in data["projects"][:10]]
         top_people = data["people"][:10]
         monthly = insights.monthly_chart(data["months"], data["by_month_group"], insights.GROUPS)
+
+        # Southwest/American flights booked on Ramp cards: metrics only —
+        # never coded, never posted to Sage.
+        ramp_flights = _load_json_data("ramp_flights.json")
+        if not isinstance(ramp_flights, list):
+            ramp_flights = []
+        rf_months: dict[str, dict[str, float]] = {}
+        rf_people: dict[str, float] = {}
+        rf_totals: dict[str, list] = {}
+        for f in ramp_flights:
+            try:
+                amt = float(f.get("amount") or 0)
+            except (TypeError, ValueError):
+                continue
+            airline = f.get("airline") or "Other"
+            month = (f.get("date") or "")[:7]
+            rf_months.setdefault(month, {}).setdefault(airline, 0.0)
+            rf_months[month][airline] += amt
+            person = f.get("person") or "(unknown)"
+            rf_people[person] = rf_people.get(person, 0.0) + amt
+            t = rf_totals.setdefault(airline, [0, 0.0])
+            t[0] += 1
+            t[1] += amt
+        ramp_air = {
+            "rows": ramp_flights,
+            "months": sorted(rf_months.items(), reverse=True)[:12],
+            "people": sorted(rf_people.items(), key=lambda kv: -kv[1])[:15],
+            "totals": sorted(rf_totals.items()),
+        }
         return render_template(
             "insights.html",
+            ramp_air=ramp_air,
             d=data,
             groups=insights.GROUPS,
             monthly=monthly,
