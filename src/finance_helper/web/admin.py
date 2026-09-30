@@ -141,7 +141,9 @@ def engine_sync() -> str:
     refresh = current_app.extensions.get("refresh_hotel_index")
     if refresh:
         refresh()
-    named = sum(1 for v in index.values() if v.get("guests"))
+    bookings = {k: v for k, v in index.items() if not k.startswith(("stay:", "city:"))}
+    named = sum(1 for v in bookings.values() if v.get("guests"))
+    index = bookings
     return (f"Engine report “{chosen['name']}”: {len(rows)} rows, {len(index)} bookings "
             f"({named} with guest names; {total} bookings on file). Stays and United "
             "coding now use the real travelers.")

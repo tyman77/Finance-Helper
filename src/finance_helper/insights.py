@@ -143,11 +143,47 @@ def _num(value) -> Decimal:
 # Guest-list export column candidates (Hotel Engine's trips/guests report —
 # separate from the billing statement, which carries no guest names).
 _GUEST_ID_COLS = ("Invoice Number", "Confirmation Number", "Confirmation", "Booking ID",
-                  "Itinerary Number", "Reservation ID", "Trip ID")
+                  "Itinerary Number", "Reservation ID", "Trip ID",
+                  # Engine Reporting API column names.
+                  "Booking number", "Vendor confirmation number")
 _GUEST_NAME_COLS = ("Guest", "Guest Name", "Traveler", "Traveler Name", "Primary Guest",
-                    "Guests", "Guest(s)", "Name")
-_GUEST_COUNT_COLS = ("Guests", "Guest Count", "Number of Guests", "Occupancy", "Adults")
-_ROOM_COUNT_COLS = ("Rooms", "Room Count", "Number of Rooms")
+                    "Guests", "Guest(s)", "Name", "Primary traveler")
+_EXTRA_GUEST_COLS = ("Additional travelers", "Additional Guests")
+_GUEST_COUNT_COLS = ("Guests", "Guest Count", "Number of Guests", "Occupancy", "Adults",
+                     "Number of travelers")
+_ROOM_COUNT_COLS = ("Rooms", "Room Count", "Number of Rooms", "Total rooms")
+_STAY_HOTEL_COLS = ("Property name", "Hotel Name", "Hotel")
+_STAY_CITY_COLS = ("City", "Hotel City")
+_STAY_START_COLS = ("Start date", "Start Date", "Check In", "Actual check-in")
+_STAY_END_COLS = ("End date", "End Date", "Check Out", "Actual checkout")
+_STATUS_COLS = ("Status (cancelled, modified, unmodified)", "Status")
+
+
+def _iso_day(raw: str) -> str:
+    from datetime import datetime as _dt
+    raw = (raw or "").strip()[:10]
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        try:
+            return _dt.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def stay_keys(hotel: str, city: str, start: str, end: str) -> list[str]:
+    """Secondary keys that tie a guest-report row to a statement booking when
+    their booking ids differ (the Engine report's "Booking number" needn't be
+    the statement's "Invoice Number"): the property + dates, and city + dates."""
+    s, e = _iso_day(start), _iso_day(end)
+    if not s:
+        return []
+    norm = lambda t: "".join(ch for ch in (t or "").lower() if ch.isalnum())
+    keys = []
+    if hotel:
+        keys.append(f"stay:{norm(hotel)}|{s}|{e}")
+    if city:
+        keys.append(f"city:{norm(city)}|{s}|{e}")
+    return keys
 
 
 def _first_col(row: dict, candidates: tuple) -> str:
@@ -217,17 +253,29 @@ def build_guest_index(rows: list[dict]) -> dict:
     found when nothing maps, so a mismatched export is a one-line fix here.
     """
     index: dict[str, dict] = {}
+    secondary: dict[str, str | None] = {}
     for row in rows:
         bid = _first_col(row, _GUEST_ID_COLS)
         if not bid:
             continue
+        if _first_col(row, _STATUS_COLS).lower().startswith("cancel"):
+            continue
         entry = index.setdefault(bid, {"guests": [], "rooms": 0, "count": 0})
         name = _first_col(row, _GUEST_NAME_COLS)
-        for part in _split_names(name):
+        extra = _first_col(row, _EXTRA_GUEST_COLS)
+        for part in _split_names(name) + _split_names(extra):
             if part not in entry["guests"]:
                 entry["guests"].append(part)
         entry["rooms"] = max(entry["rooms"], int(_num(_first_col(row, _ROOM_COUNT_COLS) or 0)))
         entry["count"] = max(entry["count"], int(_num(_first_col(row, _GUEST_COUNT_COLS) or 0)))
+        for key in stay_keys(_first_col(row, _STAY_HOTEL_COLS), _first_col(row, _STAY_CITY_COLS),
+                             _first_col(row, _STAY_START_COLS), _first_col(row, _STAY_END_COLS)):
+            # Two different bookings on the same key (two hotels in one
+            # city, same dates) are ambiguous — that key matches nothing.
+            secondary[key] = bid if secondary.get(key, bid) == bid else None
+    for key, bid in secondary.items():
+        if bid is not None and key not in index:
+            index[key] = index[bid]
     if rows and not index:
         raise ValueError(
             "No booking ids recognized in that file. Columns present: "
@@ -358,7 +406,13 @@ def hotels_detail(docs: list, flight_docs: list | None = None,
     guest_index = guest_index or {}
     by_traveler: dict[str, dict] = defaultdict(lambda: {"spend": Decimal("0"), "stays": 0})
     for b in ordered:
-        entry = guest_index.get(b["invoice"], {})
+        entry = guest_index.get(b["invoice"])
+        if not entry:
+            for key in stay_keys(b["hotel"], b["city"], b["start"], b["end"]):
+                if guest_index.get(key):
+                    entry = guest_index[key]
+                    break
+        entry = entry or {}
         for g in entry.get("guests", []):
             if g not in b["guests"]:
                 b["guests"].append(g)

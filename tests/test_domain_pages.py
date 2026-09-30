@@ -253,3 +253,31 @@ def test_flights_page_renders_fare_and_lead_report(client):
     assert b"Booked ahead" in body          # lead-time KPI (per-person in the table)
     # Hotels page keeps its own report, not the flights one.
     assert b"Avg round-trip fare" not in client.get("/d/hotels").data
+
+
+def test_engine_report_columns_attach_guests_by_stay():
+    """Engine's API report uses different column names and its "Booking
+    number" needn't equal the statement's Invoice Number — guests still
+    attach via property + dates (or city + dates), cancelled rows skipped."""
+    rows = [
+        {"Booking number": "HE-88812", "Primary traveler": "Justin Hitch",
+         "Additional travelers": "Mason Dill", "Property name": "Fairfield Inn Example",
+         "City": "Nampa", "Start date": "2026-06-09", "End date": "2026-06-10",
+         "Number of travelers": "2", "Total rooms": "1",
+         "Status (cancelled, modified, unmodified)": "unmodified"},
+        {"Booking number": "HE-88813", "Primary traveler": "Ghost Person",
+         "Property name": "La Quinta Example", "City": "Omaha",
+         "Start date": "2026-06-02", "End date": "2026-06-07",
+         "Status (cancelled, modified, unmodified)": "cancelled"},
+    ]
+    idx = insights.build_guest_index(rows)
+    assert idx["HE-88812"]["guests"] == ["Justin Hitch", "Mason Dill"]
+    assert "HE-88813" not in idx
+    from finance_helper import pipeline
+    doc = pipeline.process("hotel_engine", "samples/hotel_engine_sample.csv")
+    d = insights.hotels_detail([doc], guest_index=idx)
+    fair = next(b for b in d["bookings"] if b["hotel"] == "Fairfield Inn Example")
+    assert fair["guests"] == ["Justin Hitch", "Mason Dill"]
+    assert fair["occupancy"] == "Double"
+    laq = next(b for b in d["bookings"] if b["hotel"] == "La Quinta Example")
+    assert "Ghost Person" not in laq["guests"]
