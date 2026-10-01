@@ -452,7 +452,8 @@ def _payrun_view(state: dict | None = None):
     view = payrun.build(bc_store.list_results(), _master(), _people(),
                         datetime.now().date(), decisions=state.get("decisions"),
                         pay_weekday=cfg["pay_weekday"], horizon_days=cfg["horizon_days"],
-                        approvers=approvers.get("approvers") or {})
+                        approvers=approvers.get("approvers") or {},
+                        finance_list=state.get("finance_list"))
     return view, state
 
 
@@ -461,6 +462,18 @@ def _payrun_gaps(view: dict) -> list[str]:
     fraud check must never look like a clean one."""
     gaps = list(_master().get("gaps") or [])
     rows = view["rows"]
+    lst = view.get("list")
+    if lst and not lst["ties"]:
+        gaps.insert(0, f"Finance's list doesn't add up: the total at the top says "
+                       f"${lst['header_total']:,.2f} but its lines sum to ${lst['total']:,.2f}")
+    if lst and lst["mode"] == "list":
+        gaps.append("Bill.com isn't connected (or hasn't been refreshed), so this run is "
+                    "built from finance's list alone: the invoice, bank-detail and "
+                    "same-person checks didn't run — only the list checks did")
+        return gaps
+    if lst and lst["list_only"]:
+        gaps.append(f"{len(lst['list_only'])} bill(s) on finance's list weren't found in "
+                    "Bill.com's open bills — see the table below the run")
     if not rows:
         return gaps
     if not any(x["bill"].get("created_by") for x in rows):
@@ -492,6 +505,28 @@ def payrun_page():
         ready=_readiness(), running=_running_job(), last_run=bc_store.load_run_summary(),
         has_master=bool(master.get("vendors")),
         horizon=payrun.settings()["horizon_days"])
+
+
+@billcheck_bp.post("/payrun/list")
+def payrun_list_upload():
+    from ..billcheck import finance_list
+    file = request.files.get("list")
+    if not file or not file.filename:
+        flash("Choose finance's bills-to-pay export (.xlsx or .csv) first.")
+        return redirect(url_for("billcheck.payrun_page"))
+    data = file.read()
+    try:
+        parsed = finance_list.parse(data, file.filename)
+    except Exception as exc:
+        flash(f"Couldn't read {file.filename}: {exc}")
+        return redirect(url_for("billcheck.payrun_page"))
+    view, _state = _payrun_view()
+    payrun.save_list(view["pay_date"], parsed, file.filename, _who(), data)
+    s = finance_list.summary(parsed)
+    flash(f"Loaded {s['count']} bills (${s['total']:,.2f}) from {file.filename}."
+          + ("" if s["ties"] else f" The total at the top (${s['header_total']:,.2f}) "
+                                  "doesn't match the lines."))
+    return redirect(url_for("billcheck.payrun_page"))
 
 
 @billcheck_bp.post("/payrun/decide/<bill_id>")

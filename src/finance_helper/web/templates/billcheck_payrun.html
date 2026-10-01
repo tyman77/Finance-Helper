@@ -10,9 +10,12 @@
 <p><a href="{{ url_for('billcheck.landing') }}">← Bill Check</a></p>
 <h1>Pay Run · {{ v.pay_date }}
   {% if signed %}<span class="status-pill status-auto">signed off</span>{% endif %}</h1>
-<p class="subtle" style="max-width:68ch">Every bill going out on this pay date: anything Bill.com has
-scheduled, plus every unpaid bill due on or before {{ v.due_through }}.
-Each one is checked against its invoice (Bill Check) and for payment-fraud signals. Flagged bills need a
+<p class="subtle" style="max-width:68ch">{% if v.list %}The bills on finance's list for this pay date. Each
+one is checked on its own, against its invoice (Bill Check) and for payment-fraud signals, and compared with what
+Bill.com is actually set to pay — a bill Bill.com will pay that isn't on the list is flagged.{% else %}Every bill
+going out on this pay date: anything Bill.com has scheduled, plus every unpaid bill due on or before
+{{ v.due_through }}. Each one is checked against its invoice (Bill Check) and for payment-fraud signals.
+Upload finance's list to compare it with what Bill.com will pay.{% endif %} Flagged bills need a
 <em>release</em> or <em>hold</em> decision before the run can be signed off. Nothing is changed in
 Bill.com — hold a bill there yourself.</p>
 
@@ -41,6 +44,19 @@ Bill.com — hold a bill there yourself.</p>
   {% endif %}
 </form>
 
+<form method="post" action="{{ url_for('billcheck.payrun_list_upload') }}" enctype="multipart/form-data" class="upload-form">
+  {% if v.list %}
+  <p><strong>Finance's list:</strong> {{ v.list.filename }} · {{ v.list.count }} bills · {{ v.list.total | money }}
+    {% if v.list.ties %}<span class="status-pill status-auto">total ties</span>{% else %}<span class="status-pill status-unknown">total doesn't tie</span>{% endif %}
+    <span class="subtle">· uploaded by {{ v.list.uploaded_by }} {{ (v.list.when or '')[:16].replace('T', ' ') }}</span></p>
+  {% else %}
+  <p><strong>Upload finance's bills-to-pay list</strong> <span class="subtle">— the Bill.com export finance sends each week.
+    It becomes the run: each bill is checked, and compared with what Bill.com is actually set to pay.</span></p>
+  {% endif %}
+  <input type="file" name="list" accept=".xlsx,.xlsm,.csv" required>
+  <button type="submit" class="secondary">{{ 'Replace list' if v.list else 'Upload list' }}</button>
+</form>
+
 <div class="kpi-row">
   <div class="kpi"><div class="kpi-label">Going out {{ v.pay_date }}</div>
     <div class="kpi-value">{{ v.releasing_total | money }}</div>
@@ -55,6 +71,20 @@ Bill.com — hold a bill there yourself.</p>
     {% else %}<div class="kpi-value">—</div><div class="kpi-sub">no signed-off runs yet</div>{% endif %}</div>
 </div>
 
+{% if v.list and v.list.list_only %}
+<h2>On finance's list, not in Bill.com ({{ v.list.list_only | length }} · {{ v.list.list_only_total | money }})</h2>
+<p class="subtle">These won't be paid from Bill.com as things stand — already paid, deleted, or the vendor/invoice number differs.</p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Vendor</th><th>Invoice #</th><th>Due</th><th class="amt">Amount</th><th>List checks</th></tr></thead>
+  <tbody>{% for x in v.list.list_only %}
+    <tr><td>{{ x.vendor }}</td><td>{{ x.invoice }}</td><td>{{ x.due_date }}</td><td class="amt">{{ x.balance | money }}</td>
+      <td>{% for s in x.signals %}{{ sev_pill(s.severity) }} {{ s.title }}<br>{% else %}<span class="subtle">none</span>{% endfor %}</td></tr>
+  {% endfor %}</tbody></table></div>
+{% endif %}
+{% if v.list and v.list.dropped %}
+<p class="subtle">{{ v.list.dropped | length }} unpaid Bill.com bill(s) due by {{ v.due_through }} aren't on finance's list and aren't scheduled, so they're left out of this run.</p>
+{% endif %}
+
 {% if v.rows %}
 <p class="subtle"><a href="{{ url_for('billcheck.payrun_csv') }}">Download this pay run as CSV ↓</a></p>
 <div class="tablewrap"><table class="runs">
@@ -64,8 +94,9 @@ Bill.com — hold a bill there yourself.</p>
   {% for x in v.rows %}{% set b = x.bill %}
     <tr id="bill-{{ x.bill_id }}">
       <td>{{ sev_pill(x.severity) }}</td>
-      <td>{{ b.vendor or '—' }}</td>
-      <td><a href="{{ url_for('billcheck.bill_page', bill_id=x.bill_id) }}">{{ b.invoice or '—' }}</a></td>
+      <td>{{ b.vendor or '—' }}{% set note = b.note or (x.list_line.note if x.list_line else '') %}{% if note %}
+        <div class="subtle">📝 {{ note }}</div>{% endif %}</td>
+      <td>{% if b.source == 'list' %}{{ b.invoice or '—' }}{% else %}<a href="{{ url_for('billcheck.bill_page', bill_id=x.bill_id) }}">{{ b.invoice or '—' }}</a>{% endif %}</td>
       <td style="white-space:nowrap">{{ b.due_date or "—" }}{% if x.past_due %} <span class="subtle">past due</span>{% endif %}
         {% if b.payment_status == 'scheduled' %}<div class="subtle">scheduled</div>{% endif %}</td>
       <td class="amt">{{ b.amount | money if b.amount else '—' }}</td>
