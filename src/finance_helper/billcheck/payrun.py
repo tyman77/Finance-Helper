@@ -329,27 +329,130 @@ def signals_key(bill: dict, signals: list[dict], check_sev: str) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
+def _list_bill(line: dict) -> dict:
+    """A finance-list line as a bill, for runs built from the list alone."""
+    from .finance_list import line_key
+    return {"id": "list-" + hashlib.sha1(line_key(line["vendor"], line["invoice"]).encode()
+                                         ).hexdigest()[:10],
+            "vendor": line["vendor"], "invoice": line["invoice"],
+            "invoice_date": line["invoice_date"], "due_date": line["due_date"],
+            "amount": line["balance"], "payment_status": "open", "source": "list",
+            "note": line.get("note", "")}
+
+
+def _match_lines(bills: list[dict], lines: list[dict]) -> dict:
+    """bill id -> list line. Vendor + invoice number first; then invoice
+    number alone when it's unique on both sides and the vendors agree."""
+    from .compare import vendor_matches, normalize_invoice_number
+    from .finance_list import line_key
+
+    by_key: dict[str, list] = {}
+    by_inv: dict[str, list] = {}
+    for x in lines:
+        by_key.setdefault(line_key(x["vendor"], x["invoice"]), []).append(x)
+        by_inv.setdefault(normalize_invoice_number(x["invoice"].rstrip("*")), []).append(x)
+    taken: set[int] = set()
+    out = {}
+    for b in bills:
+        cands = [x for x in by_key.get(line_key(b.get("vendor"), b.get("invoice")), [])
+                 if x["row"] not in taken]
+        if not cands:
+            inv = normalize_invoice_number(str(b.get("invoice") or "").rstrip("*"))
+            cands = [x for x in by_inv.get(inv, []) if x["row"] not in taken
+                     and vendor_matches(x["vendor"], b.get("vendor"))] if inv else []
+            if len(cands) != 1:
+                cands = []
+        if cands:
+            taken.add(cands[0]["row"])
+            out[b["id"]] = cands[0]
+    return out
+
+
 def build(results: list[dict], master: dict, people: list[str], today: date,
           decisions: dict | None = None, pay_weekday: int = 4,
-          horizon_days: int = 7, approvers: dict | None = None) -> dict:
+          horizon_days: int = 7, approvers: dict | None = None,
+          finance_list: dict | None = None) -> dict:
     """The pay-run view: every bill going out on the next pay date, with its
-    combined verdict, decision state, and the batch totals."""
+    combined verdict, decision state, and the batch totals.
+
+    With finance's list uploaded, the list defines the run: Bill.com bills
+    that aren't on it drop out (unless Bill.com has them scheduled — money
+    leaving that finance didn't list), list lines are checked on their own,
+    and matched bills are compared with the list."""
     from ..recon.checks import vendor_master_checks
+    from . import finance_list as fl
 
     decisions = decisions or {}
+    master = master or {}
     pay_date = next_pay_date(today, pay_weekday)
-    vendor_findings = [f for f in vendor_master_checks(master or {}, people, today)["findings"]
+    vendor_findings = [f for f in vendor_master_checks(master, people, today)["findings"]
                        if f.get("kind") != "vendor_bank_change"]   # covered per bill, stricter
 
-    rows = []
+    items = []          # (bill, check_sev, check_line, check_status, signals, extracted)
     for r in results:
         bill = r.get("bill") or {}
         if not bill.get("id") or not in_run(bill, pay_date, horizon_days):
             continue
         check_sev, check_line = _check_status(r)
-        signals = fraud_signals(bill, master or {}, vendor_findings, today,
+        signals = fraud_signals(bill, master, vendor_findings, today,
                                 extracted=r.get("extracted"),
                                 approvers=(approvers or {}).get(bill["id"]))
+        items.append([bill, check_sev, check_line, r.get("status"), signals, r.get("extracted")])
+
+    lines = (finance_list or {}).get("lines") or []
+    list_view = None
+    if lines:
+        lsig = fl.line_signals(lines, pay_date, people, history=master.get("bills"))
+        list_only, dropped = [], []
+        if items:
+            matched = _match_lines([it[0] for it in items], lines)
+            kept = []
+            for it in items:
+                bill, signals = it[0], it[4]
+                line = matched.get(bill["id"])
+                if line is None:
+                    if bill.get("payment_status") == "scheduled":
+                        signals.insert(0, _signal(
+                            "not_on_list", "critical", "Scheduled in Bill.com, not on finance's list",
+                            "Bill.com is set to pay this, but it isn't on the list finance "
+                            "approved for this run. Find out who added it before Friday."))
+                        kept.append(it)
+                    else:
+                        dropped.append(bill)
+                    continue
+                signals.extend(lsig.get(line["row"], []))
+                listed, entered = _dec(line["balance"]), _dec(bill.get("amount"))
+                if listed is not None and entered is not None and listed != entered:
+                    signals.insert(0, _signal(
+                        "list_amount_changed", "high",
+                        f"Amount changed since finance's list (${listed:,.2f} → ${entered:,.2f})",
+                        "Bill.com's amount for this bill isn't what finance approved. "
+                        "Find out who changed it and why."))
+                if line["due_date"] and bill.get("due_date") and line["due_date"] != bill["due_date"]:
+                    signals.append(_signal(
+                        "list_due_changed", "review",
+                        f"Due date changed ({line['due_date']} → {bill['due_date']})",
+                        "Bill.com's due date differs from finance's list."))
+                it.append(line)
+                kept.append(it)
+            items = kept
+            seen_rows = {id(m) for m in matched.values()}
+            list_only = [{**x, "signals": lsig.get(x["row"], [])}
+                         for x in lines if id(x) not in seen_rows]
+        else:
+            for x in lines:
+                items.append([_list_bill(x), "clear", "Not checked against the invoice",
+                              "list", list(lsig.get(x["row"], [])), None, x])
+        summ = fl.summary(finance_list)
+        list_view = {**{k: finance_list.get(k) for k in ("filename", "uploaded_by", "when")},
+                     **summ, "mode": "matched" if results else "list",
+                     "list_only": list_only, "dropped": dropped,
+                     "list_only_total": sum((_dec(x["balance"]) or Decimal(0)) for x in list_only)}
+
+    rows = []
+    for it in items:
+        bill, check_sev, check_line, check_status, signals, extracted = it[:6]
+        signals.sort(key=lambda s: SEVERITY_ORDER.get(s["severity"], 9))
         severity = min([check_sev] + [s["severity"] for s in signals],
                        key=lambda s: SEVERITY_ORDER.get(s, 9))
         key = signals_key(bill, signals, check_sev)
@@ -360,8 +463,9 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
         rows.append({
             "bill_id": bill["id"], "bill": bill, "severity": severity,
             "check_severity": check_sev, "check_line": check_line,
-            "check_status": r.get("status"), "signals": signals, "key": key,
-            "extracted_schema": ((r.get("extracted") or {}).get("schema") or 0) >= SCHEMA_VERSION,
+            "check_status": check_status, "signals": signals, "key": key,
+            "extracted_schema": ((extracted or {}).get("schema") or 0) >= SCHEMA_VERSION,
+            "list_line": it[6] if len(it) > 6 else None,
             "decision": decision,
             "needs_decision": severity in ("critical", "high"),
             "past_due": bool(due and due < pay_date),
@@ -382,6 +486,7 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
         "pay_date": pay_date.isoformat(),
         "due_through": (pay_date + timedelta(days=horizon_days - 1)).isoformat(),
         "rows": rows,
+        "list": list_view,
         "counts": counts,
         "total": total(rows),
         "releasing_total": total(releasing),
@@ -439,6 +544,24 @@ def record_decision(pay_date: str, bill_id: str, key: str, action: str,
     _audit({"pay_date": pay_date, "bill_id": bill_id, **entry})
 
 
+def save_list(pay_date: str, parsed: dict, filename: str, who: str, data: bytes) -> None:
+    """Finance's list for this pay date. Replacing it voids the sign-off;
+    the uploaded file is kept next to the run as the record of what was
+    approved."""
+    state = load(pay_date)
+    when = datetime.now().isoformat(timespec="seconds")
+    state["finance_list"] = {**parsed, "filename": filename, "uploaded_by": who, "when": when}
+    state["signoff"] = None
+    _save(state)
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in (".xlsx", ".xlsm", ".csv"):
+        with open(_path(pay_date)[:-5] + "-list" + ext, "wb") as fh:
+            fh.write(data)
+    _audit({"pay_date": pay_date, "action": "list_upload", "who": who, "when": when,
+            "filename": filename, "lines": len(parsed.get("lines") or []),
+            "header_total": parsed.get("header_total")})
+
+
 def sign_off(pay_date: str, view: dict, who: str, note: str = "") -> None:
     state = load(pay_date)
     state["signoff"] = {
@@ -447,6 +570,9 @@ def sign_off(pay_date: str, view: dict, who: str, note: str = "") -> None:
         "releasing_total": str(view["releasing_total"]),
         "held_count": view["held_count"], "held_total": str(view["held_total"]),
         "bill_keys": {x["bill_id"]: x["key"] for x in view["rows"]},
+        "finance_list": ({k: str(v) if v is not None else None for k, v in view["list"].items()
+                          if k in ("filename", "uploaded_by", "count", "total", "header_total")}
+                         if view.get("list") else None),
     }
     _save(state)
     _audit({"pay_date": pay_date, "action": "signoff",

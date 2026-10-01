@@ -409,6 +409,28 @@ vendor/bill records; approvers are looked up for the pay-run bills only
 doesn't return a field a check needs, the page says which checks couldn't
 run instead of showing the bill as clean.
 
+**Finance's list.** Upload the weekly bills-to-pay export from Bill.com
+(.xlsx or .csv: Invoice no., Vendor, Invoice date, Due date, Invoice amount,
+Balance due, with the list total above the header) and it becomes the run:
+
+- The total at the top is checked against the lines.
+- Each line is checked on its own: an invoice number that's a date or has
+  an added symbol (`901172250*` — the usual way past the duplicate check;
+  critical if the plain number is already in Bill.com), a person as the
+  payee, due date = invoice date when the vendor's other bills have terms,
+  wires (from the note column), short-paid lines, round amounts, past-due
+  bills, one line taking 20%+ of the run, duplicates on the list.
+- Against Bill.com: a bill Bill.com has *scheduled* that isn't on the list
+  is critical; an amount that changed since the list is high; a changed
+  due date is review. Unscheduled Bill.com bills not on the list drop out
+  of the run; list lines Bill.com doesn't have are shown separately.
+- Without Bill.com connected, the run is built from the list alone (and
+  the page says which checks that leaves out).
+
+The uploaded file is kept next to the run (`billcheck/payruns/`), the upload
+is logged, replacing it voids the sign-off, and the sign-off records which
+list it was given against.
+
 Every critical or high bill needs **Release** (with a note: for a bank
 change, who you called and on what number) or **Hold** (then pull it from
 the run in Bill.com yourself; nothing is written to Bill.com). Once every
