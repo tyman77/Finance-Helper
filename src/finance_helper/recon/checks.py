@@ -359,6 +359,17 @@ def _near_same(a: str, b: str) -> bool:
     return _edit_distance(a, b) <= limit
 
 
+_ALIAS = re.compile(r"(?:^|[\s\-\u2013\u2014(:/])use\s+(.+?)\)?\s*$", re.I)
+
+
+def _vendor_identity(name: str) -> str:
+    """The business a vendor record stands for. AP keeps pointer records
+    named "<brand> - Use <vendor>" to route a brand's bills to the vendor
+    that sells it; those resolve to that vendor."""
+    m = _ALIAS.search(str(name or ""))
+    return _vendor_core(m.group(1) if m else name)
+
+
 def _deletes(word: str, depth: int) -> set[str]:
     out, frontier = {word}, {word}
     for _ in range(depth):
@@ -548,7 +559,10 @@ def vendor_master_checks(master: dict, people: list[str],
                 by_email[e].append(v["name"])
                 ids_by_email[e].add(v["id"])
     for email, names in by_email.items():
-        if len(set(names)) > 1:
+        # Pointer records ("DiGiCo - Use Group One Ltd") and duplicate
+        # records of one vendor share its email by design — the lookalike
+        # check covers duplicates. Only distinct businesses count here.
+        if len({_vendor_identity(n) for n in names}) > 1:
             findings.append(_finding(
                 "vendor_shared_email", "high",
                 f"One email, several vendors: {email}",

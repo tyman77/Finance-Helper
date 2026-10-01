@@ -252,10 +252,8 @@ def line_signals(lines: list[dict], pay_date: date, people: list[str] | None = N
                               f"{x['vendor']}'s other bills on this list run {usual[0]} days; "
                               f"this one is due the day it was issued. Probably mis-entered "
                               f"(would be {(i + timedelta(days=usual[0])).isoformat()})."))
-            else:
-                s.append(_sig("list_due_entry", "review", "Due date = invoice date",
-                              "Due the same day it was issued. Fine for prepay; otherwise "
-                              "check the terms."))
+            # With nothing to compare against it's usually prepay / due on
+            # receipt — not worth a flag.
         if d and d < pay_date:
             s.append(_sig("list_past_due", "review", f"Past due ({d.isoformat()})",
                           "Already past due on pay day. If this was an early-pay discount "

@@ -373,3 +373,33 @@ def test_same_or_nearly_same_name_is_a_lookalike():
 
 def test_short_names_need_an_exact_match():
     assert _lookalikes(["AJA", "AJAX", "QSC", "QSD"]) == set()
+
+
+def _shared_email(vendors):
+    master = {"vendors": [{"id": str(i), "name": n, "active": True, "created": "2020-01-01",
+                           "email": e, "payment_email": ""} for i, (n, e) in enumerate(vendors)],
+              "bank_accounts": [], "bills": []}
+    return [f for f in checks.vendor_master_checks(master, [], today=date(2026, 10, 1))["findings"]
+            if f["kind"] == "vendor_shared_email"]
+
+
+def test_pointer_records_share_their_vendors_email():
+    assert _shared_email([("DiGiCo - Use Group One Ltd", "ar@g1limited.com"),
+                          ("Group One LTD", "ar@g1limited.com"),
+                          ("Digital Projection - Use Delta Electronics", "ar@delta.com"),
+                          ("Delta Electronics (Americas) Ltd.", "ar@delta.com"),
+                          ("Shure", "ar@shure.com"), ("Shure Inc.", "ar@shure.com")]) == []
+
+
+def test_distinct_businesses_sharing_an_email_still_flag():
+    found = _shared_email([("Acme Supply", "billing@acme.biz"),
+                           ("Zenith Consulting", "billing@acme.biz"),
+                           ("DiGiCo - Use Group One Ltd", "billing@acme.biz")])
+    assert len(found) == 1 and found[0]["severity"] == "high"
+
+
+def test_vendor_identity_reads_pointer_names():
+    assert checks._vendor_identity("DiGiCo - Use Group One Ltd") == "group one"
+    assert checks._vendor_identity("Digital Projection (use Delta Electronics)") == "delta electronic"
+    assert checks._vendor_identity("Group One LTD") == "group one"
+    assert checks._vendor_identity("Useful Things Co") == "useful thing"
