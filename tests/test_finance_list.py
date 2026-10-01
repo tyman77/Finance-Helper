@@ -76,11 +76,11 @@ def test_line_checks_catch_this_weeks_problems():
     assert "list_invoice_suffix" in by["Belden - West Penn Wire901172250*"]
     assert {"list_invoice_is_date", "list_individual"} <= by["Mitchell Stier09.15.2026"]
     assert "list_invoice_suffix" not in by["Mitchell Stier09.15.2026"]
-    assert {"list_wire", "list_past_due"} <= by["Pea Soup73222"]
+    assert by["Pea Soup73222"] == {"list_wire"}
     assert "list_due_entry" in by["Wesco - Anixter531685513"]
-    assert "list_short_pay" in by["Almo CorporationAGK4290"]
+    assert by["Almo CorporationAGK4290"] == set()             # short pay: not flagged
     assert "list_large_share" in by["ROE Visual12816"]
-    assert "list_round" in by["Design Technik GroupF1646"]
+    assert by["Design Technik GroupF1646"] == set()          # round amount: not flagged
     assert by["Wesco - Anixter531684163"] == set()
 
 
@@ -219,3 +219,23 @@ def test_same_day_due_with_nothing_to_compare_is_not_flagged():
               "amount": "3490.00", "balance": "3490.00", "note": ""}]
     kinds = {s["kind"] for s in fl.line_signals(lines, FRI).get(3, [])}
     assert "list_due_entry" not in kinds
+
+
+def test_slack_message_lists_holds_and_totals():
+    flist = {**fl.parse(_xlsx(), "x.xlsx"), "filename": "x.xlsx"}
+    view = payrun.build([], {}, [], THU, horizon_days=15, finance_list=flist)
+    msg = payrun.slack_message(view)
+    assert msg.startswith("*Pay run for Fri 10/2*") and "Review in progress" in msg
+    decisions = {}
+    for x in view["rows"]:
+        if x["needs_decision"]:
+            hold = x["bill"]["vendor"] == "Wesco - Anixter"
+            decisions[x["bill_id"]] = {"action": "hold" if hold else "release",
+                                       "key": x["key"], "note": ""}
+    view = payrun.build([], {}, [], THU, horizon_days=15, finance_list=flist,
+                        decisions=decisions)
+    msg = payrun.slack_message(view)
+    assert "reviewed ✅" in msg and "Review in progress" not in msg
+    assert "Releasing *8 bills, $258,072.70*" in msg
+    assert "• Wesco - Anixter #531685513 — $2,089.98 (Due date = invoice date)" in msg
+    assert "4 flagged bill(s) were checked and are OK to pay." in msg

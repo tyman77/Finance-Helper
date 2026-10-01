@@ -101,12 +101,6 @@ def _signal(kind, severity, title, detail) -> dict:
     return {"kind": kind, "severity": severity, "title": title, "detail": detail}
 
 
-def _zip(text) -> str:
-    import re
-    found = re.findall(r"\b(\d{5})(?:-\d{4})?\b", str(text or ""))
-    return found[-1] if found else ""
-
-
 def remit_signals(extracted: dict | None, vendor: dict, accounts: list[dict]) -> list[dict]:
     """Bank/remit details printed on the invoice vs the vendor in Bill.com.
     Fake and altered invoices redirect payment by printing new banking
@@ -134,14 +128,7 @@ def remit_signals(extracted: dict | None, vendor: dict, accounts: list[dict]) ->
                 f"The invoice prints bank details (account ending {inv4}{bank}) but "
                 "Bill.com has no bank account for this vendor, so it pays by check. "
                 "If anyone asks to add this account, verify it by phone first."))
-        elif not known:
-            out.append(_signal(
-                "invoice_bank_unchecked", "review",
-                f"Invoice bank account ending {inv4} not compared",
-                "Bill.com didn't return the vendor's account number, so the invoice's "
-                "banking details couldn't be compared. Check them against the vendor "
-                "record by hand."))
-        else:
+        elif known:   # (no account numbers from Bill.com: reported as a gap, not per bill)
             match = [a for a in known if a["account_last4"] == inv4]
             if not match:
                 ours = ", ".join(sorted({a["account_last4"] for a in known}))
@@ -159,14 +146,6 @@ def remit_signals(extracted: dict | None, vendor: dict, accounts: list[dict]) ->
                     f"Invoice routing number {inv_routing} differs from Bill.com",
                     "Same last four account digits but a different bank routing number — "
                     "a different account. Verify by phone before paying."))
-    inv_zip, our_zip = _zip(ex.get("remit_address")), (vendor.get("zip") or "")[:5]
-    if inv_zip and our_zip and inv_zip != our_zip:
-        out.append(_signal(
-            "remit_address_differs", "review",
-            f"Remit-to ZIP {inv_zip} ≠ Bill.com {our_zip}",
-            f"The invoice's remit-to address ({ex.get('remit_address')}) is not the "
-            f"address on the vendor record ({vendor.get('address') or our_zip}). Often a "
-            "lockbox; confirm before changing the vendor's address."))
     return out
 
 
@@ -200,12 +179,6 @@ def same_person_signals(bill: dict, vendor: dict, approvers: list[dict] | None,
             f"{who(set_up)} set up this vendor and approves its bill",
             "The approver created the payee they're approving payment to. Confirm the "
             "vendor independently."))
-    if entered and set_up and entered == set_up and entered not in approver_ids:
-        out.append(_signal(
-            "same_person_vendor_enter", "review",
-            f"{who(entered)} set up the vendor and entered the bill",
-            "Common in a small AP team; the approval step is the independent check "
-            "here, so make sure it was done by someone else."))
     return out
 
 
@@ -250,13 +223,6 @@ def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
     key = _vkey(bill.get("vendor"))
     prior = [b for b in master.get("bills") or []
              if b.get("id") != bill.get("id") and key and _vkey(b.get("vendor")) == key]
-    if not prior and master.get("bills"):
-        out.append(_signal(
-            "first_payment", "review",
-            "First bill from this vendor",
-            "No earlier bills from this vendor in Bill.com. First payments are where "
-            "fake vendors and fake invoices get paid — confirm the work or goods."))
-
     amounts = [a for a in (_dec(b.get("amount")) for b in prior) if a and a > 0]
     if amount is not None and len(amounts) >= OUTLIER_MIN_HISTORY:
         largest = max(amounts)
@@ -379,8 +345,9 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
     decisions = decisions or {}
     master = master or {}
     pay_date = next_pay_date(today, pay_weekday)
+    # Only findings that need a decision; bank changes are covered per bill, stricter.
     vendor_findings = [f for f in vendor_master_checks(master, people, today)["findings"]
-                       if f.get("kind") != "vendor_bank_change"]   # covered per bill, stricter
+                       if f.get("kind") != "vendor_bank_change" and f.get("severity") != "review"]
 
     items = []          # (bill, check_sev, check_line, check_status, signals, extracted)
     for r in results:
@@ -422,11 +389,6 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
                         f"Amount changed since finance's list (${listed:,.2f} → ${entered:,.2f})",
                         "Bill.com's amount for this bill isn't what finance approved. "
                         "Find out who changed it and why."))
-                if line["due_date"] and bill.get("due_date") and line["due_date"] != bill["due_date"]:
-                    signals.append(_signal(
-                        "list_due_changed", "review",
-                        f"Due date changed ({line['due_date']} → {bill['due_date']})",
-                        "Bill.com's due date differs from finance's list."))
                 it.append(line)
                 kept.append(it)
             items = kept
@@ -599,3 +561,40 @@ def recent_signoffs(limit: int = 6) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def slack_message(view: dict) -> str:
+    """A short note for the accounting team: what's going out, and which
+    bills to pull from the run. Slack formatting (*bold*, bullets)."""
+    day = date.fromisoformat(view["pay_date"])
+    when = f"{day.strftime('%a')} {day.month}/{day.day}"
+    rows = view["rows"]
+    held = [x for x in rows if (x["decision"] or {}).get("action") == "hold"]
+    checked = [x for x in rows if (x["decision"] or {}).get("action") == "release"
+               and x["needs_decision"]]
+
+    def money(v) -> str:
+        return f"${Decimal(str(v)):,.2f}"
+
+    lines = [f"*Pay run for {when}*"
+             + (" — reviewed ✅" if view["ready_to_sign"] else "")]
+    if not view["ready_to_sign"]:
+        lines.append(f"_Review in progress: {view['undecided']} flagged bill(s) still "
+                     "need a decision._")
+    lines.append(f"Releasing *{view['releasing_count']} bills, "
+                 f"{money(view['releasing_total'])}*.")
+    lines.append("")
+    if held:
+        lines.append("*Please hold these from the run:*")
+        for x in held:
+            b = x["bill"]
+            why = ((x["decision"] or {}).get("note")
+                   or (x["signals"][0]["title"] if x["signals"] else x["check_line"]))
+            lines.append(f"• {b.get('vendor')} #{b.get('invoice')} — "
+                         f"{money(b.get('amount') or 0)} ({why})")
+    else:
+        lines.append("No holds this week.")
+    if checked:
+        lines.append("")
+        lines.append(f"{len(checked)} flagged bill(s) were checked and are OK to pay.")
+    return "\n".join(lines)

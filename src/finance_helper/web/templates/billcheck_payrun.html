@@ -141,8 +141,23 @@ Bill.com — hold a bill there yourself.</p>
   {% endif %}
 </form>
 {% endif %}
+{% if slack %}
+<h2>Message for the accounting team</h2>
+<p class="subtle">Ready to paste into Slack. It updates as you release or hold bills.</p>
+<textarea id="slack-msg" readonly rows="{{ slack.count('\n') + 2 }}" style="width:100%;max-width:70ch;font:inherit">{{ slack }}</textarea>
+<div><button type="button" class="secondary" id="slack-copy">Copy message</button></div>
+{% endif %}
 </div>
 <script>
+// Copy the Slack message (delegated: the section is swapped in place).
+document.addEventListener("click", async (e) => {
+  if (!e.target.closest("#slack-copy")) return;
+  const box = document.getElementById("slack-msg");
+  try { await navigator.clipboard.writeText(box.value); }
+  catch (err) { box.select(); document.execCommand("copy"); }
+  e.target.textContent = "Copied ✓";
+  setTimeout(() => (e.target.textContent = "Copy message"), 1500);
+});
 // Release / Hold save in the background: only that bill's decision, the
 // counts at the top and the sign-off section are swapped in from the
 // server's response, so the page doesn't reload or jump. If anything goes

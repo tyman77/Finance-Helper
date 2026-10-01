@@ -500,6 +500,7 @@ def payrun_page():
     master = _master()
     return render_template(
         "billcheck_payrun.html", v=view, state=state, gaps=_payrun_gaps(view),
+        slack=payrun.slack_message(view) if view["rows"] else "",
         signed=payrun.signoff_current(state, view),
         history=[h for h in payrun.recent_signoffs() if h.get("pay_date") != view["pay_date"]],
         ready=_readiness(), running=_running_job(), last_run=bc_store.load_run_summary(),
