@@ -11,7 +11,7 @@
 <h1>Pay Run · {{ v.pay_date }}
   {% if signed %}<span class="status-pill status-auto">signed off</span>{% endif %}</h1>
 <p class="subtle" style="max-width:68ch">Every bill going out on this pay date: anything Bill.com has
-scheduled, plus every unpaid bill due before the following pay date ({{ horizon }} days later).
+scheduled, plus every unpaid bill due on or before {{ v.due_through }}.
 Each one is checked against its invoice (Bill Check) and for payment-fraud signals. Flagged bills need a
 <em>release</em> or <em>hold</em> decision before the run can be signed off. Nothing is changed in
 Bill.com — hold a bill there yourself.</p>

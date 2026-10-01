@@ -376,8 +376,8 @@ default `medium`).
 ## Pay Run (Thursday review of Friday's payments)
 
 The **Pay Run** page is the weekly sign-off for the batch Bill.com pays on
-Friday: every bill Bill.com has scheduled, plus every unpaid bill due before
-the following Friday. **Refresh from Bill.com & check** pulls the open bills
+Friday: every bill Bill.com has scheduled, plus every unpaid bill due within
+the next two weeks (through the second Friday after pay day; AP pays ahead). **Refresh from Bill.com & check** pulls the open bills
 and the vendor master and runs Bill Check. Each bill then gets one verdict
 that combines its invoice check with payment-fraud signals, so they're seen
 *before* the money leaves (Cash Proof catches the same patterns afterwards,

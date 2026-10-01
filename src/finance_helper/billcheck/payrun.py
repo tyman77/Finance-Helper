@@ -56,7 +56,7 @@ def settings() -> dict:
     day = str(cfg.get("pay_day") or "friday").strip().lower()
     return {
         "pay_weekday": WEEKDAYS.index(day) if day in WEEKDAYS else 4,
-        "horizon_days": int(cfg.get("horizon_days") or 7),
+        "horizon_days": int(cfg.get("horizon_days") or 15),
     }
 
 
@@ -380,6 +380,7 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
     counts = {s: sum(1 for x in rows if x["severity"] == s) for s in SEVERITY_ORDER}
     return {
         "pay_date": pay_date.isoformat(),
+        "due_through": (pay_date + timedelta(days=horizon_days - 1)).isoformat(),
         "rows": rows,
         "counts": counts,
         "total": total(rows),
