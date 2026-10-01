@@ -46,11 +46,15 @@ def client(monkeypatch):
 
 
 @pytest.fixture
-def fakes(monkeypatch):
+def fakes(monkeypatch, tmp_path):
     calls = {"reads": 0, "fetches": 0, "last_docs": None}
     monkeypatch.setattr(billdotcom_api, "credentials_present", lambda: True)
     monkeypatch.setattr(extract, "credentials_present", lambda: True)
     monkeypatch.setattr(billdotcom_api, "fetch_open_bills", lambda: [dict(b) for b in BILLS])
+    monkeypatch.setattr(billdotcom_api, "fetch_master_index",
+                        lambda: (_ for _ in ()).throw(RuntimeError("offline in tests")))
+    monkeypatch.setattr(billdotcom_api, "fetch_bill_approvers", lambda ids: ({}, []))
+    monkeypatch.setenv("FINANCE_HELPER_DATA", str(tmp_path / "data"))
 
     def fetch_docs(bill_id):
         calls["fetches"] += 1

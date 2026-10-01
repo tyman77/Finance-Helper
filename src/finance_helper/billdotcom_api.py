@@ -242,6 +242,30 @@ def fetch_payments_v2() -> list[dict]:
     return records
 
 
+# Who created a record. The v2 field name isn't documented consistently
+# across entities, so the known spellings are tried in turn.
+_CREATED_BY_KEYS = ("createdBy", "createdById", "createdUserId", "creatorId",
+                    "createdByUserId")
+
+
+def _created_by(rec: dict) -> str:
+    for k in _CREATED_BY_KEYS:
+        if rec.get(k):
+            return str(rec[k])
+    return ""
+
+
+def _last4(value) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return digits[-4:] if len(digits) >= 4 else ""
+
+
+def _vendor_address(v: dict) -> str:
+    parts = [v.get("address1"), v.get("address2"), v.get("addressCity"),
+             v.get("addressState"), v.get("addressZip")]
+    return ", ".join(str(p).strip() for p in parts if p and str(p).strip())
+
+
 def fetch_master_index() -> dict:
     """Vendor master + bills + vendor bank accounts, for the integrity checks.
 
@@ -265,6 +289,7 @@ def fetch_master_index() -> dict:
     raw_vendors = safe("Vendor")
     raw_accounts = safe("VendorBankAccount")
     raw_bills = safe("Bill")
+    raw_users = safe("User")
 
     vendors = []
     for v in raw_vendors:
@@ -275,6 +300,9 @@ def fetch_master_index() -> dict:
             "created": str(v.get("createdTime") or "")[:10],
             "email": str(v.get("email") or "").strip().lower(),
             "payment_email": str(v.get("paymentEmail") or "").strip().lower(),
+            "created_by": _created_by(v),
+            "address": _vendor_address(v),
+            "zip": str(v.get("addressZip") or "").strip()[:5],
         })
     names = {v["id"]: v["name"] for v in vendors}
 
@@ -283,7 +311,19 @@ def fetch_master_index() -> dict:
         "vendor": names.get(a.get("vendorId"), ""),
         "created": str(a.get("createdTime") or "")[:10],
         "active": str(a.get("isActive") or "") == "1",
+        # Only the last four digits are kept — enough to compare with the
+        # invoice, never the full number on disk.
+        "account_last4": _last4(a.get("accountNumber") or a.get("bankAccountNumber")),
+        "routing": "".join(ch for ch in str(a.get("routingNumber") or "") if ch.isdigit()),
+        "created_by": _created_by(a),
     } for a in raw_accounts]
+
+    users = [{
+        "id": str(u.get("id") or ""),
+        "name": " ".join(str(u.get(k) or "").strip()
+                         for k in ("firstName", "lastName")).strip(),
+        "email": str(u.get("email") or "").strip().lower(),
+    } for u in raw_users]
 
     bills = []
     for b in raw_bills:
@@ -295,9 +335,18 @@ def fetch_master_index() -> dict:
             "created": str(b.get("createdTime") or "")[:10],
             "amount": str(b.get("amount") or ""),
             "po": str(b.get("poNumber") or "").strip(),
+            "created_by": _created_by(b),
         })
+    # Say plainly when Bill.com didn't return a field a check depends on —
+    # a silently skipped fraud check reads as a clean one.
+    if vendors and not any(v["created_by"] for v in vendors):
+        gaps.append("Vendor: no creator field returned (same-person check can't see "
+                    "who set up vendors)")
+    if raw_accounts and not any(a["account_last4"] for a in bank_accounts):
+        gaps.append("VendorBankAccount: no account numbers returned (invoice bank "
+                    "details can't be compared)")
     return {"vendors": vendors, "bank_accounts": bank_accounts,
-            "bills": bills, "gaps": gaps}
+            "bills": bills, "users": users, "gaps": gaps}
 
 
 def fetch_index() -> list[dict]:
@@ -367,6 +416,7 @@ def _normalize_bill(b: dict, vendor: dict, term: dict) -> dict:
         "po": str(b.get("poNumber") or "").strip(),
         "created": _iso_day(b.get("createdTime")),
         "updated": _iso_day(b.get("updatedTime")),
+        "created_by": _created_by(b),
     }
 
 
@@ -616,3 +666,37 @@ def fetch_bill_documents(bill_id: str) -> list[dict]:
             break
         page += 1
     return docs
+
+
+# --- Approvers: who is assigned to approve a bill ----------------------------
+# One call per bill, so only the bills in the coming pay run are asked.
+# Path env-overridable (BILLDOTCOM_APPROVERS_PATH); the approver's raw status
+# is kept as-is — the same-person check only needs to know WHO is on the
+# bill's approval chain.
+
+def fetch_bill_approvers(bill_ids: list[str]) -> tuple[dict, list[str]]:
+    """({bill_id: [{user_id, status}]}, errors). Never raises per bill."""
+    import json as _json
+
+    if not bill_ids:
+        return {}, []
+    dev_key, session = _v2_login()
+    path = os.environ.get("BILLDOTCOM_APPROVERS_PATH") or "ListApprovers.json"
+    out: dict = {}
+    errors: list[str] = []
+    for bill_id in bill_ids:
+        try:
+            resp = _v2_call(path, {
+                "devKey": dev_key, "sessionId": session,
+                "data": _json.dumps({"objectId": bill_id, "entity": "Bill"}),
+            }) or []
+        except RuntimeError as exc:
+            errors.append(f"{bill_id}: {str(exc)[:120]}")
+            continue
+        items = resp if isinstance(resp, list) else \
+            (resp.get("approvers") if isinstance(resp, dict) else None) or []
+        out[bill_id] = [{
+            "user_id": str(a.get("usersId") or a.get("userId") or a.get("approverId") or ""),
+            "status": str(a.get("status") if a.get("status") is not None else ""),
+        } for a in items if isinstance(a, dict)]
+    return out, errors

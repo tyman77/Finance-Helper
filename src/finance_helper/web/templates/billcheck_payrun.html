@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Pay Run {{ v.pay_date }} — Scout{% endblock %}
+{% macro sev_pill(sev) -%}
+  {%- if sev == 'critical' %}<span class="status-pill status-unknown">critical</span>
+  {%- elif sev == 'high' %}<span class="status-pill status-pick">high</span>
+  {%- elif sev == 'review' %}<span class="status-pill status-review">review</span>
+  {%- else %}<span class="status-pill status-auto">clear</span>{% endif -%}
+{%- endmacro %}
+{% block content %}
+<p><a href="{{ url_for('billcheck.landing') }}">← Bill Check</a></p>
+<h1>Pay Run · {{ v.pay_date }}
+  {% if signed %}<span class="status-pill status-auto">signed off</span>{% endif %}</h1>
+<p class="subtle" style="max-width:68ch">Every bill going out on this pay date: anything Bill.com has
+scheduled, plus every unpaid bill due before the following pay date ({{ horizon }} days later).
+Each one is checked against its invoice (Bill Check) and for payment-fraud signals. Flagged bills need a
+<em>release</em> or <em>hold</em> decision before the run can be signed off. Nothing is changed in
+Bill.com — hold a bill there yourself.</p>
+
+{% if not ready.billdotcom or not ready.claude %}
+<div class="flash"><p><strong>Can't refresh.</strong>
+  {% if not ready.billdotcom %}Bill.com credentials are not set.{% endif %}
+  {% if not ready.claude %}ANTHROPIC_API_KEY is not set.{% endif %}</p></div>
+{% endif %}
+{% if not has_master %}
+<div class="flash"><p><strong>No vendor master yet</strong> — the bank-change, new-vendor and history
+  checks have nothing to look at. Refresh below to pull it from Bill.com.</p></div>
+{% endif %}
+{% if gaps %}
+<div class="flash"><p><strong>Some checks couldn't run on this batch:</strong></p>
+  <ul>{% for g in gaps %}<li>{{ g }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('billcheck.run') }}" class="upload-form">
+  {% if running %}
+  <p>A check is running — <a href="{{ url_for('billcheck.progress', job_id=running) }}">watch progress →</a></p>
+  {% else %}
+  <input type="hidden" name="next" value="payrun">
+  <button type="submit" {% if not ready.billdotcom or not ready.claude %}disabled{% endif %}>Refresh from Bill.com &amp; check</button>
+  <span class="subtle">{% if last_run %}Last checked {{ last_run.when[:16].replace('T', ' ') }} by {{ last_run.by or 'local' }}.{% endif %}
+    Pulls open bills and the vendor master, reads any new invoices.</span>
+  {% endif %}
+</form>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Going out {{ v.pay_date }}</div>
+    <div class="kpi-value">{{ v.releasing_total | money }}</div>
+    <div class="kpi-sub">{{ v.releasing_count }} bills{% if v.held_count %} · {{ v.held_count }} held ({{ v.held_total | money }}){% endif %}</div></div>
+  <div class="kpi"><div class="kpi-label">Need a decision</div>
+    <div class="kpi-value">{{ v.undecided }}</div>
+    <div class="kpi-sub">{{ v.counts.critical }} critical · {{ v.counts.high }} high · {{ v.counts.review }} review</div></div>
+  <div class="kpi"><div class="kpi-label">Recent runs</div>
+    {% if history %}
+    <div class="kpi-value">{{ (history | map(attribute='releasing_total') | map('float') | sum / history | length) | money }}</div>
+    <div class="kpi-sub">average of the last {{ history | length }} signed-off runs</div>
+    {% else %}<div class="kpi-value">—</div><div class="kpi-sub">no signed-off runs yet</div>{% endif %}</div>
+</div>
+
+{% if v.rows %}
+<p class="subtle"><a href="{{ url_for('billcheck.payrun_csv') }}">Download this pay run as CSV ↓</a></p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th></th><th>Vendor</th><th>Invoice #</th><th>Due</th><th class="amt">Amount</th>
+    <th>Invoice check</th><th>Fraud signals</th><th>Decision</th></tr></thead>
+  <tbody>
+  {% for x in v.rows %}{% set b = x.bill %}
+    <tr id="bill-{{ x.bill_id }}">
+      <td>{{ sev_pill(x.severity) }}</td>
+      <td>{{ b.vendor or '—' }}</td>
+      <td><a href="{{ url_for('billcheck.bill_page', bill_id=x.bill_id) }}">{{ b.invoice or '—' }}</a></td>
+      <td style="white-space:nowrap">{{ b.due_date or "—" }}{% if x.past_due %} <span class="subtle">past due</span>{% endif %}
+        {% if b.payment_status == 'scheduled' %}<div class="subtle">scheduled</div>{% endif %}</td>
+      <td class="amt">{{ b.amount | money if b.amount else '—' }}</td>
+      <td style="max-width:28ch">{% if x.check_severity != 'clear' %}{{ sev_pill(x.check_severity) }} {% endif %}{{ x.check_line }}</td>
+      <td style="max-width:40ch">
+        {% for s in x.signals %}
+          <div>{{ sev_pill(s.severity) }} <strong>{{ s.title }}</strong>
+            <div class="subtle">{{ s.detail }}</div></div>
+        {% else %}<span class="subtle">none</span>{% endfor %}</td>
+      <td style="min-width:22ch">
+        {% if x.decision %}
+          <strong>{{ 'Released' if x.decision.action == 'release' else 'HELD' }}</strong>
+          <div class="subtle">{{ x.decision.who }} · {{ x.decision.when[:16].replace('T', ' ') }}<br>{{ x.decision.note }}</div>
+        {% endif %}
+        {% if x.needs_decision or x.decision %}
+        <form method="post" action="{{ url_for('billcheck.payrun_decide', bill_id=x.bill_id) }}">
+          <input type="text" name="note" required placeholder="{{ 'Who you called, on what number' if x.signals | selectattr('kind', 'in', ['bank_change', 'invoice_bank_notice', 'invoice_bank_mismatch', 'invoice_routing_mismatch']) | list else 'Why' }}" style="width:100%">
+          <button type="submit" name="action" value="release" class="approve">Release</button>
+          <button type="submit" name="action" value="hold" class="secondary">Hold</button>
+        </form>
+        {% else %}<span class="subtle">OK to pay</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<h2>Sign off</h2>
+{% if signed %}
+<p>Signed off by <strong>{{ state.signoff.who }}</strong> at {{ state.signoff.when[:16].replace('T', ' ') }}:
+  {{ state.signoff.releasing_count }} bills, {{ state.signoff.releasing_total | float | money }} releasing{% if state.signoff.held_count %},
+  {{ state.signoff.held_count }} held{% endif %}.{% if state.signoff.note %} <span class="subtle">— {{ state.signoff.note }}</span>{% endif %}</p>
+{% else %}
+{% if state.signoff %}<p class="subtle">An earlier sign-off no longer applies — the batch changed since. Review and sign again.</p>{% endif %}
+<form method="post" action="{{ url_for('billcheck.payrun_signoff') }}" class="upload-form">
+  {% if v.ready_to_sign %}
+  <label>Note (optional) <input type="text" name="note" style="width:40ch"></label>
+  <button type="submit">Sign off: release {{ v.releasing_count }} bills, {{ v.releasing_total | money }}</button>
+  {% else %}
+  <p class="subtle">{{ v.undecided }} flagged bill(s) still need a release or hold decision.</p>
+  {% endif %}
+</form>
+{% endif %}
+{% else %}
+<p class="subtle">No bills in this pay run{% if not last_run %} — refresh from Bill.com first{% endif %}.</p>
+{% endif %}
+{% endblock %}
