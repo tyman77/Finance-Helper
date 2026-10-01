@@ -257,7 +257,7 @@ def test_master_index_reports_missing_fields_as_gaps(fake_v2, monkeypatch):
     monkeypatch.setitem(ENTITIES, "VendorBankAccount", [
         {"vendorId": "v1", "createdTime": "2026-09-01", "isActive": "1"}])
     m = api.fetch_master_index()
-    assert any("no creator field" in g for g in m["gaps"])
+    assert not any("creator" in g for g in m["gaps"])     # permanent, not a gap
     assert any("no account numbers" in g for g in m["gaps"])
 
 

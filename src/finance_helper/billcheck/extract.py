@@ -66,18 +66,22 @@ class InvoiceFields(BaseModel):
     po_number: Optional[str]
     # Plain strings ("" = absent), NOT Optional: the structured-output API
     # caps union-typed fields at 16 and the null-able ones above use them up.
-    ship_date: str = ""
-    order_number: str = ""
-    subtotal: str = ""
-    tax: str = ""
-    current_charges: str = ""
-    project_references: str = ""
-    remit_address: str = ""
-    remit_bank_name: str = ""
-    remit_account_last4: str = ""
-    remit_routing_number: str = ""
-    bank_change_notice: bool = False
-    bank_change_text: str = ""
+    # And REQUIRED (no defaults): a field with a default is an optional
+    # parameter, each of which roughly doubles part of the compiled grammar —
+    # 12 of them got every read rejected with "Schema is too complex".
+    # tests/test_billcheck_extract.py holds the schema to these limits.
+    ship_date: str
+    order_number: str
+    subtotal: str
+    tax: str
+    current_charges: str
+    project_references: str
+    remit_address: str
+    remit_bank_name: str
+    remit_account_last4: str
+    remit_routing_number: str
+    bank_change_notice: bool
+    bank_change_text: str
     confidence: Literal["high", "medium", "low"]
     notes: str
 

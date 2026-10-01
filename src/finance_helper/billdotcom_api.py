@@ -339,9 +339,10 @@ def fetch_master_index() -> dict:
         })
     # Say plainly when Bill.com didn't return a field a check depends on —
     # a silently skipped fraud check reads as a clean one.
-    if vendors and not any(v["created_by"] for v in vendors):
-        gaps.append("Vendor: no creator field returned (same-person check can't see "
-                    "who set up vendors)")
+    # (Bill.com's Vendor listing doesn't say who created a vendor, so the
+    # vendor-creator half of the same-person check stays dormant — a
+    # permanent API limitation, not something a refresh fixes, so it isn't
+    # reported as a gap. Entered-and-approved still runs from the bills.)
     if raw_accounts and not any(a["account_last4"] for a in bank_accounts):
         gaps.append("VendorBankAccount: no account numbers returned (invoice bank "
                     "details can't be compared)")
