@@ -399,7 +399,7 @@ from the bank export):
 - **review**: remit-to ZIP differs from the vendor record (often a
   lockbox); the same person set up the vendor and entered the bill (with
   someone else approving); first bill from a vendor; personal payment
-  email; not fully approved in Bill.com.
+  email.
 
 Bank details are read off the invoice PDF along with the other fields; only
 the last four digits of any account number are kept, from the invoice and

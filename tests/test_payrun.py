@@ -349,3 +349,8 @@ def test_configured_window_covers_two_weeks_ahead():
     view = payrun.build([_result(_bill("a", due="2026-10-16"))], MASTER, [], THU,
                         horizon_days=h)
     assert view["due_through"] == "2026-10-16" and len(view["rows"]) == 1
+
+
+def test_approval_in_progress_is_not_flagged():
+    sig = payrun.fraud_signals(_bill("x", approval_status="approving"), MASTER, [], THU)
+    assert sig == []
