@@ -210,3 +210,12 @@ def test_upload_rejects_unreadable_file(client):
                 content_type="multipart/form-data")
     page = client.get("/billcheck/payrun").get_data(as_text=True)
     assert "Couldn&#39;t read junk.csv" in page or "Couldn't read junk.csv" in page
+
+
+def test_same_day_due_with_nothing_to_compare_is_not_flagged():
+    # Applied Electronics: one bill, due the day it was issued (prepay).
+    lines = [{"row": 3, "invoice": "82337", "vendor": "Applied Electronics",
+              "invoice_date": "2026-09-28", "due_date": "2026-09-28",
+              "amount": "3490.00", "balance": "3490.00", "note": ""}]
+    kinds = {s["kind"] for s in fl.line_signals(lines, FRI).get(3, [])}
+    assert "list_due_entry" not in kinds
