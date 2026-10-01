@@ -113,7 +113,7 @@ Bill.com — hold a bill there yourself.</p>
         {% endif %}
         {% if x.needs_decision or x.decision %}
         <form method="post" action="{{ url_for('billcheck.payrun_decide', bill_id=x.bill_id) }}">
-          <input type="text" name="note" required placeholder="{{ 'Who you called, on what number' if x.signals | selectattr('kind', 'in', ['bank_change', 'invoice_bank_notice', 'invoice_bank_mismatch', 'invoice_routing_mismatch']) | list else 'Why' }}" style="width:100%">
+          <input type="text" name="note" placeholder="{{ 'Optional: who you called, on what number' if x.signals | selectattr('kind', 'in', ['bank_change', 'invoice_bank_notice', 'invoice_bank_mismatch', 'invoice_routing_mismatch']) | list else 'Note (optional)' }}" style="width:100%">
           <button type="submit" name="action" value="release" class="approve">Release</button>
           <button type="submit" name="action" value="hold" class="secondary">Hold</button>
         </form>

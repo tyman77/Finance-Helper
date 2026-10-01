@@ -170,9 +170,9 @@ def test_payrun_page_decide_and_sign_off(client, monkeypatch):
     resp = client.post("/billcheck/payrun/signoff")
     assert resp.status_code == 302
 
-    # A note is required.
-    client.post("/billcheck/payrun/decide/bank", data={"action": "release", "note": ""})
-    assert "Released" not in client.get("/billcheck/payrun").get_data(as_text=True)
+    # No note needed — one click records who decided and when.
+    client.post("/billcheck/payrun/decide/bank", data={"action": "hold", "note": ""})
+    assert "HELD" in client.get("/billcheck/payrun").get_data(as_text=True)
 
     client.post("/billcheck/payrun/decide/bank",
                 data={"action": "release", "note": "Called Jo at 555-0100 from our file"})
@@ -185,7 +185,7 @@ def test_payrun_page_decide_and_sign_off(client, monkeypatch):
 
     audit = os.path.join(os.environ["FINANCE_HELPER_OUT_DIR"], "billcheck", "audit.jsonl")
     lines = [json.loads(line) for line in open(audit)]
-    assert [x["action"] for x in lines] == ["release", "signoff"]
+    assert [x["action"] for x in lines] == ["hold", "release", "signoff"]
     assert all(x["kind"] == "payrun" for x in lines)
 
     csv = client.get("/billcheck/payrun.csv").get_data(as_text=True)
