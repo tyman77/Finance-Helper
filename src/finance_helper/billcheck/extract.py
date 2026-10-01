@@ -22,7 +22,7 @@ DEFAULT_MODEL = "claude-opus-5"
 MAX_BYTES = 30 * 1024 * 1024          # API request ceiling is 32 MB
 # Bump when InvoiceFields gains something the comparison depends on; reads
 # stored under an older number are refreshed on the next run.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SYSTEM_PROMPT = """You read vendor invoices for an accounts-payable team. Report only what the document actually states; use null for anything not printed on it. Do not guess.
 
@@ -42,6 +42,8 @@ Field rules:
 - order_number: the vendor's own order / sales-order reference if printed ("S.O. #", "Order No", "Sales Order"); empty string if absent. Distinct from the customer PO.
 - ship_date: the date goods shipped, if printed (YYYY-MM-DD); some vendors' payment terms run from it. Empty string if absent.
 - project_references: customer job/project numbers printed anywhere on the document — per line item, per rental agreement, or in a reference field (typically 3-5 digit codes labeled Job, Project, PO line reference, or similar; on car-rental and travel bills each rental/booking often carries its own). Comma-separated in document order, duplicates kept once; empty string when none appear.
+- Payment instructions — where the vendor asks to be paid, exactly as printed (remittance stub, "Remit to", "Pay by ACH/wire", banking details box). remit_address: the remit-to mailing address on one line. remit_bank_name: the bank named for ACH/wire payments. remit_account_last4: the LAST FOUR digits of the bank account number printed for payment (never the full number; digits only). remit_routing_number: the ABA routing number printed for payment (9 digits). Empty strings when not printed. Do not use the vendor's own customer account number with us, a card number, or a lockbox number as the bank account.
+- bank_change_notice: true when the document says the vendor's bank, remittance, or payment details have changed or are new ("please update our banking information", "new remit-to", "we have changed banks", "do not pay the old account"); bank_change_text: that sentence as printed. False / empty otherwise.
 - is_invoice: false for statements, purchase orders, quotes, receipts, packing slips, credit memos, or anything that is not a bill for payment.
 - confidence: low when the scan is unreadable, fields are hand-written, or several invoices/amounts compete.
 - notes: anything a reviewer should know — multiple invoices in one file, a past-due balance included in the total, hand-written changes, missing pages."""
@@ -70,6 +72,12 @@ class InvoiceFields(BaseModel):
     tax: str = ""
     current_charges: str = ""
     project_references: str = ""
+    remit_address: str = ""
+    remit_bank_name: str = ""
+    remit_account_last4: str = ""
+    remit_routing_number: str = ""
+    bank_change_notice: bool = False
+    bank_change_text: str = ""
     confidence: Literal["high", "medium", "low"]
     notes: str
 
@@ -156,6 +164,9 @@ def extract_invoice(documents: list[dict], client=None) -> dict:
     if parsed is None:
         raise RuntimeError("Claude returned no structured fields for this attachment.")
     out = parsed.model_dump()
+    # The engine reuses a stored read only when it carries the current
+    # schema; without this stamp every run would re-read every attachment.
+    out["schema"] = SCHEMA_VERSION
     usage = getattr(resp, "usage", None)
     out["model"] = getattr(resp, "model", None) or model_name()
     out["usage"] = {"input": getattr(usage, "input_tokens", None),

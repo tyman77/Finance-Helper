@@ -5,10 +5,12 @@ paid in that batch gets one verdict that combines:
 
   - the Bill Check result (does the invoice say what was entered?), and
   - payment-fraud signals for the bill and its vendor, run BEFORE the money
-    leaves — bank details changed recently, a brand-new vendor, a first
-    payment, an amount far outside the vendor's history, a resubmitted
-    amount under a new invoice number, plus the vendor-master checks Cash
-    Proof already runs (lookalike names, shared emails, employee names).
+    leaves — bank details changed recently, banking details on the invoice
+    that don't match the vendor record, one person setting up the vendor /
+    entering the bill / approving it, a brand-new vendor, a first payment,
+    an amount far outside the vendor's history, a resubmitted amount under
+    a new invoice number, plus the vendor-master checks Cash Proof already
+    runs (lookalike names, shared emails, employee names).
 
 A bill that's flagged critical/high needs a decision before the run can be
 signed off: *release* (with a note — for a bank change, who was called and
@@ -29,6 +31,7 @@ from decimal import Decimal, InvalidOperation
 from statistics import median
 
 from .compare import SEVERITY_ORDER, normalize_vendor
+from .extract import SCHEMA_VERSION
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -97,8 +100,117 @@ def _signal(kind, severity, title, detail) -> dict:
     return {"kind": kind, "severity": severity, "title": title, "detail": detail}
 
 
+def _zip(text) -> str:
+    import re
+    found = re.findall(r"\b(\d{5})(?:-\d{4})?\b", str(text or ""))
+    return found[-1] if found else ""
+
+
+def remit_signals(extracted: dict | None, vendor: dict, accounts: list[dict]) -> list[dict]:
+    """Bank/remit details printed on the invoice vs the vendor in Bill.com.
+    Fake and altered invoices redirect payment by printing new banking
+    details; Bill.com pays whatever account is on the vendor record, so the
+    danger is someone updating that record to match the invoice."""
+    ex = extracted or {}
+    out: list[dict] = []
+    if ex.get("bank_change_notice"):
+        out.append(_signal(
+            "invoice_bank_notice", "critical",
+            "Invoice announces new bank details",
+            f"\u201c{ex.get('bank_change_text') or 'Bank/remittance details changed'}\u201d — "
+            "this is how payment-redirection fraud arrives. Don't update Bill.com from "
+            "the invoice or its email; call the vendor on a number you already had."))
+    inv4 = "".join(ch for ch in str(ex.get("remit_account_last4") or "") if ch.isdigit())[-4:]
+    inv_routing = "".join(ch for ch in str(ex.get("remit_routing_number") or "") if ch.isdigit())
+    if len(inv4) == 4:
+        on_file = [a for a in accounts if a.get("active", True)] or accounts
+        known = [a for a in on_file if a.get("account_last4")]
+        bank = f" at {ex['remit_bank_name']}" if ex.get("remit_bank_name") else ""
+        if not on_file:
+            out.append(_signal(
+                "invoice_bank_no_account", "high",
+                f"Invoice asks for ACH to account ending {inv4}",
+                f"The invoice prints bank details (account ending {inv4}{bank}) but "
+                "Bill.com has no bank account for this vendor, so it pays by check. "
+                "If anyone asks to add this account, verify it by phone first."))
+        elif not known:
+            out.append(_signal(
+                "invoice_bank_unchecked", "review",
+                f"Invoice bank account ending {inv4} not compared",
+                "Bill.com didn't return the vendor's account number, so the invoice's "
+                "banking details couldn't be compared. Check them against the vendor "
+                "record by hand."))
+        else:
+            match = [a for a in known if a["account_last4"] == inv4]
+            if not match:
+                ours = ", ".join(sorted({a["account_last4"] for a in known}))
+                out.append(_signal(
+                    "invoice_bank_mismatch", "critical",
+                    f"Invoice bank account …{inv4} ≠ Bill.com …{ours}",
+                    f"The invoice asks for payment to account ending {inv4}{bank}; Bill.com "
+                    f"pays this vendor to account ending {ours}. Either the invoice was "
+                    "altered or the vendor changed banks — call the vendor on a number "
+                    "you already had before paying or changing anything."))
+            elif inv_routing and len(inv_routing) == 9 and all(
+                    a.get("routing") and a["routing"] != inv_routing for a in match):
+                out.append(_signal(
+                    "invoice_routing_mismatch", "critical",
+                    f"Invoice routing number {inv_routing} differs from Bill.com",
+                    "Same last four account digits but a different bank routing number — "
+                    "a different account. Verify by phone before paying."))
+    inv_zip, our_zip = _zip(ex.get("remit_address")), (vendor.get("zip") or "")[:5]
+    if inv_zip and our_zip and inv_zip != our_zip:
+        out.append(_signal(
+            "remit_address_differs", "review",
+            f"Remit-to ZIP {inv_zip} ≠ Bill.com {our_zip}",
+            f"The invoice's remit-to address ({ex.get('remit_address')}) is not the "
+            f"address on the vendor record ({vendor.get('address') or our_zip}). Often a "
+            "lockbox; confirm before changing the vendor's address."))
+    return out
+
+
+def same_person_signals(bill: dict, vendor: dict, approvers: list[dict] | None,
+                        users: dict) -> list[dict]:
+    """Segregation of duties: one person able to create a payee, enter a bill
+    to it and approve that bill can pay anyone they like."""
+    def who(uid):
+        u = users.get(str(uid)) or {}
+        return u.get("name") or u.get("email") or f"user {uid}"
+
+    entered = str(bill.get("created_by") or "")
+    set_up = str(vendor.get("created_by") or "")
+    approver_ids = {a.get("user_id") for a in approvers or [] if a.get("user_id")}
+    if entered and set_up and entered == set_up and entered in approver_ids:
+        return [_signal(
+            "same_person_all", "critical",
+            f"{who(entered)} set up the vendor, entered the bill and approves it",
+            "One person controls every step of this payment. Have someone else "
+            "confirm the vendor is real and the work was received before release.")]
+    out = []
+    if entered and entered in approver_ids:
+        out.append(_signal(
+            "same_person_enter_approve", "high",
+            f"{who(entered)} entered and approves this bill",
+            "The person who entered the bill is also on its approval chain, so the "
+            "approval isn't independent. Have another approver review it."))
+    if set_up and set_up in approver_ids and set_up != entered:
+        out.append(_signal(
+            "same_person_vendor_approve", "high",
+            f"{who(set_up)} set up this vendor and approves its bill",
+            "The approver created the payee they're approving payment to. Confirm the "
+            "vendor independently."))
+    if entered and set_up and entered == set_up and entered not in approver_ids:
+        out.append(_signal(
+            "same_person_vendor_enter", "review",
+            f"{who(entered)} set up the vendor and entered the bill",
+            "Common in a small AP team; the approval step is the independent check "
+            "here, so make sure it was done by someone else."))
+    return out
+
+
 def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
-                  today: date) -> list[dict]:
+                  today: date, extracted: dict | None = None,
+                  approvers: list[dict] | None = None) -> list[dict]:
     """Payment-fraud signals for one bill about to be paid."""
     out: list[dict] = []
     vendor_id = bill.get("vendor_id") or ""
@@ -172,6 +284,12 @@ def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
                     "invoice number."))
                 break
 
+    accounts = [a for a in master.get("bank_accounts") or []
+                if str(a.get("vendor_id")) == str(vendor_id)]
+    out.extend(remit_signals(extracted, vendor, accounts))
+    users = {str(u.get("id")): u for u in master.get("users") or []}
+    out.extend(same_person_signals(bill, vendor, approvers, users))
+
     for f in vendor_findings:
         if str(vendor_id) in {str(i) for i in f.get("vendor_ids") or []}:
             out.append(_signal(f["kind"], f["severity"], f["title"], f["detail"]))
@@ -213,7 +331,7 @@ def signals_key(bill: dict, signals: list[dict], check_sev: str) -> str:
 
 def build(results: list[dict], master: dict, people: list[str], today: date,
           decisions: dict | None = None, pay_weekday: int = 4,
-          horizon_days: int = 7) -> dict:
+          horizon_days: int = 7, approvers: dict | None = None) -> dict:
     """The pay-run view: every bill going out on the next pay date, with its
     combined verdict, decision state, and the batch totals."""
     from ..recon.checks import vendor_master_checks
@@ -229,7 +347,9 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
         if not bill.get("id") or not in_run(bill, pay_date, horizon_days):
             continue
         check_sev, check_line = _check_status(r)
-        signals = fraud_signals(bill, master or {}, vendor_findings, today)
+        signals = fraud_signals(bill, master or {}, vendor_findings, today,
+                                extracted=r.get("extracted"),
+                                approvers=(approvers or {}).get(bill["id"]))
         severity = min([check_sev] + [s["severity"] for s in signals],
                        key=lambda s: SEVERITY_ORDER.get(s, 9))
         key = signals_key(bill, signals, check_sev)
@@ -241,6 +361,7 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
             "bill_id": bill["id"], "bill": bill, "severity": severity,
             "check_severity": check_sev, "check_line": check_line,
             "check_status": r.get("status"), "signals": signals, "key": key,
+            "extracted_schema": ((r.get("extracted") or {}).get("schema") or 0) >= SCHEMA_VERSION,
             "decision": decision,
             "needs_decision": severity in ("critical", "high"),
             "past_due": bool(due and due < pay_date),

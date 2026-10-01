@@ -164,6 +164,8 @@ def test_payrun_page_decide_and_sign_off(client, monkeypatch):
     page = client.get("/billcheck/payrun").get_data(as_text=True)
     assert "Steady Freight" in page and "Bank details added" in page
     assert "still need a release or hold" in page
+    # Checks that couldn't run are listed, not silently skipped.
+    assert "who entered them" in page and "Approvers not pulled for 2" in page
 
     resp = client.post("/billcheck/payrun/signoff")
     assert resp.status_code == 302
@@ -210,3 +212,111 @@ def test_refresh_runs_bill_check_and_returns_to_payrun(client, monkeypatch):
     done = client.get(resp.headers["Location"])
     assert done.headers["Location"].endswith("/billcheck/payrun")
     assert pulled == [1]
+
+
+# --- invoice bank details vs Bill.com ----------------------------------------
+
+ACCTS = [{"vendor_id": "v1", "account_last4": "4321", "routing": "111000025", "active": True}]
+VENDOR = {"id": "v1", "zip": "80202", "address": "1 Main St, Denver, CO, 80202"}
+
+
+def _kinds(sig):
+    return [s["kind"] for s in sig]
+
+
+def test_invoice_without_bank_details_is_quiet():
+    assert payrun.remit_signals({"remit_account_last4": ""}, VENDOR, ACCTS) == []
+    assert payrun.remit_signals(None, VENDOR, ACCTS) == []
+
+
+def test_invoice_bank_matching_bill_com_is_quiet():
+    ex = {"remit_account_last4": "4321", "remit_routing_number": "111000025",
+          "remit_address": "1 Main St, Denver CO 80202"}
+    assert payrun.remit_signals(ex, VENDOR, ACCTS) == []
+
+
+def test_invoice_bank_account_differs_is_critical():
+    sig = payrun.remit_signals({"remit_account_last4": "9999", "remit_bank_name": "Chase"},
+                               VENDOR, ACCTS)
+    assert _kinds(sig) == ["invoice_bank_mismatch"] and sig[0]["severity"] == "critical"
+    assert "9999" in sig[0]["title"] and "4321" in sig[0]["title"]
+
+
+def test_same_last4_different_routing_is_critical():
+    sig = payrun.remit_signals({"remit_account_last4": "4321",
+                                "remit_routing_number": "021000021"}, VENDOR, ACCTS)
+    assert _kinds(sig) == ["invoice_routing_mismatch"]
+
+
+def test_invoice_bank_but_vendor_paid_by_check():
+    sig = payrun.remit_signals({"remit_account_last4": "9999"}, VENDOR, [])
+    assert _kinds(sig) == ["invoice_bank_no_account"] and sig[0]["severity"] == "high"
+
+
+def test_bill_com_hides_account_numbers():
+    sig = payrun.remit_signals({"remit_account_last4": "9999"}, VENDOR,
+                               [{"vendor_id": "v1", "account_last4": "", "active": True}])
+    assert _kinds(sig) == ["invoice_bank_unchecked"] and sig[0]["severity"] == "review"
+
+
+def test_bank_change_notice_on_invoice():
+    sig = payrun.remit_signals({"bank_change_notice": True,
+                                "bank_change_text": "Please update our banking info"},
+                               VENDOR, ACCTS)
+    assert sig[0]["kind"] == "invoice_bank_notice" and sig[0]["severity"] == "critical"
+    assert "update our banking" in sig[0]["detail"]
+
+
+def test_remit_zip_differs_is_review():
+    sig = payrun.remit_signals({"remit_address": "PO Box 9, Dallas, TX 75201-1234"},
+                               VENDOR, ACCTS)
+    assert _kinds(sig) == ["remit_address_differs"] and sig[0]["severity"] == "review"
+
+
+# --- same person ---------------------------------------------------------------
+
+USERS = {"u1": {"name": "Pat Clerk"}, "u2": {"name": "Sam Boss"}}
+
+
+def test_one_person_every_step_is_critical():
+    sig = payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u1"},
+                                     [{"user_id": "u1"}, {"user_id": "u2"}], USERS)
+    assert _kinds(sig) == ["same_person_all"] and "Pat Clerk" in sig[0]["title"]
+
+
+def test_entered_and_approves_is_high():
+    sig = payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u2"},
+                                     [{"user_id": "u1"}], USERS)
+    assert _kinds(sig) == ["same_person_enter_approve"]
+
+
+def test_approver_set_up_the_vendor_is_high():
+    sig = payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u2"},
+                                     [{"user_id": "u2"}], USERS)
+    assert _kinds(sig) == ["same_person_vendor_approve"] and "Sam Boss" in sig[0]["title"]
+
+
+def test_independent_approval_is_quiet_or_review():
+    assert payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u3"},
+                                      [{"user_id": "u2"}], USERS) == []
+    sig = payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u1"},
+                                     [{"user_id": "u2"}], USERS)
+    assert _kinds(sig) == ["same_person_vendor_enter"] and sig[0]["severity"] == "review"
+
+
+def test_unknown_creators_raise_nothing():
+    assert payrun.same_person_signals({}, {}, [{"user_id": "u1"}], USERS) == []
+
+
+def test_build_wires_extracted_and_approvers_through():
+    master = {**MASTER, "users": [{"id": "u1", "name": "Pat Clerk"}],
+              "vendors": [dict(v, created_by="u1") if v["id"] == "v1" else v
+                          for v in MASTER["vendors"]],
+              "bank_accounts": [{"vendor_id": "v1", "account_last4": "4321",
+                                 "created": "2021-01-01", "active": True}]}
+    r = _result(_bill("x", created_by="u1"))
+    r["extracted"] = {"remit_account_last4": "9999", "schema": extract.SCHEMA_VERSION}
+    view = payrun.build([r], master, [], THU, approvers={"x": [{"user_id": "u1"}]})
+    kinds = _kinds(view["rows"][0]["signals"])
+    assert kinds[:2] == ["invoice_bank_mismatch", "same_person_all"]
+    assert view["rows"][0]["severity"] == "critical"

@@ -58,6 +58,9 @@ def test_extract_invoice_calls_parse_with_structured_output(monkeypatch):
     out = extract.extract_invoice(PDF, client=client)
     assert out["vendor"] == "Acme" and out["terms_days"] == 30
     assert out["model"] == "claude-test"
+    # Stamped so the engine can reuse this read on later runs.
+    assert out["schema"] == extract.SCHEMA_VERSION
+    assert out["bank_change_notice"] is False and out["remit_account_last4"] == ""
     assert out["usage"] == {"input": 1200, "output": 80,
                             "cache_read": None, "cache_write": None}
     kw = client.kwargs

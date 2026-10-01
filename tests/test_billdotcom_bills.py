@@ -228,3 +228,53 @@ def test_fetch_bill_documents_prefers_originals(fake_v2, monkeypatch):
     docs = api.fetch_bill_documents("b1")
     assert len(docs) == 1 and docs[0]["name"] == "vendor-invoice.pdf"
     assert docs[0]["data"].startswith(b"%PDF")
+
+
+def test_master_index_keeps_bank_last4_creators_and_users(fake_v2, monkeypatch):
+    for k in api._REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setitem(ENTITIES, "VendorBankAccount", [
+        {"vendorId": "v1", "accountNumber": "000123456789", "routingNumber": "111000025",
+         "createdTime": "2026-09-01T00:00:00", "isActive": "1", "createdBy": "u9"}])
+    monkeypatch.setitem(ENTITIES, "User", [
+        {"id": "u9", "firstName": "Pat", "lastName": "Clerk", "email": "Pat@x.com"}])
+    monkeypatch.setitem(ENTITIES, "Vendor", [
+        {"id": "v1", "name": "Acme", "createdBy": "u9", "address1": "1 Main",
+         "addressCity": "Denver", "addressState": "CO", "addressZip": "80202-1111"}])
+    m = api.fetch_master_index()
+    acct = m["bank_accounts"][0]
+    assert acct["account_last4"] == "6789" and acct["routing"] == "111000025"
+    assert "000123456789" not in json.dumps(m)           # never the full number
+    assert m["vendors"][0]["created_by"] == "u9" and m["vendors"][0]["zip"] == "80202"
+    assert m["users"] == [{"id": "u9", "name": "Pat Clerk", "email": "pat@x.com"}]
+    # Bills came back without a creator field -> nothing claimed; vendors had one.
+    assert not any("Vendor: no creator" in g for g in m["gaps"])
+
+
+def test_master_index_reports_missing_fields_as_gaps(fake_v2, monkeypatch):
+    for k in api._REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setitem(ENTITIES, "VendorBankAccount", [
+        {"vendorId": "v1", "createdTime": "2026-09-01", "isActive": "1"}])
+    m = api.fetch_master_index()
+    assert any("no creator field" in g for g in m["gaps"])
+    assert any("no account numbers" in g for g in m["gaps"])
+
+
+def test_fetch_bill_approvers(monkeypatch):
+    monkeypatch.setattr(api, "_v2_login", lambda http=None: ("key", "sess"))
+    seen = []
+
+    def call(path, data, http=None):
+        bill = json.loads(data["data"])["objectId"]
+        seen.append((path, bill))
+        if bill == "bad":
+            raise RuntimeError("Bill.com v2 error: no access")
+        return [{"usersId": "u1", "status": "2"}, {"usersId": "u2", "status": "0"}]
+
+    monkeypatch.setattr(api, "_v2_call", call)
+    out, errors = api.fetch_bill_approvers(["b1", "bad"])
+    assert out == {"b1": [{"user_id": "u1", "status": "2"}, {"user_id": "u2", "status": "0"}]}
+    assert len(errors) == 1 and errors[0].startswith("bad:")
+    assert seen[0][0] == "ListApprovers.json"
+    assert api.fetch_bill_approvers([]) == ({}, [])

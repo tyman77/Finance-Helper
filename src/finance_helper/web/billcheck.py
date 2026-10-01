@@ -84,6 +84,30 @@ def _refresh_master(log) -> None:
             "(fraud checks use the last copy)")
 
 
+def _run_bill_ids() -> list[str]:
+    cfg = payrun.settings()
+    pay_date = payrun.next_pay_date(datetime.now().date(), cfg["pay_weekday"])
+    return [r["bill_id"] for r in bc_store.list_results()
+            if r.get("bill_id") and payrun.in_run(r.get("bill") or {}, pay_date,
+                                                  cfg["horizon_days"])]
+
+
+def _refresh_approvers(log) -> None:
+    """Who is on each pay-run bill's approval chain — one Bill.com call per
+    bill, so only the coming run's bills are asked. Failure is logged."""
+    from .refresh import _write
+    ids = _run_bill_ids()
+    try:
+        approvers, errors = billdotcom_api.fetch_bill_approvers(ids)
+    except Exception as exc:
+        approvers, errors = {}, [f"approver lookup failed: {str(exc)[:160]}"]
+    _write("billdotcom_approvers.json", {
+        "fetched": datetime.now().isoformat(timespec="seconds"),
+        "approvers": approvers, "errors": errors})
+    log(f"· Approvers pulled for {len(approvers)} of {len(ids)} pay-run bills"
+        + (f" — {len(errors)} failed (e.g. {errors[0]})" if errors else ""))
+
+
 def _people() -> list[str]:
     """Employee names, for the vendor-named-like-an-employee check — the
     same sources Cash Proof uses."""
@@ -118,6 +142,7 @@ def _execute(job_id, job, who, limit, force):
                          extract.extract_invoice, log=log, who=who,
                          limit=limit, force=force,
                          history_bills=_history_bills())
+        _refresh_approvers(log)
         job["status"] = "done"
     except Exception as exc:
         job["status"] = "error"
@@ -356,10 +381,37 @@ def _payrun_view(state: dict | None = None):
     cfg = payrun.settings()
     pay_date = payrun.next_pay_date(datetime.now().date(), cfg["pay_weekday"]).isoformat()
     state = state or payrun.load(pay_date)
+    approvers = _data_json("billdotcom_approvers.json", {}) or {}
     view = payrun.build(bc_store.list_results(), _master(), _people(),
                         datetime.now().date(), decisions=state.get("decisions"),
-                        pay_weekday=cfg["pay_weekday"], horizon_days=cfg["horizon_days"])
+                        pay_weekday=cfg["pay_weekday"], horizon_days=cfg["horizon_days"],
+                        approvers=approvers.get("approvers") or {})
     return view, state
+
+
+def _payrun_gaps(view: dict) -> list[str]:
+    """Checks that couldn't run on this batch, said out loud — a skipped
+    fraud check must never look like a clean one."""
+    gaps = list(_master().get("gaps") or [])
+    rows = view["rows"]
+    if not rows:
+        return gaps
+    if not any(x["bill"].get("created_by") for x in rows):
+        gaps.append("Bills: Bill.com didn't say who entered them — the same-person "
+                    "check can't run")
+    appr = _data_json("billdotcom_approvers.json", {}) or {}
+    have = appr.get("approvers") or {}
+    missing = [x for x in rows if x["bill_id"] not in have]
+    if missing:
+        gaps.append(f"Approvers not pulled for {len(missing)} bill(s) — refresh to "
+                    "run the same-person check on them")
+    for e in (appr.get("errors") or [])[:3]:
+        gaps.append(f"Approver lookup: {e}")
+    unread = [x for x in rows if not (x.get("extracted_schema"))]
+    if unread:
+        gaps.append(f"{len(unread)} bill(s) not yet read with bank-detail extraction — "
+                    "their invoice banking details weren't compared")
+    return gaps
 
 
 @billcheck_bp.get("/payrun")
@@ -367,11 +419,11 @@ def payrun_page():
     view, state = _payrun_view()
     master = _master()
     return render_template(
-        "billcheck_payrun.html", v=view, state=state,
+        "billcheck_payrun.html", v=view, state=state, gaps=_payrun_gaps(view),
         signed=payrun.signoff_current(state, view),
         history=[h for h in payrun.recent_signoffs() if h.get("pay_date") != view["pay_date"]],
         ready=_readiness(), running=_running_job(), last_run=bc_store.load_run_summary(),
-        master_gaps=master.get("gaps") or [], has_master=bool(master.get("vendors")),
+        has_master=bool(master.get("vendors")),
         horizon=payrun.settings()["horizon_days"])
 
 
