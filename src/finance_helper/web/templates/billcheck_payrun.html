@@ -87,12 +87,21 @@ Bill.com — hold a bill there yourself.</p>
 
 {% if v.rows %}
 <p class="subtle"><a href="{{ url_for('billcheck.payrun_csv') }}">Download this pay run as CSV ↓</a></p>
+<div class="filters" id="run-filters">
+  <button type="button" class="filter-btn status-unknown" data-filter="needs">Needs review (<span data-count="needs">0</span>)</button>
+  <button type="button" class="filter-btn status-pick" data-filter="held">Held (<span data-count="held">0</span>)</button>
+  <button type="button" class="filter-btn status-auto" data-filter="released">Released (<span data-count="released">0</span>)</button>
+  <button type="button" class="filter-btn" data-filter="ok">OK to pay (<span data-count="ok">0</span>)</button>
+  <button type="button" class="filter-btn" data-filter="all">All (<span data-count="all">0</span>)</button>
+</div>
+<p class="subtle" id="run-empty" hidden>Nothing left to review ✓ — every flagged bill has a decision.</p>
 <div class="tablewrap"><table class="runs">
   <thead><tr><th></th><th>Vendor</th><th>Invoice #</th><th>Due</th><th class="amt">Amount</th>
     <th>Invoice check</th><th>Fraud signals</th><th>Decision</th></tr></thead>
   <tbody>
   {% for x in v.rows %}{% set b = x.bill %}
-    <tr id="bill-{{ x.bill_id }}">
+    {% set state = 'held' if (x.decision and x.decision.action == 'hold') else ('released' if x.decision else ('needs' if x.needs_decision else 'ok')) %}
+    <tr id="bill-{{ x.bill_id }}" data-state="{{ state }}">
       <td>{{ sev_pill(x.severity) }}</td>
       <td>{{ b.vendor or '—' }}{% set note = b.note or (x.list_line.note if x.list_line else '') %}{% if note %}
         <div class="subtle">📝 {{ note }}</div>{% endif %}</td>
@@ -149,6 +158,37 @@ Bill.com — hold a bill there yourself.</p>
 {% endif %}
 </div>
 <script>
+// Filter the run by decision state: needs review / held / released / OK.
+let runFilter = "needs";
+function applyFilter() {
+  const rows = document.querySelectorAll("tr[data-state]");
+  const counts = { needs: 0, held: 0, released: 0, ok: 0, all: rows.length };
+  rows.forEach((r) => {
+    counts[r.dataset.state] += 1;
+    r.hidden = runFilter !== "all" && r.dataset.state !== runFilter;
+  });
+  for (const [k, n] of Object.entries(counts)) {
+    const el = document.querySelector(`[data-count="${k}"]`);
+    if (el) el.textContent = n;
+  }
+  document.querySelectorAll("#run-filters .filter-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.filter === runFilter));
+  const empty = document.getElementById("run-empty");
+  if (empty) empty.hidden = !(runFilter === "needs" && counts.needs === 0);
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("#run-filters .filter-btn");
+  if (!b) return;
+  runFilter = b.dataset.filter;
+  applyFilter();
+});
+document.addEventListener("DOMContentLoaded", () => {
+  // Open on what still needs a decision; if nothing does, show everything.
+  const pending = document.querySelectorAll('tr[data-state="needs"]').length;
+  runFilter = pending ? "needs" : "all";
+  applyFilter();
+});
+
 // Copy the Slack message (delegated: the section is swapped in place).
 document.addEventListener("click", async (e) => {
   if (!e.target.closest("#slack-copy")) return;
@@ -179,6 +219,9 @@ document.addEventListener("submit", async (e) => {
     const fresh = doc.getElementById(row.id);
     if (!fresh) throw new Error("row missing");
     row.querySelector(".decision-cell").replaceWith(fresh.querySelector(".decision-cell"));
+    row.dataset.state = fresh.dataset.state;
+    // Let the saved decision show for a moment before the filter hides it.
+    setTimeout(applyFilter, 700);
     for (const id of ["payrun-kpis", "payrun-signoff"]) {
       const el = document.getElementById(id), next = doc.getElementById(id);
       if (el && next) el.replaceWith(next);
