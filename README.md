@@ -396,10 +396,11 @@ from the bank export):
   the vendor's largest earlier bill; the same amount billed under another invoice
   number within 30 days; lookalike vendor names or a shared email; invoice
   not verified (no attachment or unreadable).
-- **review**: remit-to ZIP differs from the vendor record (often a
-  lockbox); the same person set up the vendor and entered the bill (with
-  someone else approving); first bill from a vendor; personal payment
-  email.
+
+Only findings that need a release/hold decision are shown — lower-level
+"worth a look" flags (round amounts, past due, short pays, first bill from
+a vendor, personal payment email, remit-to address, approval in progress)
+were dropped as noise.
 
 Bank details are read off the invoice PDF along with the other fields; only
 the last four digits of any account number are kept, from the invoice and
@@ -417,12 +418,11 @@ Balance due, with the list total above the header) and it becomes the run:
 - Each line is checked on its own: an invoice number that's a date or has
   an added symbol (`901172250*` — the usual way past the duplicate check;
   critical if the plain number is already in Bill.com), a person as the
-  payee, due date = invoice date when the vendor's other bills have terms,
-  wires (from the note column), short-paid lines, round amounts, past-due
-  bills, one line taking 20%+ of the run, duplicates on the list.
+  payee ($10,000+), due date = invoice date when the vendor's other bills
+  have terms, wires (from the note column), one line taking 20%+ of the
+  run, duplicates on the list.
 - Against Bill.com: a bill Bill.com has *scheduled* that isn't on the list
-  is critical; an amount that changed since the list is high; a changed
-  due date is review. Unscheduled Bill.com bills not on the list drop out
+  is critical; an amount that changed since the list is high. Unscheduled Bill.com bills not on the list drop out
   of the run; list lines Bill.com doesn't have are shown separately.
 - Without Bill.com connected, the run is built from the list alone (and
   the page says which checks that leaves out).
@@ -430,6 +430,11 @@ Balance due, with the list total above the header) and it becomes the run:
 The uploaded file is kept next to the run (`billcheck/payruns/`), the upload
 is logged, replacing it voids the sign-off, and the sign-off records which
 list it was given against.
+
+**Message for the accounting team.** Below the sign-off, the page writes a
+short Slack message — pay date, how many bills and how much is releasing,
+which bills to hold and why (the note, or the flag), and how many flagged
+bills were checked — with a Copy button. It updates as bills are decided.
 
 Every critical or high bill needs **Release** or **Hold** (one click; a note
 is optional, e.g. for a bank change who you called; on a hold, pull it from

@@ -73,7 +73,7 @@ def test_recent_bank_change_is_critical_even_on_a_known_vendor():
 def test_new_vendor_first_payment():
     kinds = {s["kind"] for s in payrun.fraud_signals(
         _bill("x", vendor="Brand New LLC", vendor_id="v2"), MASTER, [], THU)}
-    assert {"new_vendor", "first_payment"} <= kinds
+    assert kinds == {"new_vendor"}            # "first bill" alone is no longer flagged
 
 
 def test_amount_far_above_vendor_history():
@@ -272,9 +272,10 @@ def test_invoice_bank_but_vendor_paid_by_check():
 
 
 def test_bill_com_hides_account_numbers():
+    # Nothing to compare against: reported once as a gap, not on every bill.
     sig = payrun.remit_signals({"remit_account_last4": "9999"}, VENDOR,
                                [{"vendor_id": "v1", "account_last4": "", "active": True}])
-    assert _kinds(sig) == ["invoice_bank_unchecked"] and sig[0]["severity"] == "review"
+    assert sig == []
 
 
 def test_bank_change_notice_on_invoice():
@@ -285,10 +286,10 @@ def test_bank_change_notice_on_invoice():
     assert "update our banking" in sig[0]["detail"]
 
 
-def test_remit_zip_differs_is_review():
+def test_remit_zip_differs_is_not_flagged():
     sig = payrun.remit_signals({"remit_address": "PO Box 9, Dallas, TX 75201-1234"},
                                VENDOR, ACCTS)
-    assert _kinds(sig) == ["remit_address_differs"] and sig[0]["severity"] == "review"
+    assert sig == []
 
 
 # --- same person ---------------------------------------------------------------
@@ -314,12 +315,12 @@ def test_approver_set_up_the_vendor_is_high():
     assert _kinds(sig) == ["same_person_vendor_approve"] and "Sam Boss" in sig[0]["title"]
 
 
-def test_independent_approval_is_quiet_or_review():
+def test_independent_approval_is_quiet():
     assert payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u3"},
                                       [{"user_id": "u2"}], USERS) == []
-    sig = payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u1"},
-                                     [{"user_id": "u2"}], USERS)
-    assert _kinds(sig) == ["same_person_vendor_enter"] and sig[0]["severity"] == "review"
+    # Set up the vendor and entered the bill, but someone else approves.
+    assert payrun.same_person_signals({"created_by": "u1"}, {"created_by": "u1"},
+                                      [{"user_id": "u2"}], USERS) == []
 
 
 def test_unknown_creators_raise_nothing():

@@ -71,7 +71,7 @@ technik technologies technology tech international industries labs wire cable st
 
 SHARE_FLAG = Decimal("0.20")         # one line >= 20% of the list ...
 SHARE_MIN = Decimal("50000")         # ... and at least this much -> high
-ROUND_MIN = Decimal("1000")
+INDIVIDUAL_MIN = Decimal("10000")   # a person as payee is flagged from here up
 
 
 def _norm_header(text) -> str:
@@ -205,7 +205,7 @@ def line_signals(lines: list[dict], pay_date: date, people: list[str] | None = N
 
     for x in lines:
         s = out[x["row"]]
-        bal, amt = _dec(x["balance"]) or Decimal(0), _dec(x["amount"]) or Decimal(0)
+        bal = _dec(x["balance"]) or Decimal(0)
         inv, note = x["invoice"], (x["note"] or "").lower()
 
         if seen[line_key(x["vendor"], inv)] > 1:
@@ -237,10 +237,8 @@ def line_signals(lines: list[dict], pay_date: date, people: list[str] | None = N
             s.append(_sig("list_vendor_employee", "critical", "Vendor named like an employee",
                           f"{x['vendor']} matches an employee's name. Confirm this isn't an "
                           "employee paying themselves as a vendor."))
-        elif looks_like_person(x["vendor"]):
-            big = bal >= Decimal("10000")
-            s.append(_sig("list_individual", "high" if big else "review",
-                          "Paying an individual" + (f" ${bal:,.0f}" if big else ""),
+        elif looks_like_person(x["vendor"]) and bal >= INDIVIDUAL_MIN:
+            s.append(_sig("list_individual", "high", f"Paying an individual ${bal:,.0f}",
                           f"{x['vendor']} looks like a person, not a business. Confirm who "
                           "they are, what the work was, and who approved it."))
 
@@ -254,34 +252,18 @@ def line_signals(lines: list[dict], pay_date: date, people: list[str] | None = N
                               f"(would be {(i + timedelta(days=usual[0])).isoformat()})."))
             # With nothing to compare against it's usually prepay / due on
             # receipt — not worth a flag.
-        if d and d < pay_date:
-            s.append(_sig("list_past_due", "review", f"Past due ({d.isoformat()})",
-                          "Already past due on pay day. If this was an early-pay discount "
-                          "date, the discount may be lost."))
-
         if "wire" in note:
             s.append(_sig("list_wire", "high", "Paid by wire",
                           "Wires can't be pulled back. Check the wire instructions against "
                           "what you've paid this vendor before — never against the invoice "
                           "or the email it came with."))
 
-        if amt and bal < amt:
-            s.append(_sig("list_short_pay", "review", f"Paying ${amt - bal:,.2f} less than invoiced",
-                          "Balance due is below the invoice amount. Confirm a credit memo "
-                          "or partial payment explains it."))
-        if bal >= ROUND_MIN and bal % 100 == 0:
-            s.append(_sig("list_round", "review", f"Round amount ${bal:,.0f}",
-                          "Round amounts are normal for fees and quotes, and common in "
-                          "made-up invoices. Confirm you recognize it."))
         share = bal / total
         if share >= SHARE_FLAG and bal >= SHARE_MIN:
             s.append(_sig("list_large_share", "high", f"{share * 100:.0f}% of this run",
                           f"${bal:,.2f} is a large share of the week. Payments this size are "
                           "what bank-change scams target — confirm the bank account by phone "
                           "on a number you already had."))
-        elif bal >= SHARE_MIN:
-            s.append(_sig("list_large", "review", f"Large payment ${bal:,.0f}",
-                          "Confirm the bank account on file hasn't changed recently."))
     return dict(out)
 
 
