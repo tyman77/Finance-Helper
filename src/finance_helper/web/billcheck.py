@@ -539,9 +539,6 @@ def payrun_decide(bill_id):
         flash("That bill isn't in this pay run.")
     elif action not in payrun.DECISIONS:
         flash("Pick release or hold.")
-    elif not note:
-        flash("A note is required — for a bank change, who you called and on what "
-              "number; for a hold, why.")
     else:
         payrun.record_decision(view["pay_date"], bill_id, row["key"], action, note, _who())
         flash(f"{row['bill'].get('vendor')} #{row['bill'].get('invoice')}: "

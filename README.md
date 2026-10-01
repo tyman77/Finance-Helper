@@ -431,8 +431,8 @@ The uploaded file is kept next to the run (`billcheck/payruns/`), the upload
 is logged, replacing it voids the sign-off, and the sign-off records which
 list it was given against.
 
-Every critical or high bill needs **Release** (with a note: for a bank
-change, who you called and on what number) or **Hold** (then pull it from
+Every critical or high bill needs **Release** or **Hold** (one click; a note
+is optional, e.g. for a bank change who you called; on a hold, pull it from
 the run in Bill.com yourself; nothing is written to Bill.com). Once every
 flag is decided, **Sign off** records who released how many bills and for
 how much. A decision or sign-off stops counting if the bill or the batch
