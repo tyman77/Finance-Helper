@@ -79,6 +79,20 @@ def test_new_vendor_first_payment():
 def test_amount_far_above_vendor_history():
     sig = payrun.fraud_signals(_bill("x", amount="5000.00"), MASTER, [], THU)
     assert [s["kind"] for s in sig] == ["amount_outlier"]
+    assert "$480.00" in sig[0]["detail"]
+
+
+def test_big_but_normal_for_a_high_variance_vendor_is_quiet():
+    # The QSC case: 4x the median, but well inside what the vendor has
+    # billed before.
+    hist = [{"id": f"q{i}", "vendor": "QSC", "invoice": f"Q{i}",
+             "invoice_date": "2026-01-01", "amount": a}
+            for i, a in enumerate(["1226.36"] * 780 + ["9800.00", "15400.00"] * 5)]
+    master = {**MASTER, "bills": hist}
+    sig = payrun.fraud_signals(_bill("x", vendor="QSC", amount="4864.86"), master, [], THU)
+    assert "amount_outlier" not in {s["kind"] for s in sig}
+    sig = payrun.fraud_signals(_bill("y", vendor="QSC", amount="25000.00"), master, [], THU)
+    assert "amount_outlier" in {s["kind"] for s in sig}
 
 
 def test_same_amount_new_invoice_number():
