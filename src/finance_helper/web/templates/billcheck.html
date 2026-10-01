@@ -54,6 +54,10 @@ fix the entry there, mark it <em>fixed</em>, and the next run re-verifies it.</p
     <div class="kpi-sub">unpaid in Bill.com</div></div>
 </div>
 
+<p class="subtle"><a href="{{ url_for('billcheck.learning') }}">Learning →</a>
+  {% if proposal_count %}<span class="status-pill status-review">{{ proposal_count }} rule{{ 's' if proposal_count != 1 }} proposed</span>{% endif %}
+  <span class="subtle">standing notes, what the reviewer's decisions have taught it</span></p>
+
 <h2>{% if show_all %}All bills{% else %}Needs a look{% endif %}</h2>
 <p class="subtle">
   {% if show_all %}<a href="{{ url_for('billcheck.landing') }}">Show open items only</a>

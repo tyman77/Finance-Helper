@@ -202,3 +202,73 @@ def test_nightly_schedule_math_and_single_start(monkeypatch):
     assert bc.start_nightly() is True
     assert bc.start_nightly() is False          # already running
     assert started == [1]
+
+
+# --- learning page ----------------------------------------------------------
+
+def test_learning_page_notes_and_proposal_flow(client, fakes):
+    from finance_helper.billcheck import learn
+    _run(client)
+    body = client.get("/billcheck/learning").data
+    assert b"What Bill Check has learned" in body and b"Nothing proposed yet" in body
+
+    resp = client.post("/billcheck/learning/notes", data={"notes": "Acme runs from ship date"})
+    assert resp.status_code == 302
+    assert learn.standing_notes() == "Acme runs from ship date"
+    assert b"Acme runs from ship date" in client.get("/billcheck/learning").data
+
+    # Two accepts on the late Acme bill (re-entered twice) → a proposal.
+    client.post("/billcheck/bill/b-late/disposition", data={"action": "accept", "note": "ship date"})
+    from finance_helper.billcheck import store as bc_store
+    r = bc_store.load_result("b-late")
+    r["bill"]["invoice"] = "INV-1002"
+    bc_store.save_result("b-late", r)
+    client.post("/billcheck/bill/b-late/disposition", data={"action": "accept", "note": "ship date"})
+    body = client.get("/billcheck/learning").data
+    assert b"Proposed rules" in body and b"Acme Supply Co" in body and b"due date" in body
+    assert b"1 rule proposed" in client.get("/billcheck/").data
+
+    resp = client.post("/billcheck/learning/confirm",
+                       data={"vendor": "Acme Supply Co", "field": "due_date", "note": "ship date terms"})
+    assert resp.status_code == 302
+    assert learn.learned_policies()["Acme Supply Co"]["ignore_findings"] == ["due_date"]
+    body = client.get("/billcheck/learning").data
+    assert b"Learned rules in force" in body and b"Un-learn" in body and b"ship date terms" in body
+    assert b"rule proposed" not in client.get("/billcheck/").data
+
+    resp = client.post("/billcheck/learning/remove", data={"vendor": "Acme Supply Co", "field": "due_date"})
+    assert resp.status_code == 302 and learn.learned_policies() == {}
+
+
+def test_bill_page_offers_inline_rule_after_repeat_accepts(client, fakes, monkeypatch):
+    from finance_helper.billcheck import store as bc_store
+    _run(client)
+    for inv in ("INV-1001", "INV-1002"):
+        r = bc_store.load_result("b-late")
+        r["bill"]["invoice"] = inv
+        r["disposition"] = None
+        bc_store.save_result("b-late", r)
+        client.post("/billcheck/bill/b-late/disposition", data={"action": "accept", "note": "ship date"})
+    # A fresh Acme bill with the same finding: downgraded, with the inline confirm.
+    from finance_helper import billdotcom_api
+    extra = dict(BILLS[0], id="b-new", invoice="INV-2000")
+    bills = [dict(b) for b in BILLS] + [extra]
+    monkeypatch.setattr(billdotcom_api, "fetch_open_bills", lambda: bills)
+    monkeypatch.setitem(PDFS, "b-new", dict(PDFS["b-late"], invoice_number="2000"))
+    _run(client)
+    body = client.get("/billcheck/bill/b-new").data
+    assert b"Flagged 2 times" in body and b"Stop flagging due date for Acme Supply Co" in body
+    resp = client.post("/billcheck/learning/confirm",
+                       data={"vendor": "Acme Supply Co", "field": "due_date",
+                             "next": "/billcheck/bill/b-new"})
+    assert resp.headers["Location"].endswith("/billcheck/bill/b-new")
+    _run(client)
+    body = client.get("/billcheck/bill/b-new").data
+    assert b"cleared by what Bill Check has learned" in body
+    assert b"Everything on the invoice matches" in body
+
+
+def test_learning_confirm_rejects_bad_field(client):
+    resp = client.post("/billcheck/learning/confirm", data={"vendor": "X", "field": "bogus"})
+    assert resp.status_code == 302
+    assert b"Pick a vendor and a field" in client.get("/billcheck/learning").data

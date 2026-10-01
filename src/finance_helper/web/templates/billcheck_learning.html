@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Bill Check — Learning{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('billcheck.landing') }}">← Bill Check</a></p>
+<h1>What Bill Check has learned</h1>
+<p class="subtle" style="max-width:66ch">Every <em>Accept as entered</em> and <em>Not an actual
+error</em> decision teaches the checker: the next time the same vendor trips the same field, the
+finding carries that earlier decision, and after {{ propose_after }} of them it drops to review and
+is proposed here as a vendor rule. <em>Fixed in Bill.com</em> confirms the finding was right.
+Standing notes below are read against every remaining critical/high finding
+{% if adjudicate %}by Claude{% else %}(Claude judgment pass is off — set ANTHROPIC_API_KEY / BILLCHECK_ADJUDICATE){% endif %}.</p>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Decisions recorded</div>
+    <div class="kpi-value">{{ stats.total }}</div>
+    <div class="kpi-sub">{% for who, n in stats.by_who[:3] %}{{ who }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>
+  <div class="kpi"><div class="kpi-label">Findings that were right</div>
+    <div class="kpi-value">{% if stats.precision is not none %}{{ stats.precision }}%{% else %}—{% endif %}</div>
+    <div class="kpi-sub">{{ stats.right }} fixed · {{ stats.wrong }} accepted as entered</div></div>
+  <div class="kpi"><div class="kpi-label">Rules proposed</div>
+    <div class="kpi-value">{{ proposals | length }}</div>
+    <div class="kpi-sub">{{ learned | length }} vendor{{ 's' if learned | length != 1 }} with learned rules</div></div>
+</div>
+
+<h2>Standing notes</h2>
+<p class="subtle" style="max-width:66ch">House rules in plain English, one per line — the tribal
+knowledge no config carries ("Yamaha: no quick-pay on warranty work", "Utility bills: the entered
+total is the current charges, not the balance"). They can only lower a finding, never raise one.</p>
+<form method="post" action="{{ url_for('billcheck.learning_notes') }}" class="upload-form">
+  <textarea name="notes" rows="8" style="width:100%; max-width:720px;"
+            placeholder="One plain-English rule per line…">{{ notes }}</textarea>
+  <div><button type="submit">Save standing notes</button></div>
+</form>
+
+<h2>Proposed rules</h2>
+{% if proposals %}
+<p class="subtle">Each of these was accepted as entered at least {{ propose_after }} times for the
+same vendor and field. Confirming stops the finding for that vendor; dismissing keeps raising it.</p>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Vendor</th><th>Stop flagging</th><th>Times accepted</th><th>Reviewer said</th><th></th></tr></thead>
+  <tbody>
+  {% for p in proposals %}
+  <tr>
+    <td><strong>{{ p.vendor }}</strong></td>
+    <td>{{ p.label }}</td>
+    <td>{{ p.count }} <span class="subtle">(#{{ p.invoices | join(', #') }}) · {{ p.who | join(', ') }}</span></td>
+    <td style="max-width:36ch">{% for n in p.notes %}“{{ n }}”{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+    <td>
+      <form method="post" action="{{ url_for('billcheck.learning_confirm') }}" class="dispo">
+        <input type="hidden" name="vendor" value="{{ p.vendor }}">
+        <input type="hidden" name="field" value="{{ p.field }}">
+        <input type="text" name="note" placeholder="rule as you'd tell a new hire" size="26"
+               value="{{ p.notes[0] if p.notes else '' }}">
+        <button type="submit">Confirm rule</button>
+      </form>
+      <form method="post" action="{{ url_for('billcheck.learning_dismiss') }}" class="dispo" style="margin-top:.3rem">
+        <input type="hidden" name="vendor" value="{{ p.vendor }}">
+        <input type="hidden" name="field" value="{{ p.field }}">
+        <button type="submit">Dismiss</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="subtle">Nothing proposed yet — proposals appear once the same vendor and field has been
+accepted as entered {{ propose_after }} times.</p>
+{% endif %}
+
+<h2>Learned rules in force</h2>
+{% if learned %}
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>Vendor</th><th>Not flagged</th><th>Note</th><th>Learned</th><th></th></tr></thead>
+  <tbody>
+  {% for vendor, pol in learned.items() %}
+    {% for field in pol.ignore_findings %}
+    <tr>
+      <td><strong>{{ vendor }}</strong></td>
+      <td>{{ labels.get(field, field) }}</td>
+      <td style="max-width:36ch">{{ pol.notes or '' }}</td>
+      <td class="subtle">{% for l in pol.learned if l.field == field %}{{ (l.who or '').split('@')[0] }} · {{ (l.when or '')[:10] }}{% endfor %}</td>
+      <td><form method="post" action="{{ url_for('billcheck.learning_remove') }}" class="dispo">
+        <input type="hidden" name="vendor" value="{{ vendor }}">
+        <input type="hidden" name="field" value="{{ field }}">
+        <button type="submit">Un-learn</button></form></td>
+    </tr>
+    {% endfor %}
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="subtle">None yet. Rules confirmed above land here; the ones in config/recon.yml apply as well.</p>
+{% endif %}
+
+{% if stats.accepted_by_field %}
+<h2>What gets accepted as entered</h2>
+<ul>{% for label, n in stats.accepted_by_field %}<li>{{ label }}: {{ n }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if stats.recent %}
+<h2>Recent decisions</h2>
+<div class="tablewrap"><table class="runs">
+  <thead><tr><th>When</th><th>Who</th><th>Vendor · invoice</th><th>Decision</th><th>Flagged</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for l in stats.recent %}
+  <tr>
+    <td class="subtle">{{ (l.when or '')[:16].replace('T', ' ') }}</td>
+    <td>{{ (l.who or '').split('@')[0] }}</td>
+    <td>{{ l.vendor }} <span class="subtle">#{{ l.invoice }}</span></td>
+    <td><span class="status-pill neutral">{{ l.action }}</span></td>
+    <td class="subtle">{% for f in l.fields %}{{ labels.get(f, f) }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td style="max-width:40ch">{{ l.note }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

@@ -349,6 +349,20 @@ attached invoice (PDF)     ─┘
   a note, or *Investigating*); the next run re-verifies the corrected entry
   and keeps the earlier decision in the bill's history. Every disposition is
   appended to `out/billcheck/audit.jsonl`.
+- **It learns from the reviewer** (the *Learning* page). Every *Accept as
+  entered* / *Not an actual error* is a lesson keyed by vendor and field: the
+  next finding of that kind for the vendor carries the earlier decision and
+  note; after two it drops to *review* and is proposed as a vendor rule
+  (one click on the bill page or the Learning page confirms it, which stops
+  the flag for that vendor; dismiss keeps flagging). *Fixed in Bill.com*
+  confirms the finding was right — the page shows how often findings were.
+  A standing-notes box holds house rules in plain English; Claude reads
+  them, with the vendor's prior decisions, against each remaining
+  critical/high finding and can clear or downgrade it (never raise one,
+  never clear a duplicate; `BILLCHECK_ADJUDICATE=0` turns the pass off).
+  Learned rules merge over `vendor_policies` in `config/recon.yml` and live
+  on the volume; a notes or decision change re-compares affected bills from
+  their cached reads, no re-read.
 - **When the attachment can't be pulled**: the bill shows *no attachment* with
   Bill.com's raw reply; upload the PDF on the bill page and it is read and
   compared on the spot. Bills paid or deleted in Bill.com drop out of the

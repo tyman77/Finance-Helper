@@ -35,6 +35,26 @@
     {% endfor %}
   </ul>
   {% else %}<p>Everything on the invoice matches the entry.</p>{% endif %}
+  {% for f in c.findings if f.learned %}
+  <form method="post" action="{{ url_for('billcheck.learning_confirm') }}" class="dispo" style="margin:.2rem 0 .6rem">
+    <input type="hidden" name="vendor" value="{{ b.vendor }}">
+    <input type="hidden" name="field" value="{{ f.field }}">
+    <input type="hidden" name="next" value="{{ url_for('billcheck.bill_page', bill_id=bill_id) }}">
+    <input type="text" name="note" size="26" placeholder="rule as you'd tell a new hire"
+           value="{{ f.prior_notes[0] if f.prior_notes else '' }}">
+    <button type="submit">Stop flagging {{ f.field.replace('_', ' ') }} for {{ b.vendor }}</button>
+  </form>
+  {% endfor %}
+  {% if c.suppressed %}
+  <details><summary class="subtle" style="cursor:pointer">{{ c.suppressed | length }} finding{{ 's' if c.suppressed | length != 1 }} cleared by what Bill Check has learned</summary>
+    <ul>{% for f in c.suppressed %}
+      <li class="subtle"><span class="status-pill neutral">{{ f.field.replace('_', ' ') }}</span> {{ f.reason }}<br><em>{{ f.why }}</em></li>
+    {% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if c.adjudication and c.adjudication.error %}
+  <p class="subtle">Judgment pass skipped: {{ c.adjudication.error }}</p>
+  {% endif %}
 
   <h2>Entered vs invoice</h2>
   <div class="tablewrap"><table class="runs">

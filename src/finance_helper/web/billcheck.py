@@ -17,7 +17,7 @@ from flask import (Blueprint, Response, current_app, flash, redirect,
                    render_template, request, send_file, session, url_for)
 
 from .. import billdotcom_api
-from ..billcheck import compare, engine, extract
+from ..billcheck import compare, engine, extract, learn
 from ..billcheck import store as bc_store
 
 billcheck_bp = Blueprint("billcheck", __name__, url_prefix="/billcheck")
@@ -135,7 +135,74 @@ def landing():
         "billcheck.html", ready=_readiness(), rows=rows, show_all=show_all,
         counts=counts, open_count=len(open_items), clean=clean, total=len(results),
         last_run=bc_store.load_run_summary(), running=_running_job(),
-        default_limit=DEFAULT_LIMIT, is_open=bc_store.is_open)
+        default_limit=DEFAULT_LIMIT, is_open=bc_store.is_open,
+        proposal_count=len(learn.proposals(config_policies=_config_policies())))
+
+
+def _config_policies() -> dict:
+    from ..recon.settings import recon_config
+    return (recon_config().get("billcheck") or {}).get("vendor_policies") or {}
+
+
+# --- learning: standing notes, proposals, learned policies -------------------
+
+@billcheck_bp.get("/learning")
+def learning():
+    all_lessons = learn.lessons()
+    return render_template(
+        "billcheck_learning.html",
+        notes=learn.standing_notes(),
+        proposals=learn.proposals(all_lessons, _config_policies()),
+        learned=learn.learned_policies(),
+        stats=learn.stats(all_lessons),
+        labels=learn.FIELD_LABELS,
+        propose_after=learn.PROPOSE_AFTER,
+        adjudicate=learn._adjudicate_enabled())
+
+
+@billcheck_bp.post("/learning/notes")
+def learning_notes():
+    learn.save_standing_notes(request.form.get("notes", ""))
+    flash("Standing notes saved — every bill is re-judged against them on the next run.")
+    return redirect(url_for("billcheck.learning"))
+
+
+def _back():
+    nxt = request.form.get("next") or ""
+    return redirect(nxt if nxt.startswith("/billcheck/") else url_for("billcheck.learning"))
+
+
+@billcheck_bp.post("/learning/confirm")
+def learning_confirm():
+    vendor = (request.form.get("vendor") or "").strip()
+    field = (request.form.get("field") or "").strip()
+    if not vendor or field not in learn.FIELD_LABELS:
+        flash("Pick a vendor and a field.")
+        return _back()
+    learn.confirm_proposal(vendor, field, _who(), request.form.get("note", ""))
+    flash(f"Learned: {learn.FIELD_LABELS[field]} findings are no longer raised for "
+          f"{vendor}. Applies from the next run (cached reads, no re-read).")
+    return _back()
+
+
+@billcheck_bp.post("/learning/dismiss")
+def learning_dismiss():
+    vendor = (request.form.get("vendor") or "").strip()
+    field = (request.form.get("field") or "").strip()
+    if vendor and field:
+        learn.dismiss_proposal(vendor, field, _who())
+        flash("Dismissed — the finding keeps being raised for that vendor.")
+    return _back()
+
+
+@billcheck_bp.post("/learning/remove")
+def learning_remove():
+    vendor = (request.form.get("vendor") or "").strip()
+    field = (request.form.get("field") or "").strip()
+    if vendor and field and learn.remove_learned(vendor, field):
+        flash(f"Un-learned: {learn.FIELD_LABELS.get(field, field)} findings are raised "
+              f"again for {vendor} from the next run.")
+    return _back()
 
 
 @billcheck_bp.post("/run")

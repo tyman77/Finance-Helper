@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 
 from . import compare
+from . import learn
 from . import store
 from .extract import SCHEMA_VERSION
 
@@ -51,18 +52,29 @@ def _match_projects(extracted: dict | None) -> list[dict]:
 
 def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                force: bool = False, who: str = "", duplicates: list[str] | None = None,
-               now: datetime | None = None) -> tuple[dict | None, str]:
+               now: datetime | None = None, all_lessons: list[dict] | None = None,
+               adjudicate_client=None) -> tuple[dict | None, str]:
     """Returns (result payload to store, outcome). Payload is None when the
     bill is unchanged and was skipped. Outcome is one of
     unchanged / reused / read / no_document / error."""
     existing = existing or {}
     duplicates = duplicates or []
-    fp = store.fingerprint(bill, extra=sorted(duplicates))
 
     from ..recon.settings import recon_config
     bc_cfg = recon_config().get("billcheck") or {}
-    policies = bc_cfg.get("vendor_policies") or {}
+    policies = learn.merged_policies(bc_cfg.get("vendor_policies") or {})
     aliases = bc_cfg.get("vendor_aliases") or {}
+    vendor_lessons = learn.lessons_for(bill.get("vendor", ""), all_lessons)
+    # The fingerprint covers the compared fields plus everything the verdict
+    # depends on: duplicates, and the learning state for this vendor (notes,
+    # prior decisions, learned policy). Any of those changing re-compares
+    # from the cached read. Dispositions carry over on the bill fields
+    # alone — a note being added must not bump an open decision to history.
+    learn_sig = learn.signature(bill.get("vendor", ""), all_lessons)
+    fp = store.fingerprint(bill, extra={"dups": sorted(duplicates), "learn": learn_sig})
+    bill_fp = store.fingerprint(bill)
+    existing_bill_fp = existing.get("bill_fingerprint") or (
+        store.fingerprint(existing["bill"]) if existing.get("bill") else None)
 
     # A vendor excluded from review entirely (policy skip: true) — reviewed
     # by hand elsewhere; never fetch or read its attachments.
@@ -72,7 +84,7 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                 and not force:
             return None, "unchanged"
         return {
-            "bill": bill, "fingerprint": fp, "extracted": None,
+            "bill": bill, "fingerprint": fp, "bill_fingerprint": bill_fp, "extracted": None,
             "comparison": None, "status": "skipped", "severity": "clear",
             "error": None, "documents": list(existing.get("documents") or []),
             "duplicates": duplicates,
@@ -125,6 +137,15 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
                                        aliases=aliases,
                                        check_vendor=bc_cfg.get("check_vendor", True))
                   if extracted else None)
+    if comparison:
+        policy = compare._vendor_policy(bill.get("vendor"), policies)
+        learn.apply_lessons(bill, comparison, vendor_lessons, policy)
+        if learn._adjudicate_enabled() or adjudicate_client is not None:
+            try:
+                learn.adjudicate(bill, comparison, extracted, learn.standing_notes(),
+                                 vendor_lessons, client=adjudicate_client)
+            except Exception as exc:          # never let the judgment pass sink a bill
+                comparison["adjudication"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     if comparison and duplicates:
         comparison["findings"].insert(0, {
             "field": "duplicate", "severity": "critical", "entered": bill.get("invoice", ""),
@@ -136,15 +157,16 @@ def check_bill(bill: dict, existing: dict | None, fetch_documents, extract_fn,
     else:
         status, severity = outcome, "review"
 
-    same_fp = existing.get("fingerprint") == fp
-    disposition = existing.get("disposition") if same_fp else None
+    same_bill = existing_bill_fp == bill_fp
+    disposition = existing.get("disposition") if same_bill else None
     history = list(existing.get("history") or [])
-    if existing.get("disposition") and not same_fp:
+    if existing.get("disposition") and not same_bill:
         history.append({**existing["disposition"], "fingerprint": existing.get("fingerprint"),
                         "bill": existing.get("bill"), "status": existing.get("status")})
     payload = {
         "bill": bill,
         "fingerprint": fp,
+        "bill_fingerprint": bill_fp,
         "extracted": extracted,
         "comparison": comparison,
         "projects": _match_projects(extracted),
@@ -175,6 +197,11 @@ def run_check(fetch_bills, fetch_documents, extract_fn, log=lambda m: None,
     dups = compare.find_duplicates(bills, history_bills or [])
     if dups:
         log(f"· {len(dups)} bills share a vendor + invoice number with another bill")
+    all_lessons = learn.lessons()
+    prior = sum(1 for l in all_lessons if l.get("action") in learn.LESSON_ACTIONS)
+    if prior or learn.standing_notes():
+        log(f"· learning from {prior} prior reviewer decisions"
+            + (" and the standing notes" if learn.standing_notes() else ""))
 
     counts = {"unchanged": 0, "reused": 0, "read": 0, "no_document": 0, "error": 0}
     mismatches = 0
@@ -190,7 +217,8 @@ def run_check(fetch_bills, fetch_documents, extract_fn, log=lambda m: None,
             limit_hit = True
             continue
         payload, outcome = check_bill(bill, existing, fetch_documents, extract_fn,
-                                      force=force, who=who, duplicates=dups.get(bill["id"]))
+                                      force=force, who=who, duplicates=dups.get(bill["id"]),
+                                      all_lessons=all_lessons)
         counts[outcome] = counts.get(outcome, 0) + 1
         if outcome in ("read", "error", "no_document"):
             reads += 1

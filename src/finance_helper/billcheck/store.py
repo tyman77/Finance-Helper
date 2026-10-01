@@ -166,10 +166,14 @@ def record_disposition(bill_id: str, action: str, note: str, who: str) -> bool:
              "when": datetime.now().isoformat(timespec="seconds")}
     result["disposition"] = entry
     save_result(bill_id, result)
+    # The audit row carries the bill context the decision was made against
+    # (vendor, which fields were flagged, why) — that is what the learning
+    # loop reads, and it must survive the bill being paid and retired.
+    from .learn import _context_from_result
     os.makedirs(_root(), exist_ok=True)
     with open(os.path.join(_root(), "audit.jsonl"), "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"bill_id": bill_id, "fingerprint": result.get("fingerprint"),
-                             **entry}) + "\n")
+                             **entry, **_context_from_result(result)}) + "\n")
     return True
 
 
