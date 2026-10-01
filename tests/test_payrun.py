@@ -163,6 +163,10 @@ def test_payrun_page_decide_and_sign_off(client, monkeypatch):
 
     page = client.get("/billcheck/payrun").get_data(as_text=True)
     assert "Steady Freight" in page and "Bank details added" in page
+    # Hooks the in-place Release/Hold script swaps (no full page reload).
+    for hook in ('id="payrun-kpis"', 'id="payrun-signoff"', 'class="decision-cell"',
+                 'class="decide-form"', 'getAttribute("action")'):
+        assert hook in page, hook
     assert "still need a release or hold" in page
     # Checks that couldn't run are listed, not silently skipped.
     assert "who entered them" in page and "Approvers not pulled for 2" in page

@@ -57,7 +57,7 @@ Bill.com — hold a bill there yourself.</p>
   <button type="submit" class="secondary">{{ 'Replace list' if v.list else 'Upload list' }}</button>
 </form>
 
-<div class="kpi-row">
+<div class="kpi-row" id="payrun-kpis">
   <div class="kpi"><div class="kpi-label">Going out {{ v.pay_date }}</div>
     <div class="kpi-value">{{ v.releasing_total | money }}</div>
     <div class="kpi-sub">{{ v.releasing_count }} bills{% if v.held_count %} · {{ v.held_count }} held ({{ v.held_total | money }}){% endif %}</div></div>
@@ -106,13 +106,13 @@ Bill.com — hold a bill there yourself.</p>
           <div>{{ sev_pill(s.severity) }} <strong>{{ s.title }}</strong>
             <div class="subtle">{{ s.detail }}</div></div>
         {% else %}<span class="subtle">none</span>{% endfor %}</td>
-      <td style="min-width:22ch">
+      <td style="min-width:22ch" class="decision-cell">
         {% if x.decision %}
           <strong>{{ 'Released' if x.decision.action == 'release' else 'HELD' }}</strong>
           <div class="subtle">{{ x.decision.who }} · {{ x.decision.when[:16].replace('T', ' ') }}<br>{{ x.decision.note }}</div>
         {% endif %}
         {% if x.needs_decision or x.decision %}
-        <form method="post" action="{{ url_for('billcheck.payrun_decide', bill_id=x.bill_id) }}">
+        <form method="post" action="{{ url_for('billcheck.payrun_decide', bill_id=x.bill_id) }}" class="decide-form">
           <input type="text" name="note" placeholder="{{ 'Optional: who you called, on what number' if x.signals | selectattr('kind', 'in', ['bank_change', 'invoice_bank_notice', 'invoice_bank_mismatch', 'invoice_routing_mismatch']) | list else 'Note (optional)' }}" style="width:100%">
           <button type="submit" name="action" value="release" class="approve">Release</button>
           <button type="submit" name="action" value="hold" class="secondary">Hold</button>
@@ -124,6 +124,7 @@ Bill.com — hold a bill there yourself.</p>
   </tbody>
 </table></div>
 
+<div id="payrun-signoff">
 <h2>Sign off</h2>
 {% if signed %}
 <p>Signed off by <strong>{{ state.signoff.who }}</strong> at {{ state.signoff.when[:16].replace('T', ' ') }}:
@@ -140,6 +141,44 @@ Bill.com — hold a bill there yourself.</p>
   {% endif %}
 </form>
 {% endif %}
+</div>
+<script>
+// Release / Hold save in the background: only that bill's decision, the
+// counts at the top and the sign-off section are swapped in from the
+// server's response, so the page doesn't reload or jump. If anything goes
+// wrong it falls back to an ordinary submit.
+document.addEventListener("submit", async (e) => {
+  const form = e.target.closest(".decide-form");
+  if (!form) return;
+  e.preventDefault();
+  const body = new FormData(form);
+  if (e.submitter && e.submitter.name) body.set(e.submitter.name, e.submitter.value);
+  const row = form.closest("tr");
+  form.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  try {
+    // getAttribute: the buttons are named "action", which shadows form.action.
+    const resp = await fetch(form.getAttribute("action"),
+                             { method: "POST", body, credentials: "same-origin" });
+    if (!resp.ok) throw new Error(resp.status);
+    const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+    const fresh = doc.getElementById(row.id);
+    if (!fresh) throw new Error("row missing");
+    row.querySelector(".decision-cell").replaceWith(fresh.querySelector(".decision-cell"));
+    for (const id of ["payrun-kpis", "payrun-signoff"]) {
+      const el = document.getElementById(id), next = doc.getElementById(id);
+      if (el && next) el.replaceWith(next);
+    }
+  } catch (err) {
+    // Fall back to a normal submit, carrying which button was pressed.
+    if (e.submitter && e.submitter.name) {
+      const keep = document.createElement("input");
+      keep.type = "hidden"; keep.name = e.submitter.name; keep.value = e.submitter.value;
+      form.appendChild(keep);
+    }
+    HTMLFormElement.prototype.submit.call(form);
+  }
+});
+</script>
 {% else %}
 <p class="subtle">No bills in this pay run{% if not last_run %} — refresh from Bill.com first{% endif %}.</p>
 {% endif %}
