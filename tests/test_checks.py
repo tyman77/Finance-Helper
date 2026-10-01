@@ -197,7 +197,7 @@ def test_vendor_master_bank_change_and_collision_and_lookalikes():
     }
     out = checks.vendor_master_checks(master, ["Jacob Cody"], today=date(2026, 8, 28))
     kinds = {f["kind"] for f in out["findings"]}
-    assert "vendor_lookalike" in kinds            # Acme vs Acme LLC ("supply/supplies"? shared 'acme')
+    assert "vendor_lookalike" in kinds            # Acme AV Supply vs Acme AV Supplies LLC
     assert "vendor_personal_email" in kinds       # gmail payment email
     assert "vendor_employee_collision" in kinds   # Jake Cody the vendor
     assert "vendor_bank_change" in kinds          # new bank acct on old vendor
@@ -342,3 +342,34 @@ def test_truncated_surname_needs_five_chars_and_initial():
             {"person": "Dave Williamson", "date": "2026-07-13", "amount": "200", "memo": "pd"}]
     out = checks.reimbursement_tieout(bank, ramp)
     assert out["matched"] == 0 and len(out["findings"]) == 2
+
+
+def _lookalikes(names):
+    master = {"vendors": [{"id": str(i), "name": n, "active": True, "created": "2020-01-01",
+                           "email": "", "payment_email": ""} for i, n in enumerate(names)],
+              "bank_accounts": [], "bills": []}
+    return {tuple(sorted(f["title"].split(": ", 1)[1].split(" / ")))
+            for f in checks.vendor_master_checks(master, [], today=date(2026, 10, 1))["findings"]
+            if f["kind"] == "vendor_lookalike"}
+
+
+def test_sharing_one_word_is_not_a_lookalike():
+    # Every pair here was flagged under the old shared-word rule.
+    assert _lookalikes([
+        "Applied Electronics", "Digital Projection - Use Delta Electronics",
+        "EXTRON Electronics", "NuHome Electronics", "Applied Software Technology, Inc.",
+        "Delta Electronics (Americas) Ltd.", "Lilliput Electronics (USA) Inc.",
+        "DigiKey Electronics", "Belden - West Penn Wire", "Belden"]) == set()
+
+
+def test_same_or_nearly_same_name_is_a_lookalike():
+    found = _lookalikes(["Acme AV Supply", "Acme AV Supplies LLC",   # plural + suffix
+                         "Shure", "Shure Inc.",                       # suffix only
+                         "Sennheiser", "Senheiser",                   # one letter
+                         "Chauvet", "Clear-Com"])
+    assert found == {("Acme AV Supplies LLC", "Acme AV Supply"),
+                     ("Shure", "Shure Inc."), ("Senheiser", "Sennheiser")}
+
+
+def test_short_names_need_an_exact_match():
+    assert _lookalikes(["AJA", "AJAX", "QSC", "QSD"]) == set()
