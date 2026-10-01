@@ -28,7 +28,6 @@ import json
 import os
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from statistics import median
 
 from .compare import SEVERITY_ORDER, normalize_vendor
 from .extract import SCHEMA_VERSION
@@ -37,9 +36,11 @@ WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", 
 
 BANK_CHANGE_DAYS = 45      # bank details this recent on a vendor being paid -> critical
 NEW_VENDOR_DAYS = 60       # vendor created this recently -> high
-OUTLIER_MULTIPLE = 3       # amount > N x the vendor's median bill -> high
-OUTLIER_MIN_HISTORY = 3    # ... once the vendor has this many prior bills
-OUTLIER_MIN_AMOUNT = Decimal("1000")
+# Bill sizes swing widely for most vendors, so "N x the usual bill" fires
+# constantly. Flag only a bill well beyond the vendor's largest ever.
+OUTLIER_OVER_MAX = Decimal("1.5")   # amount > 1.5 x the largest earlier bill -> high
+OUTLIER_MIN_HISTORY = 5             # ... once the vendor has this many earlier bills
+OUTLIER_MIN_AMOUNT = Decimal("5000")
 SAME_AMOUNT_DAYS = 30
 
 DECISIONS = ("release", "hold")
@@ -258,14 +259,13 @@ def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
 
     amounts = [a for a in (_dec(b.get("amount")) for b in prior) if a and a > 0]
     if amount is not None and len(amounts) >= OUTLIER_MIN_HISTORY:
-        typical = Decimal(str(median(amounts)))
-        if amount >= OUTLIER_MIN_AMOUNT and typical > 0 and amount > typical * OUTLIER_MULTIPLE:
+        largest = max(amounts)
+        if amount >= OUTLIER_MIN_AMOUNT and amount > largest * OUTLIER_OVER_MAX:
             out.append(_signal(
                 "amount_outlier", "high",
-                f"{amount / typical:.1f}x this vendor's usual bill",
-                f"${amount:,.2f} against a typical ${typical:,.2f} over "
-                f"{len(amounts)} earlier bills. Confirm the quantity/scope with "
-                "whoever ordered it."))
+                "Biggest bill ever from this vendor",
+                f"${amount:,.2f}; the largest of its {len(amounts)} earlier bills was "
+                f"${largest:,.2f}. Confirm the quantity/scope with whoever ordered it."))
 
     # Same amount under a different invoice number, close together —
     # resubmission beats a plain invoice-number duplicate check.

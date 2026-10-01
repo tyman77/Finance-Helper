@@ -392,8 +392,8 @@ from the bank export):
   duplicate invoice, late due date).
 - **high**: the invoice asks for ACH but Bill.com pays the vendor by check;
   the person who entered the bill is also its approver, or the approver set
-  up the vendor; vendor created in the last 60 days; amount more than 3x
-  the vendor's median bill; the same amount billed under another invoice
+  up the vendor; vendor created in the last 60 days; amount more than 1.5x
+  the vendor's largest earlier bill; the same amount billed under another invoice
   number within 30 days; lookalike vendor names or a shared email; invoice
   not verified (no attachment or unreadable).
 - **review**: remit-to ZIP differs from the vendor record (often a
