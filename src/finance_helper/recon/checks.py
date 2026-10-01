@@ -463,14 +463,16 @@ def vendor_master_checks(master: dict, people: list[str],
                     f"({', '.join(sorted(strong))}). Fake-vendor schemes hide "
                     "behind near-duplicates of real ones — confirm both are real "
                     "and distinct.",
-                    a["id"], b["id"]))
+                    a["id"], b["id"]) | {"vendor_ids": [a["id"], b["id"]]})
 
     # Same email behind different vendor names.
     by_email: dict[str, list] = defaultdict(list)
+    ids_by_email: dict[str, set] = defaultdict(set)
     for v in active:
         for e in (v.get("email"), v.get("payment_email")):
             if e:
                 by_email[e].append(v["name"])
+                ids_by_email[e].add(v["id"])
     for email, names in by_email.items():
         if len(set(names)) > 1:
             findings.append(_finding(
@@ -479,7 +481,7 @@ def vendor_master_checks(master: dict, people: list[str],
                 "Vendors " + ", ".join(sorted(set(names))) + " share the same "
                 "email — one operator behind multiple payees is a ghost-vendor "
                 "pattern.",
-                email))
+                email) | {"vendor_ids": sorted(ids_by_email[email], key=str)})
 
     # Personal-domain payment emails.
     for v in active:
@@ -491,7 +493,7 @@ def vendor_master_checks(master: dict, people: list[str],
                 f"Payments to {v['name']} route via {pe} — a personal mailbox, "
                 "not a company domain. Fine for sole proprietors; verify it's "
                 "expected.",
-                v["id"]))
+                v["id"]) | {"vendor_ids": [v["id"]]})
 
     # Vendor named like an employee.
     for v in active:
@@ -503,7 +505,7 @@ def vendor_master_checks(master: dict, people: list[str],
                     f"Active vendor '{v['name']}' matches employee '{person}'. "
                     "Employees paying themselves as vendors is the textbook "
                     "internal scheme — verify this vendor's ownership.",
-                    v["id"], person))
+                    v["id"], person) | {"vendor_ids": [v["id"]]})
                 break
 
     # Bank details added recently on an established vendor.
@@ -521,7 +523,7 @@ def vendor_master_checks(master: dict, people: list[str],
                 f"A bank account was added on {acct_created} to a vendor created "
                 f"{vend_created} — payment-redirection fraud starts exactly this "
                 "way. Verify by calling the vendor on a number you already had.",
-                a.get("vendor_id"), str(acct_created)))
+                a.get("vendor_id"), str(acct_created)) | {"vendor_ids": [a.get("vendor_id")]})
 
     return {"findings": findings, "vendors": len(active), "gaps": master.get("gaps") or []}
 

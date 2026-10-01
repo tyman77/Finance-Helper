@@ -38,8 +38,10 @@
          class="navlink {{ 'active' if ep.startswith('cashproof.') }}">Cash Proof</a>
       {% endif %}
       {% if 'billcheck' in perms %}
+      <a href="{{ url_for('billcheck.payrun_page') }}"
+         class="navlink {{ 'active' if ep.startswith('billcheck.payrun') }}">Pay Run</a>
       <a href="{{ url_for('billcheck.landing') }}"
-         class="navlink {{ 'active' if ep.startswith('billcheck.') }}">Bill Check</a>
+         class="navlink {{ 'active' if ep.startswith('billcheck.') and not ep.startswith('billcheck.payrun') }}">Bill Check</a>
       {% endif %}
     </nav>
     <span class="topbar-right">
