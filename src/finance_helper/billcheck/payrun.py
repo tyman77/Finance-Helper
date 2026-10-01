@@ -182,20 +182,40 @@ def same_person_signals(bill: dict, vendor: dict, approvers: list[dict] | None,
     return out
 
 
+# How a vendor is paid, from config/recon.yml billcheck.vendor_policies
+# (`payment:`). For these no bank account of ours is in play, so the
+# bank-detail checks can't point at anything AP could act on:
+#   network — an in-network Bill.com vendor: the vendor sets up and controls
+#             how it's paid; we can't change it.
+#   card    — paid by virtual card.
+NO_BANK_CHECKS = {"network": "in-network vendor — they control their own payment details",
+                  "card": "paid by virtual card — no bank account involved"}
+
+
+def payment_method(vendor_name: str, policies: dict | None) -> str:
+    from .compare import _vendor_policy
+    if not (vendor_name or "").strip():
+        return ""
+    return str(_vendor_policy(vendor_name, policies).get("payment") or "").strip().lower()
+
+
 def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
                   today: date, extracted: dict | None = None,
-                  approvers: list[dict] | None = None) -> list[dict]:
-    """Payment-fraud signals for one bill about to be paid."""
+                  approvers: list[dict] | None = None,
+                  payment: str = "") -> list[dict]:
+    """Payment-fraud signals for one bill about to be paid. `payment` is the
+    vendor's payment method from config (see NO_BANK_CHECKS)."""
     out: list[dict] = []
     vendor_id = bill.get("vendor_id") or ""
     vendors = {str(v.get("id")): v for v in master.get("vendors") or []}
     vendor = vendors.get(str(vendor_id)) or {}
     amount = _dec(bill.get("amount"))
+    bank_checks = payment not in NO_BANK_CHECKS
 
     # Bank details added/changed recently on a vendor we're about to pay —
     # the payment-redirection scheme. Any vendor age counts here: unlike
     # Cash Proof's after-the-fact check, this one stops the payment.
-    for acct in master.get("bank_accounts") or []:
+    for acct in (master.get("bank_accounts") or []) if bank_checks else []:
         if str(acct.get("vendor_id")) != str(vendor_id):
             continue
         added = _iso(acct.get("created"))
@@ -252,7 +272,8 @@ def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
 
     accounts = [a for a in master.get("bank_accounts") or []
                 if str(a.get("vendor_id")) == str(vendor_id)]
-    out.extend(remit_signals(extracted, vendor, accounts))
+    if bank_checks:
+        out.extend(remit_signals(extracted, vendor, accounts))
     users = {str(u.get("id")): u for u in master.get("users") or []}
     out.extend(same_person_signals(bill, vendor, approvers, users))
 
@@ -346,6 +367,11 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
     master = master or {}
     pay_date = next_pay_date(today, pay_weekday)
     # Only findings that need a decision; bank changes are covered per bill, stricter.
+    try:
+        from ..recon.settings import recon_config
+        policies = (recon_config().get("billcheck") or {}).get("vendor_policies") or {}
+    except Exception:
+        policies = {}
     vendor_findings = [f for f in vendor_master_checks(master, people, today)["findings"]
                        if f.get("kind") != "vendor_bank_change" and f.get("severity") != "review"]
 
@@ -357,7 +383,8 @@ def build(results: list[dict], master: dict, people: list[str], today: date,
         check_sev, check_line = _check_status(r)
         signals = fraud_signals(bill, master, vendor_findings, today,
                                 extracted=r.get("extracted"),
-                                approvers=(approvers or {}).get(bill["id"]))
+                                approvers=(approvers or {}).get(bill["id"]),
+                                payment=payment_method(bill.get("vendor"), policies))
         items.append([bill, check_sev, check_line, r.get("status"), signals, r.get("extracted")])
 
     lines = (finance_list or {}).get("lines") or []

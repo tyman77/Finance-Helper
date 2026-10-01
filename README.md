@@ -397,6 +397,12 @@ from the bank export):
   number within 30 days; lookalike vendor names or a shared email; invoice
   not verified (no attachment or unreadable).
 
+Vendors paid without a bank account of ours skip the bank-detail checks
+(bank change, invoice bank/routing mismatch): set `payment: network` for an
+in-network Bill.com vendor (they control their own payment details, e.g.
+Amazon) or `payment: card` for a virtual-card vendor (e.g. Belden) under
+`billcheck.vendor_policies` in `config/recon.yml`.
+
 Only findings that need a release/hold decision are shown — lower-level
 "worth a look" flags (round amounts, past due, short pays, first bill from
 a vendor, personal payment email, remit-to address, approval in progress)
