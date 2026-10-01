@@ -56,10 +56,12 @@ billcheck:
   # (The duplicate scan still keys on vendor+invoice, unaffected.)
   check_vendor: false
   # Pay Run: AP reviews Thursday, Bill.com pays Friday. The run holds every
-  # scheduled bill plus every unpaid bill due before the following pay day.
+  # scheduled bill plus every unpaid bill due within horizon_days of pay day
+  # (exclusive). AP pays about two weeks ahead: 15 = due through the second
+  # Friday after pay day.
   payrun:
     pay_day: friday
-    horizon_days: 7
+    horizon_days: 15
   # Per-vendor payment policies for the Bill Check comparison.
   #   quickpay: take  — we take this vendor's early-pay discount; `pct` is
   #                     the negotiated rate (the invoice's offer is verified

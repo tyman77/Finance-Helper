@@ -320,3 +320,14 @@ def test_build_wires_extracted_and_approvers_through():
     kinds = _kinds(view["rows"][0]["signals"])
     assert kinds[:2] == ["invoice_bank_mismatch", "same_person_all"]
     assert view["rows"][0]["severity"] == "critical"
+
+
+def test_configured_window_covers_two_weeks_ahead():
+    # AP pays about two weeks ahead: the 10/2 run carried bills due through
+    # 10/16 (the second Friday after), none later.
+    h = payrun.settings()["horizon_days"]
+    assert payrun.in_run(_bill("a", due="2026-10-16"), FRI, h)
+    assert not payrun.in_run(_bill("b", due="2026-10-17"), FRI, h)
+    view = payrun.build([_result(_bill("a", due="2026-10-16"))], MASTER, [], THU,
+                        horizon_days=h)
+    assert view["due_through"] == "2026-10-16" and len(view["rows"]) == 1
