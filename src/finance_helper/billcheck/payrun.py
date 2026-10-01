@@ -294,12 +294,6 @@ def fraud_signals(bill: dict, master: dict, vendor_findings: list[dict],
         if str(vendor_id) in {str(i) for i in f.get("vendor_ids") or []}:
             out.append(_signal(f["kind"], f["severity"], f["title"], f["detail"]))
 
-    if bill.get("approval_status") and bill["approval_status"] not in ("approved", "unassigned"):
-        out.append(_signal(
-            "not_approved", "review",
-            f"Approval: {bill['approval_status']}",
-            "Not fully approved in Bill.com yet — it won't pay until it is."))
-
     out.sort(key=lambda s: SEVERITY_ORDER.get(s["severity"], 9))
     return out
 
