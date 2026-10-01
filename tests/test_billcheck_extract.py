@@ -53,7 +53,7 @@ def test_extract_invoice_calls_parse_with_structured_output(monkeypatch):
         is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
         due_date=None, terms="Net 30", terms_days=30, total="10.00",
         discount_total=None, discount_date=None, discount_days=None, discount_terms=None, currency="USD",
-        po_number=None, confidence="high", notes="")
+        po_number=None, ship_date="", order_number="", subtotal="", tax="", current_charges="", project_references="", remit_address="", remit_bank_name="", remit_account_last4="", remit_routing_number="", bank_change_notice=False, bank_change_text="", confidence="high", notes="")
     client = FakeClient(FakeResp(parsed))
     out = extract.extract_invoice(PDF, client=client)
     assert out["vendor"] == "Acme" and out["terms_days"] == 30
@@ -105,7 +105,7 @@ def test_grammar_timeout_is_retried(monkeypatch):
         is_invoice=True, vendor="Acme", invoice_number="1", invoice_date="2026-08-01",
         due_date=None, terms=None, terms_days=None, total="10.00",
         discount_total=None, discount_date=None, discount_days=None, discount_terms=None, currency="USD",
-        po_number=None, confidence="high", notes="")
+        po_number=None, ship_date="", order_number="", subtotal="", tax="", current_charges="", project_references="", remit_address="", remit_bank_name="", remit_account_last4="", remit_routing_number="", bank_change_notice=False, bank_change_text="", confidence="high", notes="")
 
     class Flaky(FakeClient):
         calls = 0
@@ -123,3 +123,15 @@ def test_grammar_timeout_is_retried(monkeypatch):
             raise ValueError("Grammar compilation timed out.")
     with pytest.raises(RuntimeError, match="Grammar compilation"):
         extract.extract_invoice(PDF, client=AlwaysFlaky(None))
+
+
+def test_schema_stays_inside_structured_output_limits():
+    # Every field with a default is an optional parameter; enough of them got
+    # every read rejected in production with "Schema is too complex". The API
+    # allows 24 optional / 16 union-typed parameters, but each optional one
+    # roughly doubles part of the grammar — keep it at zero.
+    schema = extract.InvoiceFields.model_json_schema()
+    props, required = schema["properties"], set(schema.get("required", []))
+    assert [k for k in props if k not in required] == []
+    unions = [k for k, v in props.items() if "anyOf" in v or isinstance(v.get("type"), list)]
+    assert len(unions) <= 16
