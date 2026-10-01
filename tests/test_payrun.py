@@ -356,3 +356,32 @@ def test_configured_window_covers_two_weeks_ahead():
 def test_approval_in_progress_is_not_flagged():
     sig = payrun.fraud_signals(_bill("x", approval_status="approving"), MASTER, [], THU)
     assert sig == []
+
+
+# --- vendors paid without a bank account of ours -------------------------------
+
+def _bank_flags(payment):
+    master = json.loads(json.dumps(MASTER))
+    master["bank_accounts"] = [{"vendor_id": "v1", "account_last4": "4321",
+                                "created": "2026-09-25", "active": True}]
+    ex = {"remit_account_last4": "9999", "bank_change_notice": True,
+          "bank_change_text": "new bank", "schema": 7}
+    sig = payrun.fraud_signals(_bill("x"), master, [], THU, extracted=ex, payment=payment)
+    return {s["kind"] for s in sig}
+
+
+def test_bank_checks_run_for_ordinary_vendors():
+    assert {"bank_change", "invoice_bank_mismatch", "invoice_bank_notice"} <= _bank_flags("")
+
+
+def test_in_network_and_card_vendors_skip_bank_checks():
+    for method in ("network", "card"):
+        assert _bank_flags(method) == set(), method
+
+
+def test_payment_method_from_config():
+    pol = {"Amazon": {"payment": "network"}, "Belden": {"payment": "card"}}
+    assert payrun.payment_method("Amazon Business", pol) == "network"
+    assert payrun.payment_method("Belden - West Penn Wire", pol) == "card"
+    assert payrun.payment_method("Marshall", pol) == ""
+    assert payrun.payment_method("", pol) == ""      # empty name never matches a policy

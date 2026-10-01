@@ -71,13 +71,19 @@ billcheck:
   #                     full amount at NET terms, not the discount deadline.
   #   due_anchor: ship_date — terms run from the ship date, not invoice date.
   #   notes — deal wrinkles, echoed on findings for the reviewer.
+  #   payment: network — in-network Bill.com vendor: they set up and control
+  #                      how they're paid, so Pay Run skips the bank-detail
+  #                      checks (bank change, invoice bank/routing mismatch).
+  #   payment: card    — paid by virtual card; same, no bank account involved.
   vendor_policies:
+    "Amazon": {payment: network}
+    "Mitchell Stier": {payment: network}
     "TD SYNNEX":
       quickpay: never
     "ACE Backstage": {quickpay: take, pct: 5}
     "American Music": {quickpay: take, pct: 3}
     "Audio Technica": {quickpay: take, pct: 2}
-    "Belden": {quickpay: take, pct: 1.5,
+    "Belden": {quickpay: take, pct: 1.5, payment: card,
                notes: "QP is 1.5% of the PRE-TAX balance; the printed discount includes tax and AP corrects it by hand"}
     "MBI": {invoice_date_from: ship_date,
             notes: "the ship date is entered as the invoice date"}
