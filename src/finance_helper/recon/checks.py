@@ -11,6 +11,7 @@ conclusion says exactly what was compared.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -317,6 +318,82 @@ def _tokens(text: str) -> set[str]:
             and t not in ("inc", "llc", "corp", "the", "and")}
 
 
+_VENDOR_SUFFIXES = frozenset("""inc incorporated llc l l c ltd limited co corp corporation
+company the and pllc llp lp plc gmbh usa us america americas intl""".split())
+
+
+def _vendor_core(name: str) -> str:
+    """Vendor name reduced to what identifies it: lowercase, no
+    punctuation or parentheticals, no legal/country suffixes, simple
+    plurals folded ("Supplies" -> "supply")."""
+    text = re.sub(r"\([^)]*\)", " ", str(name or "").lower())
+    words = []
+    for w in re.findall(r"[a-z0-9]+", text):
+        if w in _VENDOR_SUFFIXES:
+            continue
+        if len(w) > 4 and w.endswith("ies"):
+            w = w[:-3] + "y"
+        elif len(w) > 4 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        words.append(w)
+    return " ".join(words)
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _near_same(a: str, b: str) -> bool:
+    """One or two characters apart on a name long enough for that to be
+    deliberate (5+ letters for one edit, 10+ for two)."""
+    shorter = min(len(a), len(b))
+    if shorter < 5 or abs(len(a) - len(b)) > 2:
+        return False
+    limit = 2 if shorter >= 10 else 1
+    return _edit_distance(a, b) <= limit
+
+
+def _deletes(word: str, depth: int) -> set[str]:
+    out, frontier = {word}, {word}
+    for _ in range(depth):
+        frontier = {w[:i] + w[i + 1:] for w in frontier for i in range(len(w))}
+        out |= frontier
+    return out
+
+
+def _lookalike_pairs(vendors: list[dict]):
+    """(a, b, same_core) for vendor pairs whose names are the same or a
+    letter or two apart. Candidates come from a deletion index (two strings
+    within edit distance d share a string reachable by <= d deletions from
+    each), so only near-matches are ever compared — fast on thousands."""
+    cores = [(v, _vendor_core(v["name"])) for v in vendors]
+    index: dict[str, set[int]] = defaultdict(set)
+    for i, (_v, core) in enumerate(cores):
+        if len(core) >= 5:
+            for d in _deletes(core, 2 if len(core) >= 10 else 1):
+                index[d].add(i)
+    by_core: dict[str, list[int]] = defaultdict(list)
+    for i, (_v, core) in enumerate(cores):
+        if core:
+            by_core[core].append(i)
+    pairs: set[tuple[int, int]] = set()
+    for ids in list(by_core.values()) + list(index.values()):
+        if len(ids) > 1:
+            pairs |= set(combinations(sorted(ids), 2))
+    for i, j in sorted(pairs):
+        (a, ka), (b, kb) = cores[i], cores[j]
+        if ka == kb:
+            yield a, b, True
+        elif _near_same(ka, kb):
+            yield a, b, False
+
+
 def _vendors_alike(bank_norm: str, vendor: str) -> bool:
     a, b = _tokens(bank_norm), _tokens(vendor)
     strong = {t for t in (a & b) if len(t) >= 4}
@@ -446,24 +523,21 @@ def vendor_master_checks(master: dict, people: list[str],
 
     active = [v for v in vendors if v.get("active", True) and v.get("name")]
 
-    # Lookalike vendor names: a distinctive shared token between different
-    # vendors — generic business words don't count as identity.
-    generic = {"supply", "supplies", "service", "services", "group", "company",
-               "holdings", "solutions", "systems", "enterprises", "tech",
-               "north", "south", "east", "west", "audio", "video"}
-    for i, a in enumerate(active):
-        for b in active[i + 1:]:
-            ta, tb = _tokens(a["name"]), _tokens(b["name"])
-            strong = {t for t in (ta & tb) if len(t) >= 4 and t not in generic}
-            if strong and ta != tb:
-                findings.append(_finding(
-                    "vendor_lookalike", "high",
-                    f"Lookalike vendors: {a['name']} / {b['name']}",
-                    "Two active vendors share a distinctive name part "
-                    f"({', '.join(sorted(strong))}). Fake-vendor schemes hide "
-                    "behind near-duplicates of real ones — confirm both are real "
-                    "and distinct.",
-                    a["id"], b["id"]) | {"vendor_ids": [a["id"], b["id"]]})
+    # Lookalike vendor names: the WHOLE name matches or nearly matches once
+    # legal suffixes and punctuation are dropped ("Acme Supply" / "Acme
+    # Supplies LLC", "Shure" / "Shurre"). Sharing one word ("Applied
+    # Electronics" / "Delta Electronics") is how real vendors are named, not
+    # a signal — flagging it buried the real ones.
+    for a, b, same in _lookalike_pairs(active):
+        why = ("have the same name once suffixes and punctuation are ignored" if same
+               else "have names that differ by only a letter or two")
+        findings.append(_finding(
+            "vendor_lookalike", "high",
+            f"Lookalike vendors: {a['name']} / {b['name']}",
+            f"Two active vendors {why}. Either a duplicate vendor record (bills "
+            "can be paid twice across them) or a fake vendor imitating a real one "
+            "— confirm both are real and distinct, or merge them.",
+            a["id"], b["id"]) | {"vendor_ids": [a["id"], b["id"]]})
 
     # Same email behind different vendor names.
     by_email: dict[str, list] = defaultdict(list)
