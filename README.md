@@ -359,6 +359,36 @@ classic v2 API is used) and `ANTHROPIC_API_KEY`. Model and read effort are
 env-overridable (`BILLCHECK_MODEL`, default `claude-opus-5`; `BILLCHECK_EFFORT`,
 default `medium`).
 
+## Pay Run (Thursday review of Friday's payments)
+
+The **Pay Run** page is the weekly sign-off for the batch Bill.com pays on
+Friday: every bill Bill.com has scheduled, plus every unpaid bill due before
+the following Friday. **Refresh from Bill.com & check** pulls the open bills
+and the vendor master and runs Bill Check. Each bill then gets one verdict
+that combines its invoice check with payment-fraud signals, so they're seen
+*before* the money leaves (Cash Proof catches the same patterns afterwards,
+from the bank export):
+
+- **critical**: bank details added or changed on the vendor in the last 45
+  days (call the vendor on a number you already had before releasing); a
+  vendor named like an employee; a Bill Check critical (wrong total,
+  duplicate invoice, late due date).
+- **high**: vendor created in the last 60 days; amount more than 3x the
+  vendor's median bill; the same amount billed under another invoice number
+  within 30 days; lookalike vendor names or a shared email; invoice not
+  verified (no attachment or unreadable).
+- **review**: first bill from a vendor; personal payment email; not fully
+  approved in Bill.com.
+
+Every critical or high bill needs **Release** (with a note: for a bank
+change, who you called and on what number) or **Hold** (then pull it from
+the run in Bill.com yourself; nothing is written to Bill.com). Once every
+flag is decided, **Sign off** records who released how many bills and for
+how much. A decision or sign-off stops counting if the bill or the batch
+changes afterwards. Everything is stored under `billcheck/payruns/` and
+appended to `billcheck/audit.jsonl`. The pay day and horizon are set in
+`config/recon.yml` (`billcheck.payrun`).
+
 ## Configuration
 
 - `config/sources.yml` — per-source CSV column mapping + destination.

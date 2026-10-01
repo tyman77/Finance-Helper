@@ -17,7 +17,7 @@ from flask import (Blueprint, Response, current_app, flash, redirect,
                    render_template, request, send_file, session, url_for)
 
 from .. import billdotcom_api
-from ..billcheck import compare, engine, extract
+from ..billcheck import compare, engine, extract, payrun
 from ..billcheck import store as bc_store
 
 billcheck_bp = Blueprint("billcheck", __name__, url_prefix="/billcheck")
@@ -40,18 +40,66 @@ def _readiness() -> dict:
             "model": extract.model_name()}
 
 
-def _history_bills() -> list[dict]:
-    """Bill.com master index (all bills, paid included) for the duplicate scan."""
-    import json
-    data_dir = os.environ.get(
+def _data_dir() -> str:
+    return os.environ.get(
         "FINANCE_HELPER_DATA",
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
-    path = os.path.join(data_dir, "billdotcom_master.json")
+
+
+def _data_json(name: str, default):
+    import json
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh).get("bills") or []
+        with open(os.path.join(_data_dir(), name), encoding="utf-8") as fh:
+            return json.load(fh)
     except (OSError, ValueError):
-        return []
+        return default
+
+
+def _master() -> dict:
+    """Bill.com master index: vendors, vendor bank accounts, all bills."""
+    master = _data_json("billdotcom_master.json", {})
+    return master if isinstance(master, dict) else {}
+
+
+def _history_bills() -> list[dict]:
+    """Bill.com master index (all bills, paid included) for the duplicate scan."""
+    return _master().get("bills") or []
+
+
+def _refresh_master(log) -> None:
+    """Re-pull the vendor master before a check, so a bank-account change
+    made yesterday is seen on Thursday's review. Failure is logged, not fatal."""
+    from .refresh import _is_fresh, _write
+    if _is_fresh("billdotcom_master.json"):
+        log("· Vendor master is fresh (pulled within the hour)")
+        return
+    try:
+        master = billdotcom_api.fetch_master_index()
+        _write("billdotcom_master.json", master)
+        log(f"· Vendor master: {len(master['vendors'])} vendors, "
+            f"{len(master['bank_accounts'])} bank accounts, {len(master['bills'])} bills"
+            + (f" — blocked: {'; '.join(master['gaps'])}" if master.get("gaps") else ""))
+    except Exception as exc:
+        log(f"· Vendor master refresh FAILED — {str(exc)[:160]} "
+            "(fraud checks use the last copy)")
+
+
+def _people() -> list[str]:
+    """Employee names, for the vendor-named-like-an-employee check — the
+    same sources Cash Proof uses."""
+    names: set[str] = set()
+    timecards = _data_json("timecards_index.json", {})
+    if isinstance(timecards, dict):
+        names |= set(timecards.keys())
+    for r in _data_json("ramp_reimbursements.json", []) or []:
+        if isinstance(r, dict) and r.get("person"):
+            names.add(r["person"])
+    try:
+        from .cashproof import _flight_pairs
+        names |= {p for p, _d in _flight_pairs()}
+    except Exception:
+        pass
+    return sorted(n for n in names if n)
 
 
 def _running_job():
@@ -64,6 +112,7 @@ def _running_job():
 def _execute(job_id, job, who, limit, force):
     log = job["stages"].append
     try:
+        _refresh_master(log)
         engine.run_check(billdotcom_api.fetch_open_bills,
                          billdotcom_api.fetch_bill_documents,
                          extract.extract_invoice, log=log, who=who,
@@ -155,7 +204,8 @@ def run():
     force = request.form.get("force") == "on"
     job_id = uuid.uuid4().hex[:12]
     job = {"status": "running", "stages": [], "error": None,
-           "started": datetime.now().isoformat(timespec="seconds")}
+           "started": datetime.now().isoformat(timespec="seconds"),
+           "next": "payrun" if request.form.get("next") == "payrun" else ""}
     JOBS[job_id] = job
     args = (job_id, job, _who(), limit, force)
     if current_app.config.get("TESTING"):
@@ -177,7 +227,8 @@ def progress(job_id):
         flash(f"Bill Check could not run: {job['error']}")
     else:
         flash(job["stages"][-1] if job["stages"] else "Bill Check finished.")
-    return redirect(url_for("billcheck.landing"))
+    return redirect(url_for("billcheck.payrun_page" if job.get("next") == "payrun"
+                            else "billcheck.landing"))
 
 
 @billcheck_bp.get("/queue.csv")
@@ -297,3 +348,81 @@ def recheck(bill_id):
            "no_document": f"Bill.com has no attachment on this bill: {payload.get('error')}",
            }.get(outcome, f"Could not re-read: {payload.get('error')}"))
     return redirect(url_for("billcheck.bill_page", bill_id=bill_id))
+
+
+# --- Pay Run: Thursday's review of Friday's batch ----------------------------
+
+def _payrun_view(state: dict | None = None):
+    cfg = payrun.settings()
+    pay_date = payrun.next_pay_date(datetime.now().date(), cfg["pay_weekday"]).isoformat()
+    state = state or payrun.load(pay_date)
+    view = payrun.build(bc_store.list_results(), _master(), _people(),
+                        datetime.now().date(), decisions=state.get("decisions"),
+                        pay_weekday=cfg["pay_weekday"], horizon_days=cfg["horizon_days"])
+    return view, state
+
+
+@billcheck_bp.get("/payrun")
+def payrun_page():
+    view, state = _payrun_view()
+    master = _master()
+    return render_template(
+        "billcheck_payrun.html", v=view, state=state,
+        signed=payrun.signoff_current(state, view),
+        history=[h for h in payrun.recent_signoffs() if h.get("pay_date") != view["pay_date"]],
+        ready=_readiness(), running=_running_job(), last_run=bc_store.load_run_summary(),
+        master_gaps=master.get("gaps") or [], has_master=bool(master.get("vendors")),
+        horizon=payrun.settings()["horizon_days"])
+
+
+@billcheck_bp.post("/payrun/decide/<bill_id>")
+def payrun_decide(bill_id):
+    action = (request.form.get("action") or "").strip()
+    note = (request.form.get("note") or "").strip()
+    view, _state = _payrun_view()
+    row = next((x for x in view["rows"] if x["bill_id"] == bill_id), None)
+    if row is None:
+        flash("That bill isn't in this pay run.")
+    elif action not in payrun.DECISIONS:
+        flash("Pick release or hold.")
+    elif not note:
+        flash("A note is required — for a bank change, who you called and on what "
+              "number; for a hold, why.")
+    else:
+        payrun.record_decision(view["pay_date"], bill_id, row["key"], action, note, _who())
+        flash(f"{row['bill'].get('vendor')} #{row['bill'].get('invoice')}: "
+              + ("released for Friday." if action == "release"
+                 else "held — pull it from the payment run in Bill.com."))
+    return redirect(url_for("billcheck.payrun_page") + f"#bill-{bill_id}")
+
+
+@billcheck_bp.post("/payrun/signoff")
+def payrun_signoff():
+    view, _state = _payrun_view()
+    if not view["ready_to_sign"]:
+        flash(f"{view['undecided']} flagged bill(s) still need a release or hold decision.")
+    elif not view["rows"]:
+        flash("Nothing in this pay run to sign off.")
+    else:
+        payrun.sign_off(view["pay_date"], view, _who(),
+                        (request.form.get("note") or "").strip())
+        flash(f"Pay run for {view['pay_date']} signed off: "
+              f"{view['releasing_count']} bills, ${view['releasing_total']:,.2f}.")
+    return redirect(url_for("billcheck.payrun_page"))
+
+
+@billcheck_bp.get("/payrun.csv")
+def payrun_csv():
+    view, _state = _payrun_view()
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["pay_date", "severity", "vendor", "invoice", "due_date", "amount",
+                "bill_check", "fraud_signals", "decision", "decided_by", "note", "bill_id"])
+    for x in view["rows"]:
+        b, d = x["bill"], x["decision"] or {}
+        w.writerow([view["pay_date"], x["severity"], b.get("vendor"), b.get("invoice"),
+                    b.get("due_date"), b.get("amount"), x["check_line"],
+                    " | ".join(s["title"] for s in x["signals"]),
+                    d.get("action", ""), d.get("who", ""), d.get("note", ""), x["bill_id"]])
+    return Response(buf.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=payrun-{view['pay_date']}.csv"})

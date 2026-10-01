@@ -51,6 +51,8 @@ def fakes(monkeypatch):
     monkeypatch.setattr(billdotcom_api, "credentials_present", lambda: True)
     monkeypatch.setattr(extract, "credentials_present", lambda: True)
     monkeypatch.setattr(billdotcom_api, "fetch_open_bills", lambda: [dict(b) for b in BILLS])
+    monkeypatch.setattr(billdotcom_api, "fetch_master_index",
+                        lambda: (_ for _ in ()).throw(RuntimeError("offline in tests")))
 
     def fetch_docs(bill_id):
         calls["fetches"] += 1
